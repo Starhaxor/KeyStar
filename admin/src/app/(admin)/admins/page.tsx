@@ -1,0 +1,229 @@
+"use client";
+import ConsoleSection, {
+  EmptyNote,
+  ErrorNote,
+  LoadingNote,
+  PageTitle,
+} from "@/components/console/ConsoleSection";
+import StatusBadge from "@/components/console/StatusBadge";
+import Label from "@/components/form/Label";
+import Button from "@/components/ui/button/Button";
+import { Modal } from "@/components/ui/modal";
+import { useAdminIdentity } from "@/context/AdminIdentityContext";
+import { api, formatDateTime } from "@/lib/api";
+import type { AdminAccount, AdminRole } from "@/lib/types";
+import React, { useCallback, useEffect, useState } from "react";
+
+const selectClasses =
+  "h-11 w-full rounded-lg border appearance-none px-4 py-2.5 text-sm shadow-theme-xs focus:outline-hidden focus:ring-3 dark:bg-gray-900 dark:text-white/90 bg-transparent text-gray-800 border-gray-300 focus:border-brand-300 focus:ring-brand-500/10 dark:border-gray-700 dark:focus:border-brand-800";
+
+// Admins page: lists admin accounts and lets holders of admins.write change
+// another account's role or status. Editing your own account is blocked both
+// here and by the backend (ADMIN_SELF_MODIFICATION).
+
+export default function AdminsPage() {
+  const { identity, hasPermission } = useAdminIdentity();
+  const [admins, setAdmins] = useState<AdminAccount[]>([]);
+  const [roles, setRoles] = useState<AdminRole[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [editing, setEditing] = useState<AdminAccount | null>(null);
+  const [editRole, setEditRole] = useState("");
+  const [editStatus, setEditStatus] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const canWrite = hasPermission("admins.write");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setError(null);
+      const [adminList, roleList] = await Promise.all([
+        api.admins(),
+        api.roles(),
+      ]);
+      setAdmins(adminList.items ?? []);
+      setRoles(roleList.items ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load admins");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  function openEdit(admin: AdminAccount) {
+    setEditing(admin);
+    setEditRole(admin.role);
+    setEditStatus(admin.status);
+    setSaveError(null);
+  }
+
+  async function saveEdit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editing) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await api.updateAdmin(editing.id, { role: editRole, status: editStatus });
+      setEditing(null);
+      await load();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Update failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div>
+      <PageTitle
+        title="Admins"
+        description="Administrator accounts, roles and account status."
+      />
+      <ConsoleSection
+        title="Admin Accounts"
+        description={`${admins.length} account(s)`}
+      >
+        {loading && !error ? (
+          <LoadingNote />
+        ) : error ? (
+          <ErrorNote message={error} />
+        ) : admins.length === 0 ? (
+          <EmptyNote message="No admin accounts found." />
+        ) : (
+          <table className="w-full text-left text-sm">
+            <thead className="border-b border-gray-200 dark:border-gray-800">
+              <tr className="text-xs uppercase text-gray-400">
+                <th className="px-5 py-3 font-medium">Email</th>
+                <th className="px-5 py-3 font-medium">Role</th>
+                <th className="px-5 py-3 font-medium">Status</th>
+                <th className="px-5 py-3 font-medium">MFA</th>
+                <th className="px-5 py-3 font-medium">Created</th>
+                {canWrite && <th className="px-5 py-3 font-medium"></th>}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+              {admins.map((admin) => {
+                const isSelf = admin.id === identity?.id;
+                return (
+                  <tr key={admin.id}>
+                    <td className="px-5 py-3.5 text-gray-700 dark:text-gray-300">
+                      {admin.email}
+                      {isSelf && (
+                        <span className="ml-2 rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-500 dark:bg-brand-500/[0.1]">
+                          you
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <span className="inline-flex rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-700 dark:bg-white/[0.05] dark:text-gray-300">
+                        {admin.role}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <StatusBadge status={admin.status} />
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <span
+                        className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
+                          admin.mfa_enrolled
+                            ? "bg-success-50 text-success-600 dark:bg-success-500/[0.1]"
+                            : "bg-warning-50 text-warning-600 dark:bg-warning-500/[0.1]"
+                        }`}
+                      >
+                        {admin.mfa_enrolled ? "enabled" : "pending"}
+                      </span>
+                    </td>
+                    <td className="whitespace-nowrap px-5 py-3.5 text-gray-500 dark:text-gray-400">
+                      {formatDateTime(admin.created_at)}
+                    </td>
+                    {canWrite && (
+                      <td className="px-5 py-3.5 text-right">
+                        {!isSelf && (
+                          <button
+                            type="button"
+                            className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/[0.05]"
+                            onClick={() => openEdit(admin)}
+                          >
+                            Edit
+                          </button>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </ConsoleSection>
+
+      <Modal
+        isOpen={editing !== null}
+        onClose={() => setEditing(null)}
+        className="max-w-md p-6"
+      >
+        {editing && (
+          <form onSubmit={saveEdit} className="space-y-5">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-800 dark:text-white/90">
+                Edit {editing.email}
+              </h3>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                Changes take effect on the account&apos;s next request.
+              </p>
+            </div>
+            <div>
+              <Label>Role</Label>
+              <select
+                className={selectClasses}
+                value={editRole}
+                onChange={(e) => setEditRole(e.target.value)}
+              >
+                {roles.map((role) => (
+                  <option key={role.id} value={role.name}>
+                    {role.name} — {role.description}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label>Status</Label>
+              <select
+                className={selectClasses}
+                value={editStatus}
+                onChange={(e) => setEditStatus(e.target.value)}
+              >
+                <option value="active">active</option>
+                <option value="disabled">disabled</option>
+              </select>
+            </div>
+            {saveError && (
+              <p className="text-sm text-error-500" role="alert">
+                {saveError}
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 dark:border-gray-700 dark:text-gray-300"
+                onClick={() => setEditing(null)}
+              >
+                Cancel
+              </button>
+              <Button size="sm" disabled={saving}>
+                {saving ? "Saving..." : "Save changes"}
+              </Button>
+            </div>
+          </form>
+        )}
+      </Modal>
+    </div>
+  );
+}

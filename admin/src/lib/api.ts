@@ -2,7 +2,9 @@
 // mutating requests carry the double-submit CSRF token from the csrf cookie.
 
 import type {
+  AdminAccount,
   AdminIdentity,
+  AdminRole,
   AuditEntry,
   ConsoleDevice,
   ConsoleLicense,
@@ -10,8 +12,10 @@ import type {
   ConsoleUser,
   CreatedLicense,
   LoginResponse,
+  MfaEnrollment,
   Overview,
   PageResult,
+  SecurityEvent,
   UserDetail,
 } from "./types";
 
@@ -84,6 +88,13 @@ async function request<T>(
     const message =
       typeof payload.message === "string" ? payload.message : "Request failed";
     if (
+      response.status === 403 &&
+      code === "MFA_ENROLLMENT_REQUIRED" &&
+      typeof window !== "undefined" &&
+      !window.location.pathname.startsWith("/security")
+    ) {
+      window.location.assign("/security");
+    } else if (
       response.status === 401 &&
       typeof window !== "undefined" &&
       !init?.isLogin &&
@@ -112,6 +123,55 @@ export const api = {
       body: { email, password },
       isLogin: true,
     });
+  },
+  completeMfa(
+    mfaToken: string,
+    input: { code?: string; recovery_code?: string }
+  ) {
+    return request<{ ok: boolean }>("/v1/admin/auth/mfa", {
+      method: "POST",
+      body: { mfa_token: mfaToken, ...input },
+      isLogin: true,
+    });
+  },
+  mfaEnrollStart() {
+    return request<{ ok: boolean } & MfaEnrollment>("/v1/admin/mfa/enroll/start", {
+      method: "POST",
+      body: {},
+    });
+  },
+  mfaEnrollConfirm(code: string) {
+    return request<{ ok: boolean; recovery_codes: string[] }>(
+      "/v1/admin/mfa/enroll/confirm",
+      { method: "POST", body: { code } }
+    );
+  },
+  mfaDisable(password: string) {
+    return request<{ ok: boolean }>("/v1/admin/mfa/disable", {
+      method: "POST",
+      body: { password },
+    });
+  },
+  admins() {
+    return request<{ ok: boolean; items: AdminAccount[]; total: number }>(
+      "/v1/admin/admins"
+    );
+  },
+  updateAdmin(adminId: string, update: { status?: string; role?: string }) {
+    return request<{ ok: boolean }>(`/v1/admin/admins/${adminId}`, {
+      method: "PATCH",
+      body: update,
+    });
+  },
+  roles() {
+    return request<{ ok: boolean; items: AdminRole[]; total: number }>(
+      "/v1/admin/roles"
+    );
+  },
+  securityEvents(page: number) {
+    return request<{ ok: boolean } & PageResult<SecurityEvent>>(
+      `/v1/admin/security-events?${pageQuery(page)}`
+    );
   },
   logout() {
     return request<{ ok: boolean }>("/v1/admin/auth/logout", {

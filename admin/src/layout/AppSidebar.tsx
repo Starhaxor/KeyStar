@@ -4,12 +4,16 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useSidebar } from "../context/SidebarContext";
+import { useAdminIdentity } from "../context/AdminIdentityContext";
 import {
+  AlertIcon,
   BoxCubeIcon,
   DocsIcon,
   GridIcon,
+  GroupIcon,
   HorizontaLDots,
   ListIcon,
+  LockIcon,
   TimeIcon,
   UserCircleIcon,
 } from "../icons/index";
@@ -18,23 +22,36 @@ type NavItem = {
   name: string;
   icon: React.ReactNode;
   path: string;
+  // permission gates the item in the UI; undefined means always visible.
+  permission?: string;
 };
 
 const navItems: NavItem[] = [
-  { icon: <GridIcon />, name: "Overview", path: "/" },
-  { icon: <UserCircleIcon />, name: "Users", path: "/users" },
-  { icon: <DocsIcon />, name: "Licenses", path: "/licenses" },
-  { icon: <BoxCubeIcon />, name: "Devices", path: "/devices" },
-  { icon: <TimeIcon />, name: "Sessions", path: "/sessions" },
-  { icon: <ListIcon />, name: "Audit Log", path: "/audit-logs" },
+  { icon: <GridIcon />, name: "Overview", path: "/", permission: "overview.read" },
+  { icon: <UserCircleIcon />, name: "Users", path: "/users", permission: "users.read" },
+  { icon: <DocsIcon />, name: "Licenses", path: "/licenses", permission: "licenses.read" },
+  { icon: <BoxCubeIcon />, name: "Devices", path: "/devices", permission: "devices.read" },
+  { icon: <TimeIcon />, name: "Sessions", path: "/sessions", permission: "sessions.read" },
+  { icon: <ListIcon />, name: "Audit Log", path: "/audit-logs", permission: "audit.read" },
+  { icon: <GroupIcon />, name: "Admins", path: "/admins", permission: "admins.read" },
+  { icon: <AlertIcon />, name: "Security Events", path: "/security-events", permission: "security.read" },
+  // Security (MFA) is always visible: unenrolled admins are restricted to it.
+  { icon: <LockIcon />, name: "Security", path: "/security" },
 ];
 
 const AppSidebar: React.FC = () => {
   const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
   const pathname = usePathname();
+  const { hasPermission } = useAdminIdentity();
 
   const isActive = (path: string) =>
-    path === "/" ? pathname === "/" : pathname.startsWith(path);
+    path === "/"
+      ? pathname === "/"
+      : pathname === path || pathname.startsWith(`${path}/`);
+
+  const visibleItems = navItems.filter(
+    (nav) => !nav.permission || hasPermission(nav.permission)
+  );
 
   return (
     <aside
@@ -89,7 +106,7 @@ const AppSidebar: React.FC = () => {
                 )}
               </h2>
               <ul className="flex flex-col gap-4">
-                {navItems.map((nav) => (
+                {visibleItems.map((nav) => (
                   <li key={nav.name}>
                     <Link
                       href={nav.path}

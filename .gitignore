@@ -1,0 +1,6 @@
+# IDE / agent workspace data
+.qoder/
+
+# OS
+Thumbs.db
+Desktop.ini

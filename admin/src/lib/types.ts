@@ -5,6 +5,42 @@ export interface AdminIdentity {
   id: string;
   email: string;
   status: string;
+  role: string;
+  permissions: string[];
+  mfa_enrolled: boolean;
+}
+
+export interface AdminAccount {
+  id: string;
+  email: string;
+  status: string;
+  role: string;
+  permissions: string[];
+  mfa_enrolled: boolean;
+  created_at: string;
+}
+
+export interface AdminRole {
+  id: string;
+  name: string;
+  description: string;
+  permissions: string[];
+  built_in: boolean;
+}
+
+export interface SecurityEvent {
+  id: string;
+  kind: string;
+  severity: string;
+  admin_account_id: string;
+  actor_email: string;
+  user_agent: string;
+  created_at: string;
+}
+
+export interface MfaEnrollment {
+  secret: string;
+  provisioning_uri: string;
 }
 
 export interface ConsoleUser {
@@ -87,6 +123,8 @@ export interface PageResult<T> {
 export interface LoginResponse {
   email: string;
   expires_at: string;
+  mfa_required: boolean;
+  mfa_token: string;
 }
 
 export interface CreatedLicense {
