@@ -1,0 +1,118 @@
+"use client";
+import ConsoleSection, {
+  EmptyNote,
+  ErrorNote,
+  LoadingNote,
+  PageTitle,
+} from "@/components/console/ConsoleSection";
+import StatCard from "@/components/console/StatCard";
+import { api, formatDateTime } from "@/lib/api";
+import type { Overview } from "@/lib/types";
+import { BoxCubeIcon, DocsIcon, TimeIcon, UserCircleIcon } from "@/icons";
+import React, { useCallback, useEffect, useState } from "react";
+
+export default function OverviewPage() {
+  const [overview, setOverview] = useState<Overview | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setError(null);
+      const response = await api.overview();
+      setOverview(response);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load overview");
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  return (
+    <div>
+      <PageTitle
+        title="Overview"
+        description="Live snapshot of the StarLoader licensing system."
+      />
+      {error && (
+        <div className="mb-4 rounded-lg border border-error-500/30 bg-error-50 px-4 py-3 text-sm text-error-600 dark:bg-error-500/10 dark:text-error-500">
+          {error}
+        </div>
+      )}
+      {!overview && !error && (
+        <div className="rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
+          <LoadingNote />
+        </div>
+      )}
+      {overview && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard
+              label="Total Users"
+              value={overview.total_users}
+              icon={<UserCircleIcon />}
+            />
+            <StatCard
+              label="Active Licenses"
+              value={overview.active_licenses}
+              icon={<DocsIcon />}
+            />
+            <StatCard
+              label="Active Devices"
+              value={overview.active_devices}
+              icon={<BoxCubeIcon />}
+            />
+            <StatCard
+              label="Active Sessions"
+              value={overview.active_sessions}
+              icon={<TimeIcon />}
+            />
+          </div>
+
+          <ConsoleSection
+            title="Recent Admin Activity"
+            description="Latest events from the audit log."
+          >
+            {overview.recent_audit.length === 0 ? (
+              <EmptyNote message="No admin activity recorded yet." />
+            ) : (
+              <table className="w-full text-left text-sm">
+                <thead className="border-b border-gray-200 dark:border-gray-800">
+                  <tr className="text-xs uppercase text-gray-400">
+                    <th className="px-5 py-3 font-medium">Action</th>
+                    <th className="px-5 py-3 font-medium">Actor</th>
+                    <th className="px-5 py-3 font-medium">Resource</th>
+                    <th className="px-5 py-3 font-medium">When</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                  {overview.recent_audit.map((entry) => (
+                    <tr key={entry.id}>
+                      <td className="px-5 py-3 font-medium text-gray-700 dark:text-gray-300">
+                        {entry.action}
+                      </td>
+                      <td className="px-5 py-3 text-gray-500 dark:text-gray-400">
+                        {entry.actor_email || "—"}
+                      </td>
+                      <td className="px-5 py-3 text-gray-500 dark:text-gray-400">
+                        {entry.resource_type
+                          ? `${entry.resource_type}${
+                              entry.resource_id ? ` · ${entry.resource_id}` : ""
+                            }`
+                          : "—"}
+                      </td>
+                      <td className="px-5 py-3 text-gray-500 dark:text-gray-400">
+                        {formatDateTime(entry.created_at)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </ConsoleSection>
+        </div>
+      )}
+    </div>
+  );
+}
