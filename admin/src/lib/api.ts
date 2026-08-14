@@ -7,6 +7,7 @@ import type {
   AdminRole,
   AuditEntry,
   ConsoleDevice,
+  ConsoleDeviceDetail,
   ConsoleLicense,
   ConsoleSession,
   ConsoleUser,
@@ -163,6 +164,12 @@ export const api = {
       body: update,
     });
   },
+  createAdmin(email: string, password: string, role: string) {
+    return request<{ ok: boolean; admin: AdminAccount }>("/v1/admin/admins", {
+      method: "POST",
+      body: { email, password, role },
+    });
+  },
   roles() {
     return request<{ ok: boolean; items: AdminRole[]; total: number }>(
       "/v1/admin/roles"
@@ -190,6 +197,12 @@ export const api = {
       `/v1/admin/users?${pageQuery(page, { search })}`
     );
   },
+  createUser(email: string, password: string) {
+    return request<{ ok: boolean; user: ConsoleUser }>("/v1/admin/users", {
+      method: "POST",
+      body: { email, password },
+    });
+  },
   userDetail(userId: string) {
     return request<{ ok: boolean } & UserDetail>(`/v1/admin/users/${userId}`);
   },
@@ -198,6 +211,12 @@ export const api = {
       method: "PATCH",
       body: { status },
     });
+  },
+  revokeUserSessions(userId: string) {
+    return request<{ ok: boolean; revoked: number }>(
+      `/v1/admin/users/${userId}/sessions/revoke`,
+      { method: "POST", body: {} }
+    );
   },
   licenses(page: number) {
     return request<{ ok: boolean } & PageResult<ConsoleLicense>>(
@@ -226,6 +245,17 @@ export const api = {
     return request<{ ok: boolean } & PageResult<ConsoleDevice>>(
       `/v1/admin/devices?${pageQuery(page)}`
     );
+  },
+  deviceDetail(deviceId: string) {
+    return request<{ ok: boolean } & ConsoleDeviceDetail>(
+      `/v1/admin/devices/${deviceId}`
+    );
+  },
+  resetDevice(deviceId: string) {
+    return request<{ ok: boolean }>(`/v1/admin/devices/${deviceId}/reset`, {
+      method: "POST",
+      body: {},
+    });
   },
   revokeDevice(deviceId: string) {
     return request<{ ok: boolean }>(`/v1/admin/devices/${deviceId}/revoke`, {

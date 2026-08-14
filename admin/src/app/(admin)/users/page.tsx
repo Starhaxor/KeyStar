@@ -6,19 +6,35 @@ import ConsoleSection, {
   PageTitle,
 } from "@/components/console/ConsoleSection";
 import StatusBadge from "@/components/console/StatusBadge";
+import Label from "@/components/form/Label";
 import Pagination from "@/components/tables/Pagination";
+import Button from "@/components/ui/button/Button";
+import { Modal } from "@/components/ui/modal";
+import { useAdminIdentity } from "@/context/AdminIdentityContext";
 import { api, formatDateTime } from "@/lib/api";
 import type { PageResult, ConsoleUser } from "@/lib/types";
 import Link from "next/link";
 import React, { useCallback, useEffect, useState } from "react";
 
+const inputClasses =
+  "h-11 w-full rounded-lg border appearance-none px-4 py-2.5 text-sm shadow-theme-xs focus:outline-hidden focus:ring-3 dark:bg-gray-900 dark:text-white/90 bg-transparent text-gray-800 border-gray-300 focus:border-brand-300 focus:ring-brand-500/10 dark:border-gray-700 dark:focus:border-brand-800 placeholder:text-gray-400";
+
 export default function UsersPage() {
+  const { hasPermission } = useAdminIdentity();
   const [result, setResult] = useState<PageResult<ConsoleUser> | null>(null);
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createEmail, setCreateEmail] = useState("");
+  const [createPassword, setCreatePassword] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  const canWrite = hasPermission("users.write");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -43,6 +59,29 @@ export default function UsersPage() {
     setSearch(searchInput.trim());
   }
 
+  function openCreate() {
+    setCreateEmail("");
+    setCreatePassword("");
+    setCreateError(null);
+    setCreateOpen(true);
+  }
+
+  async function handleCreate(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setCreating(true);
+    setCreateError(null);
+    try {
+      await api.createUser(createEmail.trim(), createPassword);
+      setCreateOpen(false);
+      setPage(1);
+      await load();
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : "Create failed");
+    } finally {
+      setCreating(false);
+    }
+  }
+
   const totalPages = result
     ? Math.max(1, Math.ceil(result.total / result.page_size))
     : 1;
@@ -59,21 +98,28 @@ export default function UsersPage() {
           result ? `${result.total} user(s) total` : "Loading users"
         }
         actions={
-          <form onSubmit={handleSearch} className="flex items-center gap-2">
-            <input
-              type="search"
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Search by email..."
-              className="h-10 w-56 rounded-lg border border-gray-300 bg-transparent px-3.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
-            />
-            <button
-              type="submit"
-              className="h-10 rounded-lg bg-brand-500 px-4 text-sm font-medium text-white hover:bg-brand-600"
-            >
-              Search
-            </button>
-          </form>
+          <div className="flex items-center gap-2">
+            <form onSubmit={handleSearch} className="flex items-center gap-2">
+              <input
+                type="search"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder="Search by email..."
+                className="h-10 w-56 rounded-lg border border-gray-300 bg-transparent px-3.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+              />
+              <button
+                type="submit"
+                className="h-10 rounded-lg bg-brand-500 px-4 text-sm font-medium text-white hover:bg-brand-600"
+              >
+                Search
+              </button>
+            </form>
+            {canWrite && (
+              <Button size="sm" onClick={openCreate}>
+                Add user
+              </Button>
+            )}
+          </div>
         }
       >
         {loading && !error ? (
@@ -142,6 +188,64 @@ export default function UsersPage() {
           </>
         )}
       </ConsoleSection>
+
+      <Modal
+        isOpen={createOpen}
+        onClose={() => setCreateOpen(false)}
+        className="max-w-md p-6"
+      >
+        <form onSubmit={handleCreate} className="space-y-5">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-800 dark:text-white/90">
+              Add user
+            </h3>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              Creates an end-user account. The user can log in immediately with
+              this password.
+            </p>
+          </div>
+          <div>
+            <Label>Email</Label>
+            <input
+              type="email"
+              required
+              value={createEmail}
+              onChange={(e) => setCreateEmail(e.target.value)}
+              placeholder="user@example.com"
+              className={inputClasses}
+            />
+          </div>
+          <div>
+            <Label>Password</Label>
+            <input
+              type="password"
+              required
+              minLength={10}
+              value={createPassword}
+              onChange={(e) => setCreatePassword(e.target.value)}
+              placeholder="At least 10 characters"
+              className={inputClasses}
+            />
+          </div>
+          {createError && (
+            <p className="text-sm text-error-500" role="alert">
+              {createError}
+            </p>
+          )}
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 dark:border-gray-700 dark:text-gray-300"
+              onClick={() => setCreateOpen(false)}
+            >
+              Cancel
+            </button>
+            <Button size="sm" disabled={creating}>
+              {creating ? "Creating..." : "Create user"}
+            </Button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

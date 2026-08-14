@@ -8,6 +8,7 @@ import ConsoleSection, {
 import ConfirmModal from "@/components/console/ConfirmModal";
 import StatusBadge from "@/components/console/StatusBadge";
 import Button from "@/components/ui/button/Button";
+import { useAdminIdentity } from "@/context/AdminIdentityContext";
 import { api, formatDateTime } from "@/lib/api";
 import type { UserDetail } from "@/lib/types";
 import Link from "next/link";
@@ -19,11 +20,19 @@ export default function UserDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const { hasPermission } = useAdminIdentity();
   const [detail, setDetail] = useState<UserDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  const [revokeOpen, setRevokeOpen] = useState(false);
+  const [revokeBusy, setRevokeBusy] = useState(false);
+  const [revokeError, setRevokeError] = useState<string | null>(null);
+  const [revokedNotice, setRevokedNotice] = useState<string | null>(null);
+
+  const canWriteSessions = hasPermission("sessions.write");
 
   const load = useCallback(async () => {
     try {
@@ -52,6 +61,26 @@ export default function UserDetailPage({
       setActionError(err instanceof Error ? err.message : "Action failed");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleRevokeSessions() {
+    if (!detail) return;
+    setRevokeBusy(true);
+    setRevokeError(null);
+    try {
+      const response = await api.revokeUserSessions(detail.user.id);
+      setRevokeOpen(false);
+      setRevokedNotice(
+        response.revoked === 0
+          ? "No active sessions were found for this user."
+          : `${response.revoked} session(s) revoked.`
+      );
+      await load();
+    } catch (err) {
+      setRevokeError(err instanceof Error ? err.message : "Revoke failed");
+    } finally {
+      setRevokeBusy(false);
     }
   }
 
@@ -91,6 +120,18 @@ export default function UserDetailPage({
                 Back to users
               </Button>
             </Link>
+            {canWriteSessions && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setRevokeError(null);
+                  setRevokeOpen(true);
+                }}
+              >
+                Revoke sessions
+              </Button>
+            )}
             <Button
               size="sm"
               onClick={() => {
@@ -103,6 +144,12 @@ export default function UserDetailPage({
           </>
         }
       />
+
+      {revokedNotice && (
+        <div className="rounded-xl border border-success-200 bg-success-50 px-4 py-3 text-sm text-success-700 dark:border-success-500/30 dark:bg-success-500/10 dark:text-success-400">
+          {revokedNotice}
+        </div>
+      )}
 
       <ConsoleSection title="Profile">
         <div className="grid grid-cols-1 gap-4 px-5 py-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -253,6 +300,17 @@ export default function UserDetailPage({
         error={actionError}
         onConfirm={handleStatusChange}
         onClose={() => setConfirmOpen(false)}
+      />
+
+      <ConfirmModal
+        isOpen={revokeOpen}
+        title="Revoke sessions"
+        message={`Revoke every active auth session of ${user.email}? Their devices will need to log in again.`}
+        confirmLabel="Revoke sessions"
+        busy={revokeBusy}
+        error={revokeError}
+        onConfirm={handleRevokeSessions}
+        onClose={() => setRevokeOpen(false)}
       />
     </div>
   );

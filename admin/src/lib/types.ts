@@ -71,9 +71,22 @@ export interface ConsoleDevice {
   user_email: string;
   license_id: string;
   tpm_registered: boolean;
+  // Presence flags only: the backend stores HMACs of hardware ids and never
+  // returns the raw values.
+  has_smbios_uuid: boolean;
+  has_motherboard_serial: boolean;
+  has_bios_serial: boolean;
+  has_system_disk_serial: boolean;
+  has_machine_guid: boolean;
   status: string;
   created_at: string;
   last_seen_at: string;
+}
+
+export interface ConsoleDeviceDetail {
+  device: ConsoleDevice;
+  product: string;
+  tpm_fingerprint: string;
 }
 
 export interface ConsoleSession {
