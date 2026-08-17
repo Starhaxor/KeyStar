@@ -173,12 +173,25 @@ export const api = {
       body: { email, password, role },
     });
   },
-  // Turns an existing end-user into a dashboard admin, reusing the user's
-  // existing password hash — no new password is introduced.
+  // Turns an existing end-user into a dashboard admin. The backend generates
+  // a strong temporary password (returned once) — the user's client password
+  // is never reused for console access.
   promoteToAdmin(userId: string, role: string) {
-    return request<{ ok: boolean; admin: AdminAccount }>(
-      `/v1/admin/users/${userId}/promote`,
-      { method: "POST", body: { role } }
+    return request<{
+      ok: boolean;
+      admin: AdminAccount;
+      temp_password: string;
+    }>(`/v1/admin/users/${userId}/promote`, {
+      method: "POST",
+      body: { role },
+    });
+  },
+  // Resets another admin's password. When password is empty the backend
+  // generates one and returns it as temp_password exactly once.
+  resetAdminPassword(adminId: string, password?: string) {
+    return request<{ ok: boolean; temp_password?: string }>(
+      `/v1/admin/admins/${adminId}/reset-password`,
+      { method: "POST", body: { password: password ?? "" } }
     );
   },
   roles() {

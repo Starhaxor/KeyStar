@@ -8,10 +8,12 @@ import ConsoleSection, {
 import EmptyState from "@/components/console/EmptyState";
 import StatusBadge from "@/components/console/StatusBadge";
 import RowActions, { type RowAction } from "@/components/console/RowActions";
+import ResetPasswordModal from "@/components/console/ResetPasswordModal";
 import Label from "@/components/form/Label";
 import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import { useAdminIdentity } from "@/context/AdminIdentityContext";
+import { useToast } from "@/context/ToastContext";
 import { api, formatDateTime } from "@/lib/api";
 import type { AdminAccount, AdminRole } from "@/lib/types";
 import { GroupIcon } from "@/icons";
@@ -47,6 +49,9 @@ export default function AdminsPage() {
   const [createRole, setCreateRole] = useState("viewer");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+
+  const [resetTarget, setResetTarget] = useState<AdminAccount | null>(null);
+  const toast = useToast();
 
   const canWrite = hasPermission("admins.write");
 
@@ -258,6 +263,11 @@ export default function AdminsPage() {
                                     tone: "info",
                                     onClick: () => openEdit(admin),
                                   },
+                                  {
+                                    label: "Reset password",
+                                    tone: "warning",
+                                    onClick: () => setResetTarget(admin),
+                                  },
                                 ] as RowAction[]
                               }
                             />
@@ -405,6 +415,22 @@ export default function AdminsPage() {
           </div>
         </form>
       </Modal>
+
+      <ResetPasswordModal
+        open={resetTarget !== null}
+        userEmail={resetTarget?.email ?? ""}
+        onClose={() => setResetTarget(null)}
+        onReset={async (password) => {
+          if (!resetTarget) return { tempPassword: null };
+          const response = await api.resetAdminPassword(
+            resetTarget.id,
+            password || undefined
+          );
+          await load();
+          toast.success("Admin password reset", resetTarget.email);
+          return { tempPassword: response.temp_password ?? null };
+        }}
+      />
     </div>
   );
 }

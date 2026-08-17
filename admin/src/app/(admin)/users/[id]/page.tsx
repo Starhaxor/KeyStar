@@ -7,6 +7,7 @@ import ConsoleSection, {
 } from "@/components/console/ConsoleSection";
 import ConfirmModal from "@/components/console/ConfirmModal";
 import LicenseCreateModal from "@/components/console/LicenseCreateModal";
+import PromoteAdminModal from "@/components/console/PromoteAdminModal";
 import ResetPasswordModal from "@/components/console/ResetPasswordModal";
 import RowActions, { type RowAction } from "@/components/console/RowActions";
 import StatusBadge from "@/components/console/StatusBadge";
@@ -94,9 +95,6 @@ export default function UserDetailPage({
 
   // Promote to admin
   const [promoteOpen, setPromoteOpen] = useState(false);
-  const [promoteRole, setPromoteRole] = useState("viewer");
-  const [promoteBusy, setPromoteBusy] = useState(false);
-  const [promoteError, setPromoteError] = useState<string | null>(null);
 
   const canWriteSessions = hasPermission("sessions.write");
   const canWriteLicenses = hasPermission("licenses.write");
@@ -237,20 +235,12 @@ export default function UserDetailPage({
     }
   }
 
-  async function handlePromote(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail) return;
-    setPromoteBusy(true);
-    setPromoteError(null);
-    try {
-      await api.promoteToAdmin(detail.user.id, promoteRole);
-      setPromoteOpen(false);
-      toast.success("Admin account created", detail.user.email);
-    } catch (err) {
-      setPromoteError(err instanceof Error ? err.message : "Create failed");
-    } finally {
-      setPromoteBusy(false);
-    }
+  async function handlePromote(role: string) {
+    if (!detail) return { tempPassword: "" };
+    const response = await api.promoteToAdmin(detail.user.id, role);
+    await load();
+    toast.success("Admin account created", detail.user.email);
+    return { tempPassword: response.temp_password };
   }
 
   if (error) {
@@ -293,11 +283,7 @@ export default function UserDetailPage({
               <Button
                 variant="info"
                 size="sm"
-                onClick={() => {
-                  setPromoteRole("viewer");
-                  setPromoteError(null);
-                  setPromoteOpen(true);
-                }}
+                onClick={() => setPromoteOpen(true)}
               >
                 Promote to admin
               </Button>
@@ -728,62 +714,12 @@ export default function UserDetailPage({
       </Modal>
 
       {/* Promote to admin */}
-      <Modal
-        isOpen={promoteOpen}
+      <PromoteAdminModal
+        open={promoteOpen}
+        userEmail={user.email}
         onClose={() => setPromoteOpen(false)}
-        className="max-w-md p-6"
-      >
-        <form onSubmit={handlePromote} className="space-y-5">
-          <div>
-            <h3 className="text-lg font-semibold text-gray-800 dark:text-white/90">
-              Promote to admin
-            </h3>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              Grants {user.email} access to the admin console with their
-              existing password — no new password is needed. The new admin
-              must enroll MFA on their first login.
-            </p>
-          </div>
-          <div>
-            <Label>Email</Label>
-            <input
-              type="email"
-              value={user.email}
-              readOnly
-              disabled
-              className={fieldClasses}
-            />
-          </div>
-          <div>
-            <Label>Role</Label>
-            <select
-              className={fieldClasses}
-              value={promoteRole}
-              onChange={(e) => setPromoteRole(e.target.value)}
-            >
-              <option value="viewer">viewer</option>
-              <option value="owner">owner</option>
-            </select>
-          </div>
-          {promoteError && (
-            <p className="text-sm text-error-500" role="alert">
-              {promoteError}
-            </p>
-          )}
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 dark:border-gray-700 dark:text-gray-300"
-              onClick={() => setPromoteOpen(false)}
-            >
-              Cancel
-            </button>
-            <Button variant="info" size="sm" disabled={promoteBusy}>
-              {promoteBusy ? "Creating..." : "Create admin"}
-            </Button>
-          </div>
-        </form>
-      </Modal>
+        onPromote={handlePromote}
+      />
 
       <ConfirmModal
         isOpen={confirmOpen}
