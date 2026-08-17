@@ -43,7 +43,7 @@ type AdminAuthService interface {
 type AdminConsoleStore interface {
 	ConsoleOverview(ctx context.Context) (*domain.ConsoleOverview, error)
 	ConsoleDailyStats(ctx context.Context, days int) ([]domain.DailyStat, error)
-	ListConsoleUsers(ctx context.Context, offset, limit int, search string) ([]domain.ConsoleUser, int64, error)
+	ListConsoleUsers(ctx context.Context, offset, limit int, search string, status string) ([]domain.ConsoleUser, int64, error)
 	ConsoleUserDetail(ctx context.Context, userID string) (*domain.ConsoleUserDetail, error)
 	SetUserStatus(ctx context.Context, userID string, status domain.UserStatus) error
 	SetUserNotes(ctx context.Context, userID, notes string) error

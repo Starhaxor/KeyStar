@@ -97,14 +97,22 @@ func (s *Store) ConsoleDailyStats(ctx context.Context, days int) ([]domain.Daily
 	return stats, nil
 }
 
-func (s *Store) ListConsoleUsers(ctx context.Context, offset, limit int, search string) ([]domain.ConsoleUser, int64, error) {
+func (s *Store) ListConsoleUsers(ctx context.Context, offset, limit int, search string, status string) ([]domain.ConsoleUser, int64, error) {
 	search = strings.ToLower(strings.TrimSpace(search))
+	status = strings.ToLower(strings.TrimSpace(status))
 	var total int64
 	countQuery := `select count(*) from users`
 	countArgs := []any{}
+	where := []string{}
 	if search != "" {
-		countQuery = `select count(*) from users where position($1 in email) > 0`
-		countArgs = []any{search}
+		where = append(where, "position($1 in email) > 0")
+		countArgs = append(countArgs, search)
+	}
+	if status == "active" || status == "disabled" || status == "banned" {
+		where = append(where, fmt.Sprintf("status = '%s'", status))
+	}
+	if len(where) > 0 {
+		countQuery = "select count(*) from users where " + strings.Join(where, " and ")
 	}
 	if err := s.db.QueryRow(ctx, countQuery, countArgs...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count console users: %w", err)
@@ -114,6 +122,7 @@ func (s *Store) ListConsoleUsers(ctx context.Context, offset, limit int, search 
 			select id
 			from users
 			where ($3 = '' or position($3 in email) > 0)
+			  and ($4 = '' or status = $4)
 			order by created_at desc, id desc
 			limit $2 offset $1
 		)
@@ -125,7 +134,7 @@ func (s *Store) ListConsoleUsers(ctx context.Context, offset, limit int, search 
 			(select max(ss.created_at) from auth_sessions ss where ss.user_id = u.id)
 		from filtered f
 		join users u on u.id = f.id
-		order by u.created_at desc, u.id desc`, offset, limit, search)
+		order by u.created_at desc, u.id desc`, offset, limit, search, status)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list console users: %w", err)
 	}

@@ -302,7 +302,7 @@ func (router *Router) handleAdminUserCreate(writer http.ResponseWriter, request 
 
 func (router *Router) handleAdminUserList(writer http.ResponseWriter, request *http.Request) {
 	page, pageSize, offset := parseAdminPagination(request)
-	users, total, err := router.admin.Console.ListConsoleUsers(request.Context(), offset, pageSize, request.URL.Query().Get("search"))
+	users, total, err := router.admin.Console.ListConsoleUsers(request.Context(), offset, pageSize, request.URL.Query().Get("search"), request.URL.Query().Get("status"))
 	if err != nil {
 		router.writeConsoleError(writer, request, err)
 		return

@@ -20,14 +20,41 @@ import { useToast } from "@/context/ToastContext";
 import { api, formatDateTime } from "@/lib/api";
 import type { PageResult, ConsoleUser } from "@/lib/types";
 import Link from "next/link";
-import React, { useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import React, { Suspense, useCallback, useEffect, useState } from "react";
 
 const inputClasses =
   "h-11 w-full rounded-lg border appearance-none px-4 py-2.5 text-sm shadow-theme-xs focus:outline-hidden focus:ring-3 dark:bg-gray-900 dark:text-white/90 bg-transparent text-gray-800 border-gray-300 focus:border-brand-300 focus:ring-brand-500/10 dark:border-gray-700 dark:focus:border-brand-800 placeholder:text-gray-400";
 
+const VALID_STATUS_FILTERS = ["active", "disabled", "banned"];
+
 export default function UsersPage() {
+  return (
+    <Suspense
+      fallback={
+        <div>
+          <PageTitle
+            title="Users"
+            description="Licensed end users of the product."
+          />
+          <TableSkeleton rows={6} cols={7} />
+        </div>
+      }
+    >
+      <UsersPageContent />
+    </Suspense>
+  );
+}
+
+function UsersPageContent() {
   const { hasPermission } = useAdminIdentity();
   const toast = useToast();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const statusParam = searchParams.get("status") ?? "";
+  const statusFilter = VALID_STATUS_FILTERS.includes(statusParam)
+    ? statusParam
+    : "";
   const [result, setResult] = useState<PageResult<ConsoleUser> | null>(null);
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState("");
@@ -65,18 +92,32 @@ export default function UsersPage() {
     setLoading(true);
     try {
       setError(null);
-      const response = await api.users(page, search);
+      const response = await api.users(page, search, statusFilter);
       setResult(response);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load users");
     } finally {
       setLoading(false);
     }
-  }, [page, search]);
+  }, [page, search, statusFilter]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // Reset pagination when the URL-driven status filter changes.
+  useEffect(() => {
+    setPage(1);
+  }, [statusFilter]);
+
+  // Keep the filter shareable: the status filter lives in ?status=
+  function updateStatusFilter(next: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (next === "") params.delete("status");
+    else params.set("status", next);
+    const query = params.toString();
+    router.replace(query ? `/users?${query}` : "/users");
+  }
 
   // Live search: debounce keystrokes, then refetch from page 1.
   useEffect(() => {
@@ -89,9 +130,11 @@ export default function UsersPage() {
 
   // Open the create modal when arriving via /users?create=1 (sub sidebar).
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("create") === "1") {
-      window.history.replaceState({}, "", "/users");
+    if (searchParams.get("create") === "1") {
+      const params = new URLSearchParams(searchParams.toString());
+      params.delete("create");
+      const query = params.toString();
+      router.replace(query ? `/users?${query}` : "/users");
       openCreate();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -129,10 +172,17 @@ export default function UsersPage() {
     setStatusError(null);
     const next = statusTarget.status === "active" ? "disabled" : "active";
     try {
-      await api.setUserStatus(statusTarget.id, next);
-      setStatusTarget(null);
-      await load();
-      toast.success(next === "disabled" ? "User disabled" : "User enabled", statusTarget.email);
+      if (statusTarget.status === "banned") {
+        await api.unbanUser(statusTarget.id);
+        setStatusTarget(null);
+        await load();
+        toast.success("User unbanned", statusTarget.email);
+      } else {
+        await api.setUserStatus(statusTarget.id, next);
+        setStatusTarget(null);
+        await load();
+        toast.success(next === "disabled" ? "User disabled" : "User enabled", statusTarget.email);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Update failed";
       setStatusError(message);
@@ -166,7 +216,8 @@ export default function UsersPage() {
 
   const items = result?.items ?? [];
   const activeCount = items.filter((u) => u.status === "active").length;
-  const disabledCount = items.length - activeCount;
+  const bannedCount = items.filter((u) => u.status === "banned").length;
+  const disabledCount = items.length - activeCount - bannedCount;
 
   const allOnPageSelected =
     items.length > 0 && items.every((u) => selected.has(u.id));
@@ -265,13 +316,16 @@ export default function UsersPage() {
       {result && (
         <div className="mb-4 flex flex-wrap gap-2">
           <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700 dark:bg-white/[0.05] dark:text-gray-300">
-            {result.total} total
+            {result.total} total{statusFilter ? ` (${statusFilter})` : ""}
           </span>
           <span className="rounded-full bg-success-50 px-3 py-1 text-xs font-medium text-success-600 dark:bg-success-500/10 dark:text-success-400">
             {activeCount} active (this page)
           </span>
           <span className="rounded-full bg-warning-50 px-3 py-1 text-xs font-medium text-warning-600 dark:bg-warning-500/10 dark:text-warning-400">
             {disabledCount} disabled (this page)
+          </span>
+          <span className="rounded-full bg-error-50 px-3 py-1 text-xs font-medium text-error-600 dark:bg-error-500/10 dark:text-error-400">
+            {bannedCount} banned (this page)
           </span>
         </div>
       )}
@@ -289,6 +343,26 @@ export default function UsersPage() {
               placeholder="Type to filter by email..."
               className="h-10 w-56 rounded-lg border border-gray-300 bg-transparent px-3.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
             />
+            <select
+              value={statusFilter}
+              onChange={(e) => updateStatusFilter(e.target.value)}
+              aria-label="Filter users by status"
+              className="h-10 rounded-lg border border-gray-300 bg-transparent px-2.5 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+            >
+              <option value="">All statuses</option>
+              <option value="active">Active</option>
+              <option value="disabled">Disabled</option>
+              <option value="banned">Banned</option>
+            </select>
+            {statusFilter !== "" && (
+              <button
+                type="button"
+                onClick={() => updateStatusFilter("")}
+                className="rounded-lg px-2 py-1 text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              >
+                Clear
+              </button>
+            )}
             <ExportCsvButton
               filename="users.csv"
               headers={["email", "status", "licenses", "devices", "active_sessions", "last_login_at", "created_at"]}
@@ -317,7 +391,11 @@ export default function UsersPage() {
         ) : !result || result.items.length === 0 ? (
           <EmptyState
             title="No users found"
-            message="Users appear here when they register, or add one manually."
+            message={
+              statusFilter === "banned"
+                ? "No banned users match the current filters."
+                : "Users appear here when they register, or add one manually."
+            }
           />
         ) : (
           <>
@@ -353,8 +431,17 @@ export default function UsersPage() {
                     },
                   ];
                   if (canWrite) {
-                    actions.push(
-                      {
+                    if (user.status === "banned") {
+                      actions.push({
+                        label: "Unban user",
+                        tone: "success",
+                        onClick: () => {
+                          setStatusError(null);
+                          setStatusTarget(user);
+                        },
+                      });
+                    } else {
+                      actions.push({
                         label:
                           user.status === "active"
                             ? "Disable user"
@@ -364,7 +451,9 @@ export default function UsersPage() {
                           setStatusError(null);
                           setStatusTarget(user);
                         },
-                      },
+                      });
+                    }
+                    actions.push(
                       {
                         label: "Revoke sessions",
                         tone: "danger",
@@ -505,16 +594,28 @@ export default function UsersPage() {
       <ConfirmModal
         isOpen={statusTarget !== null}
         title={
-          statusTarget?.status === "active" ? "Disable user" : "Enable user"
+          statusTarget?.status === "banned"
+            ? "Unban user"
+            : statusTarget?.status === "active"
+              ? "Disable user"
+              : "Enable user"
         }
         message={
           statusTarget
-            ? statusTarget.status === "active"
-              ? `Disable ${statusTarget.email}? Their licenses stay intact but the account can no longer authenticate.`
-              : `Enable ${statusTarget.email}? The account can authenticate again.`
+            ? statusTarget.status === "banned"
+              ? `Unban ${statusTarget.email}? The ban details will be cleared and the account returns to active.`
+              : statusTarget.status === "active"
+                ? `Disable ${statusTarget.email}? Their licenses stay intact but the account can no longer authenticate.`
+                : `Enable ${statusTarget.email}? The account can authenticate again.`
             : ""
         }
-        confirmLabel={statusTarget?.status === "active" ? "Disable" : "Enable"}
+        confirmLabel={
+          statusTarget?.status === "banned"
+            ? "Unban"
+            : statusTarget?.status === "active"
+              ? "Disable"
+              : "Enable"
+        }
         busy={statusBusy}
         error={statusError}
         onConfirm={handleStatusChange}

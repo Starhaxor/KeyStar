@@ -1,8 +1,8 @@
 "use client";
-import React, { useEffect, useState } from "react";
+import React, { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useSidebar } from "../context/SidebarContext";
 import { useAdminIdentity } from "../context/AdminIdentityContext";
 import {
@@ -37,7 +37,10 @@ const navItems: NavItem[] = [
     name: "Users",
     path: "/users",
     permission: "users.read",
-    children: [{ label: "Directory", href: "/users" }],
+    children: [
+      { label: "Directory", href: "/users" },
+      { label: "Banned", href: "/users?status=banned" },
+    ],
   },
   {
     icon: <DocsIcon />,
@@ -86,10 +89,11 @@ function initialsFor(email: string): string {
   return local.slice(0, 2).toUpperCase() || "A";
 }
 
-const AppSidebar: React.FC = () => {
+const AppSidebarInner: React.FC = () => {
   const { isExpanded, isMobileOpen, isHovered, setIsHovered, toggleSidebar } =
     useSidebar();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { hasPermission, identity } = useAdminIdentity();
 
   // Which sections have their submenu expanded. The section containing the
@@ -99,15 +103,42 @@ const AppSidebar: React.FC = () => {
   const isActive = (path: string) =>
     path === "/" ? pathname === "/" : pathname === path || pathname.startsWith(`${path}/`);
 
-  // A sub-item is the current location only when it is the canonical page
-  // itself; ?create=1 shortcuts are actions, never highlighted.
-  const isChildActive = (child: SubItem) => {
-    if (child.href.includes("?")) return false;
-    return pathname === child.href || pathname.startsWith(`${child.href}/`);
+  // A sub-item matches when its path matches and every query parameter it
+  // declares is present in the current URL.
+  const childMatches = (child: SubItem) => {
+    const [childPath, childQuery] = child.href.split("?");
+    if (pathname !== childPath && !pathname.startsWith(`${childPath}/`)) {
+      return false;
+    }
+    if (!childQuery) return true;
+    const wanted = new URLSearchParams(childQuery);
+    for (const [key, value] of wanted.entries()) {
+      if (searchParams.get(key) !== value) return false;
+    }
+    return true;
   };
 
+  // When several sub-items of one section match (e.g. /users and
+  // /users?status=banned), highlight only the most specific one.
+  const bestChildHref = (nav: NavItem): string | null => {
+    const matches = (nav.children ?? []).filter(childMatches);
+    if (matches.length === 0) return null;
+    matches.sort((a, b) => {
+      const qa = a.href.split("?")[1]?.length ?? 0;
+      const qb = b.href.split("?")[1]?.length ?? 0;
+      return qb - qa;
+    });
+    return matches[0].href;
+  };
+
+  const activeChildHrefs = new Set(
+    navItems.map((nav) => bestChildHref(nav)).filter(Boolean)
+  ) as Set<string>;
+
+  const isChildActive = (child: SubItem) => activeChildHrefs.has(child.href);
+
   const isSectionActive = (nav: NavItem) =>
-    isActive(nav.path) || (nav.children ?? []).some(isChildActive);
+    isActive(nav.path) || (nav.children ?? []).some(childMatches);
 
   // On navigation only the section containing the current route stays open;
   // every other section collapses. This keeps the menu deterministic and
@@ -120,7 +151,7 @@ const AppSidebar: React.FC = () => {
       }
       return next;
     });
-  }, [pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pathname, searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleSection = (name: string) =>
     setOpenSections((prev) => ({ ...prev, [name]: !prev[name] }));
@@ -337,5 +368,11 @@ const AppSidebar: React.FC = () => {
     </aside>
   );
 };
+
+const AppSidebar: React.FC = () => (
+  <Suspense>
+    <AppSidebarInner />
+  </Suspense>
+);
 
 export default AppSidebar;

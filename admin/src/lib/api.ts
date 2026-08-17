@@ -250,9 +250,9 @@ export const api = {
       "/v1/admin/overview/stats"
     );
   },
-  users(page: number, search: string) {
+  users(page: number, search: string, status = "") {
     return request<{ ok: boolean } & PageResult<ConsoleUser>>(
-      `/v1/admin/users?${pageQuery(page, { search })}`
+      `/v1/admin/users?${pageQuery(page, { search, status })}`
     );
   },
   createUser(email: string, password: string) {

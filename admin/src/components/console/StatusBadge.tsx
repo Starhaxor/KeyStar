@@ -10,6 +10,7 @@ const statusColors: Record<
   pending: "warning",
   locked: "warning",
   disabled: "error",
+  banned: "error",
   revoked: "error",
   expired: "light",
 };
