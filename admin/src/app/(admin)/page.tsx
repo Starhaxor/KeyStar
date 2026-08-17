@@ -1,5 +1,6 @@
 "use client";
 import ActivityChart from "@/components/console/ActivityChart";
+import CompositionChart from "@/components/console/CompositionChart";
 import { CardSkeleton, Skeleton, TableSkeleton } from "@/components/common/Skeleton";
 import ConsoleSection, {
   EmptyNote,
@@ -89,20 +90,38 @@ export default function OverviewPage() {
             />
           </div>
 
-          <ConsoleSection
-            title="Activity"
-            description="Licenses, devices, sessions and admin logins over the last 14 days."
-          >
-            {!stats ? (
-              <div className="p-5">
-                <Skeleton className="h-64 w-full" />
-              </div>
-            ) : stats.length === 0 ? (
-              <EmptyNote message="No activity data yet." />
-            ) : (
-              <ActivityChart stats={stats} />
-            )}
-          </ConsoleSection>
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+            <div className="xl:col-span-2">
+              <ConsoleSection
+                title="Activity"
+                description="Licenses, devices, sessions and admin logins over the last 14 days."
+              >
+                {!stats ? (
+                  <div className="p-5">
+                    <Skeleton className="h-64 w-full" />
+                  </div>
+                ) : stats.length === 0 ? (
+                  <EmptyNote message="No activity data yet." />
+                ) : (
+                  <ActivityChart stats={stats} />
+                )}
+              </ConsoleSection>
+            </div>
+            <ConsoleSection
+              title="Composition"
+              description="Share of activity over the last 14 days."
+            >
+              {!stats ? (
+                <div className="p-5">
+                  <Skeleton className="h-64 w-full" />
+                </div>
+              ) : stats.length === 0 ? (
+                <EmptyNote message="No activity data yet." />
+              ) : (
+                <CompositionChart stats={stats} />
+              )}
+            </ConsoleSection>
+          </div>
 
           <ConsoleSection
             title="Recent Admin Activity"
