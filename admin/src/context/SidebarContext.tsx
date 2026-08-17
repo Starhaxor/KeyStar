@@ -34,6 +34,20 @@ export const SidebarProvider: React.FC<{ children: React.ReactNode }> = ({
   const [activeItem, setActiveItem] = useState<string | null>(null);
   const [openSubmenu, setOpenSubmenu] = useState<string | null>(null);
 
+  // Persist the desktop collapse state across reloads.
+  useEffect(() => {
+    const saved = localStorage.getItem("sidebar-expanded");
+    if (saved === "0" || saved === "1") {
+      setIsExpanded(saved === "1");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isMobile) {
+      localStorage.setItem("sidebar-expanded", isExpanded ? "1" : "0");
+    }
+  }, [isExpanded, isMobile]);
+
   useEffect(() => {
     const handleResize = () => {
       const mobile = window.innerWidth < 768;

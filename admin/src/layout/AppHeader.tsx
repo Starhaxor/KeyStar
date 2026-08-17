@@ -61,7 +61,7 @@ const AppHeader: React.FC = () => {
             StarLoader Admin Console
           </span>
         </div>
-        <div className="flex items-center justify-between w-full gap-4 px-5 py-4 lg:justify-end lg:px-0 lg:w-auto lg:py-4">
+        <div className="flex items-center justify-end w-full gap-4 px-5 py-4 lg:px-0 lg:w-auto lg:py-4">
           <div className="flex items-center gap-2 2xsm:gap-3">
             <ThemeToggleButton />
           </div>
