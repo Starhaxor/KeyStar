@@ -9,6 +9,7 @@ import type {
   ConsoleDevice,
   ConsoleDeviceDetail,
   ConsoleLicense,
+  DailyStat,
   ConsoleSession,
   ConsoleUser,
   CreatedLicense,
@@ -193,6 +194,11 @@ export const api = {
   },
   overview() {
     return request<{ ok: boolean } & Overview>("/v1/admin/overview");
+  },
+  overviewStats() {
+    return request<{ ok: boolean; days: DailyStat[] }>(
+      "/v1/admin/overview/stats"
+    );
   },
   users(page: number, search: string) {
     return request<{ ok: boolean } & PageResult<ConsoleUser>>(

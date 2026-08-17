@@ -119,6 +119,15 @@ export interface Overview {
   recent_audit: AuditEntry[];
 }
 
+export interface DailyStat {
+  day: string;
+  licenses_created: number;
+  devices_registered: number;
+  sessions_created: number;
+  audit_events: number;
+  admin_logins: number;
+}
+
 export interface UserDetail {
   user: ConsoleUser;
   licenses: ConsoleLicense[];

@@ -1,4 +1,5 @@
 "use client";
+import ActivityChart from "@/components/console/ActivityChart";
 import ConsoleSection, {
   EmptyNote,
   ErrorNote,
@@ -7,19 +8,24 @@ import ConsoleSection, {
 } from "@/components/console/ConsoleSection";
 import StatCard from "@/components/console/StatCard";
 import { api, formatDateTime } from "@/lib/api";
-import type { Overview } from "@/lib/types";
+import type { DailyStat, Overview } from "@/lib/types";
 import { BoxCubeIcon, DocsIcon, TimeIcon, UserCircleIcon } from "@/icons";
 import React, { useCallback, useEffect, useState } from "react";
 
 export default function OverviewPage() {
   const [overview, setOverview] = useState<Overview | null>(null);
+  const [stats, setStats] = useState<DailyStat[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       setError(null);
-      const response = await api.overview();
-      setOverview(response);
+      const [overviewResponse, statsResponse] = await Promise.all([
+        api.overview(),
+        api.overviewStats(),
+      ]);
+      setOverview(overviewResponse);
+      setStats(statsResponse.days);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load overview");
     }
@@ -69,6 +75,19 @@ export default function OverviewPage() {
               icon={<TimeIcon />}
             />
           </div>
+
+          <ConsoleSection
+            title="Activity"
+            description="Licenses, devices, sessions and admin logins over the last 14 days."
+          >
+            {!stats ? (
+              <LoadingNote />
+            ) : stats.length === 0 ? (
+              <EmptyNote message="No activity data yet." />
+            ) : (
+              <ActivityChart stats={stats} />
+            )}
+          </ConsoleSection>
 
           <ConsoleSection
             title="Recent Admin Activity"
