@@ -59,10 +59,6 @@ const navItems: NavItem[] = [
     name: "Audit Log",
     path: "/audit-logs",
     permission: "audit.read",
-    children: [
-      { label: "Audit log", href: "/audit-logs" },
-      { label: "Security events", href: "/security-events" },
-    ],
   },
   {
     icon: <GroupIcon />,
@@ -81,7 +77,6 @@ const navItems: NavItem[] = [
     children: [
       { label: "MFA & settings", href: "/security" },
       { label: "Security events", href: "/security-events" },
-      { label: "Audit log", href: "/audit-logs" },
     ],
   },
 ];
@@ -114,9 +109,12 @@ const AppSidebar: React.FC = () => {
   const isSectionActive = (nav: NavItem) =>
     isActive(nav.path) || (nav.children ?? []).some(isChildActive);
 
+  // On navigation only the section containing the current route stays open;
+  // every other section collapses. This keeps the menu deterministic and
+  // prevents stale sections from lingering expanded.
   useEffect(() => {
-    setOpenSections((prev) => {
-      const next = { ...prev };
+    setOpenSections(() => {
+      const next: Record<string, boolean> = {};
       for (const nav of navItems) {
         if (nav.children && isSectionActive(nav)) next[nav.name] = true;
       }
@@ -188,44 +186,66 @@ const AppSidebar: React.FC = () => {
                         {active && (
                           <span className="absolute left-[-16px] top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-brand-500" />
                         )}
-                        <Link
-                          href={nav.path}
-                          title={expanded ? undefined : nav.name}
-                          className={`menu-item group flex-1 ${
-                            active ? "menu-item-active" : "menu-item-inactive"
-                          }`}
-                        >
-                          <span
-                            className={
-                              active
-                                ? "menu-item-icon-active"
-                                : "menu-item-icon-inactive"
-                            }
-                          >
-                            {nav.icon}
-                          </span>
-                          {expanded && (
-                            <span className="flex-1 text-left">{nav.name}</span>
-                          )}
-                        </Link>
-                        {expanded && nav.children && (
+                        {nav.children ? (
+                          // Sections with a submenu: the whole row toggles it.
                           <button
                             type="button"
                             onClick={() => toggleSection(nav.name)}
-                            aria-label={`Toggle ${nav.name} submenu`}
+                            title={expanded ? undefined : nav.name}
                             aria-expanded={sectionOpen}
-                            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-gray-100 dark:hover:bg-white/5 ${
-                              sectionOpen
-                                ? "text-brand-500 dark:text-brand-400"
-                                : "text-gray-400"
+                            className={`menu-item group flex-1 ${
+                              active ? "menu-item-active" : "menu-item-inactive"
                             }`}
                           >
-                            <ChevronDownIcon
-                              className={`transition-transform ${
-                                sectionOpen ? "rotate-180" : ""
-                              }`}
-                            />
+                            <span
+                              className={
+                                active
+                                  ? "menu-item-icon-active"
+                                  : "menu-item-icon-inactive"
+                              }
+                            >
+                              {nav.icon}
+                            </span>
+                            {expanded && (
+                              <span className="flex-1 text-left">
+                                {nav.name}
+                              </span>
+                            )}
+                            {expanded && (
+                              <ChevronDownIcon
+                                className={`h-4 w-4 shrink-0 transition-transform ${
+                                  sectionOpen ? "rotate-180" : ""
+                                } ${
+                                  active
+                                    ? "text-brand-500 dark:text-brand-400"
+                                    : "text-gray-400"
+                                }`}
+                              />
+                            )}
                           </button>
+                        ) : (
+                          <Link
+                            href={nav.path}
+                            title={expanded ? undefined : nav.name}
+                            className={`menu-item group flex-1 ${
+                              active ? "menu-item-active" : "menu-item-inactive"
+                            }`}
+                          >
+                            <span
+                              className={
+                                active
+                                  ? "menu-item-icon-active"
+                                  : "menu-item-icon-inactive"
+                              }
+                            >
+                              {nav.icon}
+                            </span>
+                            {expanded && (
+                              <span className="flex-1 text-left">
+                                {nav.name}
+                              </span>
+                            )}
+                          </Link>
                         )}
                       </div>
                       {expanded && nav.children && sectionOpen && (
