@@ -62,6 +62,7 @@ export default function UserDetailPage({
     UserDetail["licenses"][number] | null
   >(null);
   const [extendDays, setExtendDays] = useState(30);
+  const [extendUnit, setExtendUnit] = useState("days");
   const [extendMaxDevices, setExtendMaxDevices] = useState(0);
   const [extendBusy, setExtendBusy] = useState(false);
   const [extendError, setExtendError] = useState<string | null>(null);
@@ -105,6 +106,9 @@ export default function UserDetailPage({
   // Ban / unban
   const [banOpen, setBanOpen] = useState(false);
   const [banReason, setBanReason] = useState("");
+  const [banPermanent, setBanPermanent] = useState(false);
+  const [banDurationValue, setBanDurationValue] = useState(7);
+  const [banDurationUnit, setBanDurationUnit] = useState("days");
   const [banBusy, setBanBusy] = useState(false);
   const [banError, setBanError] = useState<string | null>(null);
 
@@ -173,7 +177,11 @@ export default function UserDetailPage({
     setBanBusy(true);
     setBanError(null);
     try {
-      await api.banUser(detail.user.id, banReason.trim());
+      await api.banUser(detail.user.id, banReason.trim(), {
+        permanent: banPermanent,
+        durationValue: banPermanent ? 0 : banDurationValue,
+        durationUnit: banPermanent ? "" : banDurationUnit,
+      });
       setBanOpen(false);
       setBanReason("");
       await load();
@@ -247,7 +255,11 @@ export default function UserDetailPage({
     setExtendBusy(true);
     setExtendError(null);
     try {
-      await api.updateLicense(extendTarget.id, extendDays, extendMaxDevices);
+      await api.updateLicense(extendTarget.id, {
+        extendValue: extendDays,
+        extendUnit,
+        maxDevices: extendMaxDevices,
+      });
       setExtendTarget(null);
       await load();
       toast.success("License extended", extendTarget.user_email);
@@ -463,6 +475,15 @@ export default function UserDetailPage({
         <div className="rounded-xl border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-400">
           <span className="font-semibold">Banned</span>
           {detail.banned_at && ` · ${formatDateTime(detail.banned_at)}`}
+          {detail.ban_expires_at && (
+            <span className="block">
+              Until {formatDateTime(detail.ban_expires_at)}
+              {" · "}auto-reopens when the deadline passes
+            </span>
+          )}
+          {!detail.ban_expires_at && (
+            <span className="block">Permanent ban</span>
+          )}
           {detail.ban_reason && (
             <span className="mt-1 block">Reason: {detail.ban_reason}</span>
           )}
@@ -636,6 +657,7 @@ export default function UserDetailPage({
                       onClick: () => {
                         setExtendError(null);
                         setExtendDays(30);
+                        setExtendUnit("days");
                         setExtendMaxDevices(license.max_devices);
                         setExtendTarget(license);
                       },
@@ -833,16 +855,52 @@ export default function UserDetailPage({
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
-                  Extend by (days)
+                  Extend by
                 </label>
-                <input
-                  className={fieldClasses}
-                  type="number"
-                  min={0}
-                  max={3650}
-                  value={extendDays}
-                  onChange={(e) => setExtendDays(Number(e.target.value))}
-                />
+                <div className="flex gap-2">
+                  <input
+                    className={fieldClasses}
+                    type="number"
+                    min={1}
+                    max={1000}
+                    value={extendDays}
+                    onChange={(e) =>
+                      setExtendDays(Math.max(0, Number(e.target.value) || 0))
+                    }
+                  />
+                  <select
+                    className={`${fieldClasses} w-32 px-2`}
+                    value={extendUnit}
+                    onChange={(e) => setExtendUnit(e.target.value)}
+                  >
+                    <option value="hours">Hours</option>
+                    <option value="days">Days</option>
+                    <option value="weeks">Weeks</option>
+                    <option value="months">Months</option>
+                    <option value="years">Years</option>
+                  </select>
+                </div>
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  New expiry:{" "}
+                  <span className="font-medium text-gray-700 dark:text-gray-200">
+                    {(() => {
+                      const current = new Date(extendTarget.expires_at);
+                      const base =
+                        current.getTime() > Date.now() ? current : new Date();
+                      if (extendUnit === "hours")
+                        base.setHours(base.getHours() + extendDays);
+                      else if (extendUnit === "days")
+                        base.setDate(base.getDate() + extendDays);
+                      else if (extendUnit === "weeks")
+                        base.setDate(base.getDate() + 7 * extendDays);
+                      else if (extendUnit === "months")
+                        base.setMonth(base.getMonth() + extendDays);
+                      else if (extendUnit === "years")
+                        base.setFullYear(base.getFullYear() + extendDays);
+                      return formatDateTime(base.toISOString());
+                    })()}
+                  </span>
+                </p>
               </div>
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
@@ -1001,8 +1059,8 @@ export default function UserDetailPage({
               Ban user
             </h3>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              Banned users cannot sign in until unbanned. The reason is recorded
-              and shown on this profile.
+              Banned users cannot sign in until unbanned. Choose a temporary ban
+              that reopens automatically, or a permanent one.
             </p>
           </div>
           <div>
@@ -1015,6 +1073,119 @@ export default function UserDetailPage({
               placeholder="e.g. license abuse, chargeback, shared account..."
               className="w-full resize-y rounded-lg border border-gray-300 bg-transparent px-4 py-3 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
             />
+          </div>
+          <div>
+            <Label>Ban duration</Label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setBanPermanent(false)}
+                className={`rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
+                  !banPermanent
+                    ? "border-brand-500 bg-brand-50 text-brand-700 dark:border-brand-500/60 dark:bg-brand-500/10 dark:text-brand-400"
+                    : "border-gray-300 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                }`}
+              >
+                Temporary
+              </button>
+              <button
+                type="button"
+                onClick={() => setBanPermanent(true)}
+                className={`rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
+                  banPermanent
+                    ? "border-error-500 bg-error-50 text-error-700 dark:border-error-500/60 dark:bg-error-500/10 dark:text-error-400"
+                    : "border-gray-300 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                }`}
+              >
+                Permanent
+              </button>
+            </div>
+            {!banPermanent ? (
+              <div className="mt-3 space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={1000}
+                    value={banDurationValue}
+                    onChange={(e) =>
+                      setBanDurationValue(
+                        Math.max(1, Number(e.target.value) || 1)
+                      )
+                    }
+                    className="w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+                  />
+                  <select
+                    value={banDurationUnit}
+                    onChange={(e) => setBanDurationUnit(e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2.5 text-sm text-gray-800 focus:border-brand-300 focus:outline-hidden dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+                  >
+                    <option value="hours">Hours</option>
+                    <option value="days">Days</option>
+                    <option value="weeks">Weeks</option>
+                    <option value="months">Months</option>
+                    <option value="years">Years</option>
+                  </select>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { label: "1 h", value: 1, unit: "hours" },
+                    { label: "24 h", value: 24, unit: "hours" },
+                    { label: "7 d", value: 7, unit: "days" },
+                    { label: "30 d", value: 30, unit: "days" },
+                    { label: "90 d", value: 90, unit: "days" },
+                    { label: "1 y", value: 1, unit: "years" },
+                  ].map((preset) => {
+                    const active =
+                      banDurationValue === preset.value &&
+                      banDurationUnit === preset.unit;
+                    return (
+                      <button
+                        key={preset.label}
+                        type="button"
+                        onClick={() => {
+                          setBanDurationValue(preset.value);
+                          setBanDurationUnit(preset.unit);
+                        }}
+                        className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                          active
+                            ? "border-brand-500 bg-brand-50 text-brand-700 dark:border-brand-500/60 dark:bg-brand-500/10 dark:text-brand-400"
+                            : "border-gray-300 text-gray-500 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800"
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Ban lifts on{" "}
+                  <span className="font-medium text-gray-700 dark:text-gray-200">
+                    {(() => {
+                      const deadline = new Date();
+                      if (banDurationUnit === "hours")
+                        deadline.setHours(deadline.getHours() + banDurationValue);
+                      else if (banDurationUnit === "days")
+                        deadline.setDate(deadline.getDate() + banDurationValue);
+                      else if (banDurationUnit === "weeks")
+                        deadline.setDate(deadline.getDate() + 7 * banDurationValue);
+                      else if (banDurationUnit === "months")
+                        deadline.setMonth(deadline.getMonth() + banDurationValue);
+                      else if (banDurationUnit === "years")
+                        deadline.setFullYear(
+                          deadline.getFullYear() + banDurationValue
+                        );
+                      return formatDateTime(deadline.toISOString());
+                    })()}
+                  </span>{" "}
+                  — the user can sign in again without admin action.
+                </p>
+              </div>
+            ) : (
+              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                The account stays banned until an admin unbans it manually.
+              </p>
+            )}
           </div>
           {banError && (
             <p className="text-sm text-error-500" role="alert">
@@ -1034,7 +1205,7 @@ export default function UserDetailPage({
               disabled={banBusy || banReason.trim() === ""}
               onClick={handleBan}
             >
-              {banBusy ? "Banning..." : "Ban user"}
+              {banBusy ? "Banning..." : banPermanent ? "Ban permanently" : "Ban temporarily"}
             </Button>
           </div>
         </div>

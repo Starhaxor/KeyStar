@@ -4,6 +4,7 @@ import (
 	cryptorand "crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -324,23 +325,25 @@ func (router *Router) handleAdminUserDetail(writer http.ResponseWriter, request 
 		return
 	}
 	writeJSON(writer, http.StatusOK, struct {
-		OK        bool                 `json:"ok"`
-		User      consoleUserJSON      `json:"user"`
-		Notes     string               `json:"notes"`
-		BanReason string               `json:"ban_reason"`
-		BannedAt  string               `json:"banned_at"`
-		Licenses  []consoleLicenseJSON `json:"licenses"`
-		Devices   []consoleDeviceJSON  `json:"devices"`
-		Sessions  []consoleSessionJSON `json:"sessions"`
+		OK            bool                 `json:"ok"`
+		User          consoleUserJSON      `json:"user"`
+		Notes         string               `json:"notes"`
+		BanReason     string               `json:"ban_reason"`
+		BannedAt      string               `json:"banned_at"`
+		BanExpiresAt  string               `json:"ban_expires_at"`
+		Licenses      []consoleLicenseJSON `json:"licenses"`
+		Devices       []consoleDeviceJSON  `json:"devices"`
+		Sessions      []consoleSessionJSON `json:"sessions"`
 	}{
-		OK:        true,
-		User:      mapConsoleUser(detail.User),
-		Notes:     detail.Notes,
-		BanReason: detail.BanReason,
-		BannedAt:  formatTimePtr(detail.BannedAt),
-		Licenses:  mapConsoleLicenses(detail.Licenses),
-		Devices:   mapConsoleDevices(detail.Devices),
-		Sessions:  mapConsoleSessions(detail.Sessions),
+		OK:           true,
+		User:         mapConsoleUser(detail.User),
+		Notes:        detail.Notes,
+		BanReason:    detail.BanReason,
+		BannedAt:     formatTimePtr(detail.BannedAt),
+		BanExpiresAt: formatTimePtr(detail.BanExpiresAt),
+		Licenses:     mapConsoleLicenses(detail.Licenses),
+		Devices:      mapConsoleDevices(detail.Devices),
+		Sessions:     mapConsoleSessions(detail.Sessions),
 	})
 }
 
@@ -559,15 +562,66 @@ func generateTemporaryPassword() (string, error) {
 	return string(bytes), nil
 }
 
-// handleAdminUserBan bans a user with a required reason. Banned users are
-// rejected by the client login path (status is no longer active).
+var banDurationUnits = map[string]bool{
+	"hours": true, "days": true, "weeks": true, "months": true, "years": true,
+}
+
+// addLicenseDuration moves a timestamp forward by a value/unit pair.
+func addLicenseDuration(base time.Time, value int, unit string) (time.Time, error) {
+	if value < 1 || value > 1000 {
+		return time.Time{}, errors.New("duration must be between 1 and 1000")
+	}
+	switch unit {
+	case "hours":
+		return base.Add(time.Duration(value) * time.Hour), nil
+	case "days":
+		return base.AddDate(0, 0, value), nil
+	case "weeks":
+		return base.AddDate(0, 0, 7*value), nil
+	case "months":
+		return base.AddDate(0, value, 0), nil
+	case "years":
+		return base.AddDate(value, 0, 0), nil
+	default:
+		return time.Time{}, errors.New("duration unit must be hours, days, weeks, months or years")
+	}
+}
+
+// banExpiresAt computes a temporary ban deadline from a value/unit pair.
+func banExpiresAt(now time.Time, value int, unit string) (time.Time, error) {
+	if value < 1 || value > 1000 {
+		return time.Time{}, errors.New("duration must be between 1 and 1000")
+	}
+	switch unit {
+	case "hours":
+		return now.Add(time.Duration(value) * time.Hour), nil
+	case "days":
+		return now.AddDate(0, 0, value), nil
+	case "weeks":
+		return now.AddDate(0, 0, 7*value), nil
+	case "months":
+		return now.AddDate(0, value, 0), nil
+	case "years":
+		return now.AddDate(value, 0, 0), nil
+	default:
+		return time.Time{}, errors.New("duration unit must be hours, days, weeks, months or years")
+	}
+}
+
+// handleAdminUserBan bans a user with a required reason. The ban is permanent
+// by default; a duration (value + unit) produces a temporary ban that expires
+// automatically (see store.AutoUnbanExpired). Banned users are rejected by the
+// client login path (status is no longer active).
 func (router *Router) handleAdminUserBan(writer http.ResponseWriter, request *http.Request, account *domain.AdminAccount, userID string) {
 	if !uuidPattern.MatchString(userID) {
 		writeError(writer, request, http.StatusNotFound, "USER_NOT_FOUND", "user not found")
 		return
 	}
 	var body struct {
-		Reason string `json:"reason"`
+		Reason        string `json:"reason"`
+		Permanent     bool   `json:"permanent"`
+		DurationValue int    `json:"duration_value"`
+		DurationUnit  string `json:"duration_unit"`
 	}
 	if err := decodeAdminJSONBody(writer, request, &body); err != nil {
 		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
@@ -578,14 +632,40 @@ func (router *Router) handleAdminUserBan(writer http.ResponseWriter, request *ht
 		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "a ban reason (max 500 chars) is required")
 		return
 	}
-	if err := router.admin.Console.BanUser(request.Context(), userID, reason); err != nil {
+	var expiresAt *time.Time
+	if !body.Permanent {
+		if body.DurationValue == 0 {
+			writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "a duration or permanent=true is required")
+			return
+		}
+		deadline, err := banExpiresAt(router.now(), body.DurationValue, body.DurationUnit)
+		if err != nil {
+			writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+			return
+		}
+		expiresAt = &deadline
+	}
+	if err := router.admin.Console.BanUser(request.Context(), userID, reason, expiresAt); err != nil {
 		router.writeConsoleError(writer, request, err)
 		return
 	}
-	router.auditAdmin(request, account, "USER_BANNED", "user", userID, map[string]string{"reason": reason})
+	metadata := map[string]string{"reason": reason}
+	if expiresAt != nil {
+		metadata["ban_until"] = expiresAt.UTC().Format(time.RFC3339)
+		metadata["duration"] = fmt.Sprintf("%d %s", body.DurationValue, body.DurationUnit)
+	} else {
+		metadata["duration"] = "permanent"
+	}
+	router.auditAdmin(request, account, "USER_BANNED", "user", userID, metadata)
 	writeJSON(writer, http.StatusOK, struct {
-		OK bool `json:"ok"`
-	}{OK: true})
+		OK        bool   `json:"ok"`
+		BanUntil  string `json:"ban_until"`
+		Permanent bool   `json:"permanent"`
+	}{
+		OK:        true,
+		BanUntil:  formatTimePtr(expiresAt),
+		Permanent: expiresAt == nil,
+	})
 }
 
 // handleAdminUserUnban clears a user's ban and restores active status.
@@ -745,14 +825,29 @@ func (router *Router) handleAdminLicenseCreate(writer http.ResponseWriter, reque
 	var body struct {
 		UserEmail  string `json:"user_email"`
 		Days       int    `json:"days"`
+		Value      int    `json:"value"`
+		Unit       string `json:"unit"`
 		MaxDevices int    `json:"max_devices"`
 	}
 	if err := decodeAdminJSONBody(writer, request, &body); err != nil {
 		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
 		return
 	}
-	if strings.TrimSpace(body.UserEmail) == "" || body.Days < 1 || body.Days > 3650 || body.MaxDevices < 1 || body.MaxDevices > 10000 {
-		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "user_email, days (1-3650) and max_devices (1-10000) are required")
+	durationValue := body.Value
+	unit := strings.ToLower(strings.TrimSpace(body.Unit))
+	if unit == "" {
+		unit = "days"
+	}
+	if durationValue == 0 {
+		durationValue = body.Days // legacy callers send days only
+	}
+	if strings.TrimSpace(body.UserEmail) == "" || !banDurationUnits[unit] || body.MaxDevices < 1 || body.MaxDevices > 10000 {
+		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "user_email, a valid duration (unit: hours/days/weeks/months/years) and max_devices (1-10000) are required")
+		return
+	}
+	expiresAt, err := addLicenseDuration(router.now().UTC(), durationValue, unit)
+	if err != nil {
+		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
 		return
 	}
 	user, err := router.admin.Console.FindUserByEmail(request.Context(), body.UserEmail)
@@ -770,7 +865,7 @@ func (router *Router) handleAdminLicenseCreate(writer http.ResponseWriter, reque
 		UserID:      user.ID,
 		Product:     router.admin.Product,
 		MaxDevices:  body.MaxDevices,
-		ExpiresAt:   router.now().UTC().AddDate(0, 0, body.Days),
+		ExpiresAt:   expiresAt,
 	})
 	if err != nil {
 		router.writeConsoleError(writer, request, err)
@@ -798,16 +893,18 @@ func (router *Router) handleAdminLicenseUpdate(writer http.ResponseWriter, reque
 		return
 	}
 	var body struct {
-		ExtendDays int    `json:"extend_days"`
-		MaxDevices int    `json:"max_devices"`
-		Level      *int   `json:"level"`
-		Notes      string `json:"notes"`
+		ExtendValue int    `json:"extend_value"`
+		ExtendUnit  string `json:"extend_unit"`
+		ExtendDays  int    `json:"extend_days"`
+		MaxDevices  int    `json:"max_devices"`
+		Level       *int   `json:"level"`
+		Notes       string `json:"notes"`
 	}
 	if err := decodeAdminJSONBody(writer, request, &body); err != nil {
 		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
 		return
 	}
-	if body.ExtendDays == 0 && body.MaxDevices == 0 && body.Level == nil && strings.TrimSpace(body.Notes) == "" {
+	if body.ExtendValue == 0 && body.ExtendDays == 0 && body.MaxDevices == 0 && body.Level == nil && strings.TrimSpace(body.Notes) == "" {
 		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "extend_days, max_devices, level or notes is required")
 		return
 	}
@@ -828,9 +925,33 @@ func (router *Router) handleAdminLicenseUpdate(writer http.ResponseWriter, reque
 		writeError(writer, request, http.StatusConflict, "LICENSE_REVOKED", "revoked licenses cannot be modified")
 		return
 	}
-	expiresAt := license.ExpiresAt.AddDate(0, 0, body.ExtendDays)
-	if !expiresAt.After(router.now()) {
-		expiresAt = router.now().AddDate(0, 0, body.ExtendDays)
+	unit := strings.ToLower(strings.TrimSpace(body.ExtendUnit))
+	if unit == "" {
+		unit = "days"
+	}
+	if !banDurationUnits[unit] {
+		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "extend_unit must be hours, days, weeks, months or years")
+		return
+	}
+	extendValue := body.ExtendValue
+	if extendValue == 0 {
+		extendValue = body.ExtendDays // legacy callers send extend_days only
+	}
+	expiresAt := license.ExpiresAt
+	if extendValue > 0 {
+		deadline, err := addLicenseDuration(license.ExpiresAt, extendValue, unit)
+		if err != nil {
+			writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+			return
+		}
+		if !deadline.After(router.now()) {
+			deadline, err = addLicenseDuration(router.now(), extendValue, unit)
+			if err != nil {
+				writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+				return
+			}
+		}
+		expiresAt = deadline
 	}
 	maxDevices := body.MaxDevices
 	if maxDevices == 0 {
@@ -852,8 +973,8 @@ func (router *Router) handleAdminLicenseUpdate(writer http.ResponseWriter, reque
 		router.writeConsoleError(writer, request, err)
 		return
 	}
-	router.auditAdmin(request, account, "LICENSE_UPDATED", "license", licenseID, map[string]int{
-		"extend_days": body.ExtendDays, "max_devices": maxDevices, "level": level,
+	router.auditAdmin(request, account, "LICENSE_UPDATED", "license", licenseID, map[string]any{
+		"extend": fmt.Sprintf("%d %s", extendValue, unit), "max_devices": maxDevices, "level": level,
 	})
 	writeJSON(writer, http.StatusOK, struct {
 		OK bool `json:"ok"`

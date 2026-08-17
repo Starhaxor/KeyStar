@@ -8,10 +8,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/starloader/backend/internal/domain"
 )
 
-const userColumns = `id::text, email, password_hash, status, created_at, updated_at`
+const userColumns = `id::text, email, password_hash, status, ban_expires_at, created_at, updated_at`
 
 func (s *Store) CreateUser(ctx context.Context, input domain.NewUser) (*domain.User, error) {
 	row := s.db.QueryRow(ctx, `
@@ -75,6 +76,10 @@ func normalizeEmail(email string) string {
 
 func scanUser(row pgx.Row) (*domain.User, error) {
 	var user domain.User
-	err := row.Scan(&user.ID, &user.Email, &user.PasswordHash, &user.Status, &user.CreatedAt, &user.UpdatedAt)
+	var banExpiresAt pgtype.Timestamptz
+	err := row.Scan(&user.ID, &user.Email, &user.PasswordHash, &user.Status, &banExpiresAt, &user.CreatedAt, &user.UpdatedAt)
+	if banExpiresAt.Valid {
+		user.BanExpiresAt = &banExpiresAt.Time
+	}
 	return &user, err
 }

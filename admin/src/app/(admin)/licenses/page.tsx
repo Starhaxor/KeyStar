@@ -33,7 +33,8 @@ export default function LicensesPage() {
   const [createOpen, setCreateOpen] = useState(false);
 
   const [extendTarget, setExtendTarget] = useState<ConsoleLicense | null>(null);
-  const [extendDays, setExtendDays] = useState(30);
+  const [extendValue, setExtendValue] = useState(30);
+  const [extendUnit, setExtendUnit] = useState("days");
   const [extendMaxDevices, setExtendMaxDevices] = useState(0);
   const [extendLevel, setExtendLevel] = useState(1);
   const [extendNotes, setExtendNotes] = useState("");
@@ -88,13 +89,13 @@ export default function LicensesPage() {
     setExtendBusy(true);
     setExtendError(null);
     try {
-      await api.updateLicense(
-        extendTarget.id,
-        extendDays,
-        extendMaxDevices,
-        extendLevel,
-        extendNotes
-      );
+      await api.updateLicense(extendTarget.id, {
+        extendValue,
+        extendUnit,
+        maxDevices: extendMaxDevices,
+        level: extendLevel,
+        notes: extendNotes,
+      });
       setExtendTarget(null);
       await load();
     } catch (err) {
@@ -223,7 +224,8 @@ export default function LicensesPage() {
                       disabled: license.status === "revoked",
                       onClick: () => {
                         setExtendError(null);
-                        setExtendDays(30);
+                        setExtendValue(30);
+                        setExtendUnit("days");
                         setExtendMaxDevices(license.max_devices);
                         setExtendLevel(license.level ?? 1);
                         setExtendNotes(license.notes ?? "");
@@ -318,16 +320,82 @@ export default function LicensesPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
-                  Extend by (days)
+                  Extend by
                 </label>
-                <input
-                  className={fieldClasses}
-                  type="number"
-                  min={0}
-                  max={3650}
-                  value={extendDays}
-                  onChange={(e) => setExtendDays(Number(e.target.value))}
-                />
+                <div className="flex gap-2">
+                  <input
+                    className={fieldClasses}
+                    type="number"
+                    min={1}
+                    max={1000}
+                    value={extendValue}
+                    onChange={(e) =>
+                      setExtendValue(Math.max(0, Number(e.target.value) || 0))
+                    }
+                  />
+                  <select
+                    className={`${fieldClasses} w-32 px-2`}
+                    value={extendUnit}
+                    onChange={(e) => setExtendUnit(e.target.value)}
+                  >
+                    <option value="hours">Hours</option>
+                    <option value="days">Days</option>
+                    <option value="weeks">Weeks</option>
+                    <option value="months">Months</option>
+                    <option value="years">Years</option>
+                  </select>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {[
+                    { label: "1 h", value: 1, unit: "hours" },
+                    { label: "12 h", value: 12, unit: "hours" },
+                    { label: "7 d", value: 7, unit: "days" },
+                    { label: "30 d", value: 30, unit: "days" },
+                    { label: "1 mo", value: 1, unit: "months" },
+                    { label: "1 y", value: 1, unit: "years" },
+                  ].map((preset) => {
+                    const active =
+                      extendValue === preset.value && extendUnit === preset.unit;
+                    return (
+                      <button
+                        key={preset.label}
+                        type="button"
+                        onClick={() => {
+                          setExtendValue(preset.value);
+                          setExtendUnit(preset.unit);
+                        }}
+                        className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                          active
+                            ? "border-brand-500 bg-brand-50 text-brand-700 dark:border-brand-500/60 dark:bg-brand-500/10 dark:text-brand-400"
+                            : "border-gray-300 text-gray-500 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800"
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  New expiry:{" "}
+                  <span className="font-medium text-gray-700 dark:text-gray-200">
+                    {(() => {
+                      const current = new Date(extendTarget.expires_at);
+                      const base =
+                        current.getTime() > Date.now() ? current : new Date();
+                      if (extendUnit === "hours")
+                        base.setHours(base.getHours() + extendValue);
+                      else if (extendUnit === "days")
+                        base.setDate(base.getDate() + extendValue);
+                      else if (extendUnit === "weeks")
+                        base.setDate(base.getDate() + 7 * extendValue);
+                      else if (extendUnit === "months")
+                        base.setMonth(base.getMonth() + extendValue);
+                      else if (extendUnit === "years")
+                        base.setFullYear(base.getFullYear() + extendValue);
+                      return formatDateTime(base.toISOString());
+                    })()}
+                  </span>
+                </p>
               </div>
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">

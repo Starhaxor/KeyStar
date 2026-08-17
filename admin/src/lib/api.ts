@@ -288,11 +288,26 @@ export const api = {
       { method: "POST", body: {} }
     );
   },
-  banUser(userId: string, reason: string) {
-    return request<{ ok: boolean }>(`/v1/admin/users/${userId}/ban`, {
-      method: "POST",
-      body: { reason },
-    });
+  // permanent=true bans forever; otherwise duration_value + duration_unit
+  // (hours/days/weeks/months/years) produce a temporary ban that reopens
+  // automatically when the deadline passes.
+  banUser(
+    userId: string,
+    reason: string,
+    options: { permanent: boolean; durationValue?: number; durationUnit?: string }
+  ) {
+    return request<{ ok: boolean; ban_until?: string; permanent?: boolean }>(
+      `/v1/admin/users/${userId}/ban`,
+      {
+        method: "POST",
+        body: {
+          reason,
+          permanent: options.permanent,
+          duration_value: options.durationValue ?? 0,
+          duration_unit: options.durationUnit ?? "",
+        },
+      }
+    );
   },
   unbanUser(userId: string) {
     return request<{ ok: boolean }>(`/v1/admin/users/${userId}/unban`, {
@@ -329,25 +344,39 @@ export const api = {
       `/v1/admin/licenses?${pageQuery(page)}`
     );
   },
-  createLicense(userEmail: string, days: number, maxDevices: number) {
+  createLicense(
+    userEmail: string,
+    duration: { value: number; unit: string },
+    maxDevices: number
+  ) {
     return request<{ ok: boolean } & CreatedLicense>("/v1/admin/licenses", {
       method: "POST",
-      body: { user_email: userEmail, days, max_devices: maxDevices },
+      body: {
+        user_email: userEmail,
+        value: duration.value,
+        unit: duration.unit,
+        max_devices: maxDevices,
+      },
     });
   },
   updateLicense(
     licenseId: string,
-    extendDays: number,
-    maxDevices: number,
-    level?: number,
-    notes?: string
+    input: {
+      extendValue?: number;
+      extendUnit?: string;
+      maxDevices?: number;
+      level?: number;
+      notes?: string;
+    }
   ) {
-    const body: Record<string, unknown> = {
-      extend_days: extendDays,
-      max_devices: maxDevices,
-    };
-    if (level !== undefined) body.level = level;
-    if (notes !== undefined) body.notes = notes;
+    const body: Record<string, unknown> = {};
+    if (input.extendValue) {
+      body.extend_value = input.extendValue;
+      body.extend_unit = input.extendUnit ?? "days";
+    }
+    if (input.maxDevices !== undefined) body.max_devices = input.maxDevices;
+    if (input.level !== undefined) body.level = input.level;
+    if (input.notes !== undefined) body.notes = input.notes;
     return request<{ ok: boolean }>(`/v1/admin/licenses/${licenseId}`, {
       method: "PATCH",
       body,

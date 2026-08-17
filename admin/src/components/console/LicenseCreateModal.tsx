@@ -23,7 +23,8 @@ export default function LicenseCreateModal({
 }) {
   const toast = useToast();
   const [email, setEmail] = useState(defaultEmail);
-  const [days, setDays] = useState(30);
+  const [value, setValue] = useState(30);
+  const [unit, setUnit] = useState("days");
   const [maxDevices, setMaxDevices] = useState(1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +34,8 @@ export default function LicenseCreateModal({
   useEffect(() => {
     if (open) {
       setEmail(defaultEmail);
-      setDays(30);
+      setValue(30);
+      setUnit("days");
       setMaxDevices(1);
       setError(null);
       setCreated(null);
@@ -46,11 +48,7 @@ export default function LicenseCreateModal({
     setBusy(true);
     setError(null);
     try {
-      const response = await api.createLicense(
-        email.trim(),
-        days,
-        maxDevices
-      );
+      const response = await api.createLicense(email.trim(), { value, unit }, maxDevices);
       setCreated(response);
       setCopied(false);
       await onCreated?.();
@@ -136,16 +134,60 @@ export default function LicenseCreateModal({
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <Label>Duration (days)</Label>
-              <input
-                className={fieldClasses}
-                type="number"
-                min={1}
-                max={3650}
-                required
-                value={days}
-                onChange={(e) => setDays(Number(e.target.value))}
-              />
+              <Label>Duration</Label>
+              <div className="flex gap-2">
+                <input
+                  className={fieldClasses}
+                  type="number"
+                  min={1}
+                  max={1000}
+                  required
+                  value={value}
+                  onChange={(e) =>
+                    setValue(Math.max(1, Number(e.target.value) || 1))
+                  }
+                />
+                <select
+                  className={`${fieldClasses} w-32 px-2`}
+                  value={unit}
+                  onChange={(e) => setUnit(e.target.value)}
+                >
+                  <option value="hours">Hours</option>
+                  <option value="days">Days</option>
+                  <option value="weeks">Weeks</option>
+                  <option value="months">Months</option>
+                  <option value="years">Years</option>
+                </select>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {[
+                  { label: "1 h", value: 1, unit: "hours" },
+                  { label: "12 h", value: 12, unit: "hours" },
+                  { label: "7 d", value: 7, unit: "days" },
+                  { label: "30 d", value: 30, unit: "days" },
+                  { label: "1 mo", value: 1, unit: "months" },
+                  { label: "1 y", value: 1, unit: "years" },
+                ].map((preset) => {
+                  const active = value === preset.value && unit === preset.unit;
+                  return (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => {
+                        setValue(preset.value);
+                        setUnit(preset.unit);
+                      }}
+                      className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                        active
+                          ? "border-brand-500 bg-brand-50 text-brand-700 dark:border-brand-500/60 dark:bg-brand-500/10 dark:text-brand-400"
+                          : "border-gray-300 text-gray-500 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800"
+                      }`}
+                    >
+                      {preset.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
             <div>
               <Label>Max Devices</Label>

@@ -153,6 +153,7 @@ export interface UserDetail {
   notes: string;
   ban_reason: string;
   banned_at: string;
+  ban_expires_at: string | null;
   licenses: ConsoleLicense[];
   devices: ConsoleDevice[];
   sessions: ConsoleSession[];

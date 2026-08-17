@@ -153,14 +153,14 @@ func (s *Store) ConsoleUserDetail(ctx context.Context, userID string) (*domain.C
 			(select count(*)::integer from auth_sessions ss
 				where ss.user_id = u.id and ss.status = 'verified' and ss.expires_at > now()),
 			(select max(ss.created_at) from auth_sessions ss where ss.user_id = u.id),
-			u.notes, u.ban_reason, u.banned_at
+			u.notes, u.ban_reason, u.banned_at, u.ban_expires_at
 		from users u
 		where u.id = $1::uuid`, userID)
 	var user domain.ConsoleUser
 	detail := &domain.ConsoleUserDetail{}
 	err := row.Scan(&user.ID, &user.Email, &user.Status, &user.CreatedAt,
 		&user.LicenseCount, &user.DeviceCount, &user.ActiveSessionCount, &user.LastLoginAt,
-		&detail.Notes, &detail.BanReason, &detail.BannedAt)
+		&detail.Notes, &detail.BanReason, &detail.BannedAt, &detail.BanExpiresAt)
 	detail.User = user
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -212,14 +212,17 @@ func (s *Store) SetUserNotes(ctx context.Context, userID, notes string) error {
 	return nil
 }
 
-// BanUser bans a user with a reason. The client login path rejects any user
-// whose status is not active, so the ban takes effect immediately.
-func (s *Store) BanUser(ctx context.Context, userID, reason string) error {
+// BanUser bans a user with a reason. When expiresAt is non-nil the ban is
+// temporary and the account reopens automatically once the timestamp passes
+// (see AutoUnbanExpired). The client login path rejects any non-active user,
+// so the ban takes effect immediately.
+func (s *Store) BanUser(ctx context.Context, userID, reason string, expiresAt *time.Time) error {
 	err := s.db.QueryRow(ctx, `
 		update users
-		set status = 'banned', ban_reason = $2, banned_at = now(), updated_at = now()
+		set status = 'banned', ban_reason = $2, banned_at = now(),
+		    ban_expires_at = $3, updated_at = now()
 		where id = $1::uuid
-		returning id`, userID, reason).Scan(new(string))
+		returning id`, userID, reason, expiresAt).Scan(new(string))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ErrUserNotFound
@@ -229,11 +232,28 @@ func (s *Store) BanUser(ctx context.Context, userID, reason string) error {
 	return nil
 }
 
+// AutoUnbanExpired reopens a user whose temporary ban has expired. It is a
+// no-op unless the user is banned and the ban deadline has passed.
+func (s *Store) AutoUnbanExpired(ctx context.Context, userID string) error {
+	err := s.db.QueryRow(ctx, `
+		update users
+		set status = 'active', ban_reason = '', banned_at = null, ban_expires_at = null,
+		    updated_at = now()
+		where id = $1::uuid and status = 'banned'
+		  and ban_expires_at is not null and ban_expires_at <= now()
+		returning id`, userID).Scan(new(string))
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("auto unban expired: %w", err)
+	}
+	return nil
+}
+
 // UnbanUser clears a ban and restores the user to active.
 func (s *Store) UnbanUser(ctx context.Context, userID string) error {
 	err := s.db.QueryRow(ctx, `
 		update users
-		set status = 'active', ban_reason = '', banned_at = null, updated_at = now()
+		set status = 'active', ban_reason = '', banned_at = null, ban_expires_at = null,
+		    updated_at = now()
 		where id = $1::uuid
 		returning id`, userID).Scan(new(string))
 	if err != nil {

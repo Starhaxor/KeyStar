@@ -47,8 +47,9 @@ type AdminConsoleStore interface {
 	ConsoleUserDetail(ctx context.Context, userID string) (*domain.ConsoleUserDetail, error)
 	SetUserStatus(ctx context.Context, userID string, status domain.UserStatus) error
 	SetUserNotes(ctx context.Context, userID, notes string) error
-	BanUser(ctx context.Context, userID, reason string) error
+	BanUser(ctx context.Context, userID, reason string, expiresAt *time.Time) error
 	UnbanUser(ctx context.Context, userID string) error
+	AutoUnbanExpired(ctx context.Context, userID string) error
 	ResetUserDevices(ctx context.Context, userID string) (int64, error)
 	BulkSetUserStatus(ctx context.Context, userIDs []string, status domain.UserStatus) (int64, error)
 	BulkRevokeUserSessions(ctx context.Context, userIDs []string) (int64, error)

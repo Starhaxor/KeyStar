@@ -233,6 +233,7 @@ type fakeLoginRepository struct {
 	foundLicenseProduct string
 	pendingInput        domain.NewPendingSession
 	createPendingCalls  int
+	autoUnbanCalls      int
 }
 
 func (repository *fakeLoginRepository) FindUserByEmail(_ context.Context, email string) (*domain.User, error) {
@@ -250,4 +251,46 @@ func (repository *fakeLoginRepository) CreatePendingSession(_ context.Context, i
 	repository.createPendingCalls++
 	repository.pendingInput = input
 	return repository.pending, repository.pendingErr
+}
+
+func (repository *fakeLoginRepository) AutoUnbanExpired(_ context.Context, _ string) error {
+	repository.autoUnbanCalls++
+	return nil
+}
+
+func TestLoginReopensExpiredTemporaryBan(t *testing.T) {
+	now := time.Date(2026, 8, 10, 9, 30, 0, 0, time.UTC)
+	repository := validLoginRepository(now)
+	repository.user.Status = domain.UserStatusBanned
+	expired := now.Add(-time.Hour) // deadline already passed
+	repository.user.BanExpiresAt = &expired
+	service := newTestLoginService(repository, bytes.NewReader(bytes.Repeat([]byte{0x2a}, 32)), now)
+
+	_, err := service.Login(context.Background(), validLoginInput())
+	if err != nil {
+		t.Fatalf("Login() error = %v, want success after expired temporary ban", err)
+	}
+	if repository.autoUnbanCalls != 1 {
+		t.Fatalf("AutoUnbanExpired calls = %d, want 1", repository.autoUnbanCalls)
+	}
+	if repository.createPendingCalls != 1 {
+		t.Fatalf("CreatePendingSession calls = %d, want 1 (login should proceed)", repository.createPendingCalls)
+	}
+}
+
+func TestLoginRejectsActiveTemporaryBan(t *testing.T) {
+	now := time.Date(2026, 8, 10, 9, 30, 0, 0, time.UTC)
+	repository := validLoginRepository(now)
+	repository.user.Status = domain.UserStatusBanned
+	active := now.Add(24 * time.Hour) // still in effect
+	repository.user.BanExpiresAt = &active
+	service := newTestLoginService(repository, bytes.NewReader(bytes.Repeat([]byte{0x2a}, 32)), now)
+
+	_, err := service.Login(context.Background(), validLoginInput())
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("Login() error = %v, want %v", err, ErrInvalidCredentials)
+	}
+	if repository.autoUnbanCalls != 0 {
+		t.Fatalf("AutoUnbanExpired calls = %d, want 0", repository.autoUnbanCalls)
+	}
 }

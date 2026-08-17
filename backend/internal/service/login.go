@@ -44,6 +44,7 @@ type LoginRepository interface {
 	FindUserByEmail(context.Context, string) (*domain.User, error)
 	FindLicenseByUserAndProduct(context.Context, string, string) (*domain.License, error)
 	CreatePendingSession(context.Context, domain.NewPendingSession) (*domain.PendingSession, error)
+	AutoUnbanExpired(context.Context, string) error
 }
 
 type LoginService struct {
@@ -88,7 +89,16 @@ func (service *LoginService) Login(ctx context.Context, input LoginInput) (Pendi
 	if err != nil {
 		return PendingChallenge{}, fmt.Errorf("verify login password: %w", err)
 	}
-	if !passwordOK || user.Status != domain.UserStatusActive {
+	if !passwordOK {
+		return PendingChallenge{}, ErrInvalidCredentials
+	}
+	if user.Status == domain.UserStatusBanned && user.BanExpiresAt != nil && !user.BanExpiresAt.After(service.now().UTC()) {
+		// Temporary ban reached its deadline: reopen the account and let the
+		// login proceed as normal.
+		_ = service.repository.AutoUnbanExpired(ctx, user.ID)
+		user.Status = domain.UserStatusActive
+	}
+	if user.Status != domain.UserStatusActive {
 		return PendingChallenge{}, ErrInvalidCredentials
 	}
 

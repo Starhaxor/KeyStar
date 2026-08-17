@@ -16,13 +16,14 @@ type ConsoleUser struct {
 }
 
 type ConsoleUserDetail struct {
-	User      ConsoleUser
-	Notes     string
-	BanReason string
-	BannedAt  *time.Time
-	Licenses  []ConsoleLicense
-	Devices   []ConsoleDevice
-	Sessions  []ConsoleSession
+	User          ConsoleUser
+	Notes         string
+	BanReason     string
+	BannedAt      *time.Time
+	BanExpiresAt  *time.Time
+	Licenses      []ConsoleLicense
+	Devices       []ConsoleDevice
+	Sessions      []ConsoleSession
 }
 
 type ConsoleLicense struct {
