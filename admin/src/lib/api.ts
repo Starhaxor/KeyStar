@@ -17,6 +17,7 @@ import type {
   MfaEnrollment,
   Overview,
   PageResult,
+  RoleMember,
   SecurityEvent,
   UserDetail,
 } from "./types";
@@ -198,6 +199,33 @@ export const api = {
     return request<{ ok: boolean; items: AdminRole[]; total: number }>(
       "/v1/admin/roles"
     );
+  },
+  createRole(
+    name: string,
+    description: string,
+    permissions: string[]
+  ) {
+    return request<{ ok: boolean; role: AdminRole }>("/v1/admin/roles", {
+      method: "POST",
+      body: { name, description, permissions },
+    });
+  },
+  roleMembers(roleId: string) {
+    return request<{ ok: boolean; items: RoleMember[]; total: number }>(
+      `/v1/admin/roles/${roleId}/members`
+    );
+  },
+  updateRole(roleId: string, description: string, permissions: string[]) {
+    return request<{ ok: boolean }>(`/v1/admin/roles/${roleId}`, {
+      method: "PATCH",
+      body: { description, permissions },
+    });
+  },
+  deleteRole(roleId: string) {
+    return request<{ ok: boolean }>(`/v1/admin/roles/${roleId}`, {
+      method: "DELETE",
+      body: {},
+    });
   },
   securityEvents(page: number) {
     return request<{ ok: boolean } & PageResult<SecurityEvent>>(

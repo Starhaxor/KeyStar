@@ -26,6 +26,15 @@ export interface AdminRole {
   description: string;
   permissions: string[];
   built_in: boolean;
+  member_count: number;
+}
+
+export interface RoleMember {
+  id: string;
+  email: string;
+  status: string;
+  mfa_enrolled: boolean;
+  created_at: string;
 }
 
 export interface SecurityEvent {
