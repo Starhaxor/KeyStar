@@ -9,7 +9,8 @@ interface PromoteAdminModalProps {
   userEmail: string;
   onClose: () => void;
   // Returns the temporary password that was generated (displayed exactly once).
-  onPromote: (role: string) => Promise<{ tempPassword: string }>;
+  // An empty/undefined value surfaces an error instead of silently proceeding.
+  onPromote: (role: string) => Promise<{ tempPassword?: string }>;
 }
 
 const fieldClasses =
@@ -33,6 +34,12 @@ export default function PromoteAdminModal({
     setError(null);
     try {
       const response = await onPromote(role);
+      if (!response.tempPassword) {
+        setError(
+          "The backend did not return a temporary password, so the account may have been created without a usable credential. Reset its password from the Admins page, or redeploy the backend."
+        );
+        return;
+      }
       setTempPassword(response.tempPassword);
       setCopied(false);
     } catch (err) {

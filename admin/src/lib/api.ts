@@ -180,7 +180,7 @@ export const api = {
     return request<{
       ok: boolean;
       admin: AdminAccount;
-      temp_password: string;
+      temp_password?: string;
     }>(`/v1/admin/users/${userId}/promote`, {
       method: "POST",
       body: { role },
