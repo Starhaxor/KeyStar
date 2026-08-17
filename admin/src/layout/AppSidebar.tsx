@@ -65,6 +65,12 @@ const navItems: NavItem[] = [
     ],
   },
   {
+    icon: <ListIcon />,
+    name: "Variables",
+    path: "/variables",
+    permission: "admins.read",
+  },
+  {
     icon: <LockIcon />,
     name: "Security",
     path: "/security",

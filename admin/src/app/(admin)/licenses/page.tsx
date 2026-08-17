@@ -35,6 +35,8 @@ export default function LicensesPage() {
   const [extendTarget, setExtendTarget] = useState<ConsoleLicense | null>(null);
   const [extendDays, setExtendDays] = useState(30);
   const [extendMaxDevices, setExtendMaxDevices] = useState(0);
+  const [extendLevel, setExtendLevel] = useState(1);
+  const [extendNotes, setExtendNotes] = useState("");
   const [extendBusy, setExtendBusy] = useState(false);
   const [extendError, setExtendError] = useState<string | null>(null);
 
@@ -86,7 +88,13 @@ export default function LicensesPage() {
     setExtendBusy(true);
     setExtendError(null);
     try {
-      await api.updateLicense(extendTarget.id, extendDays, extendMaxDevices);
+      await api.updateLicense(
+        extendTarget.id,
+        extendDays,
+        extendMaxDevices,
+        extendLevel,
+        extendNotes
+      );
       setExtendTarget(null);
       await load();
     } catch (err) {
@@ -199,6 +207,7 @@ export default function LicensesPage() {
                   <th className="px-5 py-3 font-medium">User</th>
                   <th className="px-5 py-3 font-medium">Product</th>
                   <th className="px-5 py-3 font-medium">Status</th>
+                  <th className="px-5 py-3 font-medium">Level</th>
                   <th className="px-5 py-3 font-medium">Max Devices</th>
                   <th className="px-5 py-3 font-medium">Expires</th>
                   <th className="px-5 py-3 font-medium">Created</th>
@@ -216,6 +225,8 @@ export default function LicensesPage() {
                         setExtendError(null);
                         setExtendDays(30);
                         setExtendMaxDevices(license.max_devices);
+                        setExtendLevel(license.level ?? 1);
+                        setExtendNotes(license.notes ?? "");
                         setExtendTarget(license);
                       },
                     },
@@ -242,6 +253,14 @@ export default function LicensesPage() {
                       </td>
                       <td className="px-5 py-3.5">
                         <StatusBadge status={license.status} />
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <span
+                          title={"Level " + (license.level ?? 1)}
+                          className="inline-flex items-center justify-center rounded-md bg-brand-50 px-2 py-0.5 text-xs font-semibold text-brand-600 dark:bg-brand-500/10 dark:text-brand-400"
+                        >
+                          Lv {license.level ?? 1}
+                        </span>
                       </td>
                       <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
                         {license.max_devices}
@@ -321,6 +340,32 @@ export default function LicensesPage() {
                   max={10000}
                   value={extendMaxDevices}
                   onChange={(e) => setExtendMaxDevices(Number(e.target.value))}
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
+                  Level (1-100)
+                </label>
+                <input
+                  className={fieldClasses}
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={extendLevel}
+                  onChange={(e) => setExtendLevel(Number(e.target.value))}
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
+                  Notes
+                </label>
+                <input
+                  className={fieldClasses}
+                  type="text"
+                  maxLength={2000}
+                  value={extendNotes}
+                  onChange={(e) => setExtendNotes(e.target.value)}
+                  placeholder="Internal note"
                 />
               </div>
             </div>

@@ -52,7 +52,9 @@ type License struct {
 	UserID      string
 	Product     string
 	Status      LicenseStatus
+	Level       int
 	MaxDevices  int
+	Notes       string
 	ExpiresAt   time.Time
 	CreatedAt   time.Time
 	UpdatedAt   time.Time

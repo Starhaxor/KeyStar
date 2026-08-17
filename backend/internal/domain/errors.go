@@ -21,6 +21,8 @@ var (
 	ErrDeviceNotFound       = &NotFoundError{Entity: "device"}
 	ErrAuthSessionNotFound  = &NotFoundError{Entity: "auth session"}
 	ErrAdminAlreadyExists   = errors.New("admin account already exists")
+	ErrVariableNotFound     = &NotFoundError{Entity: "variable"}
+	ErrVariableAlreadyExists = errors.New("a variable with this key already exists")
 )
 
 // ChallengeConsumedError marks the single-use challenge conflict while

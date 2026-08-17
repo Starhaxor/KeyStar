@@ -69,9 +69,20 @@ export interface ConsoleLicense {
   user_email: string;
   product: string;
   status: string;
+  level: number;
   max_devices: number;
+  notes: string;
   expires_at: string;
   created_at: string;
+}
+
+export interface Variable {
+  id: string;
+  key: string;
+  value: string;
+  description: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ConsoleDevice {
@@ -139,6 +150,9 @@ export interface DailyStat {
 
 export interface UserDetail {
   user: ConsoleUser;
+  notes: string;
+  ban_reason: string;
+  banned_at: string;
   licenses: ConsoleLicense[];
   devices: ConsoleDevice[];
   sessions: ConsoleSession[];

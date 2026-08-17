@@ -10,7 +10,7 @@ import (
 	"github.com/starloader/backend/internal/domain"
 )
 
-const licenseColumns = `id::text, license_hmac, user_id::text, product, status, max_devices, expires_at, created_at, updated_at`
+const licenseColumns = `id::text, license_hmac, user_id::text, product, status, level, max_devices, notes, expires_at, created_at, updated_at`
 
 func (s *Store) CreateLicense(ctx context.Context, input domain.NewLicense) (*domain.License, error) {
 	row := s.db.QueryRow(ctx, `
@@ -61,7 +61,9 @@ func scanLicense(row pgx.Row) (*domain.License, error) {
 		&license.UserID,
 		&license.Product,
 		&license.Status,
+		&license.Level,
 		&license.MaxDevices,
+		&license.Notes,
 		&license.ExpiresAt,
 		&license.CreatedAt,
 		&license.UpdatedAt,

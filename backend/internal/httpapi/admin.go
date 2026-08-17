@@ -46,6 +46,10 @@ type AdminConsoleStore interface {
 	ListConsoleUsers(ctx context.Context, offset, limit int, search string) ([]domain.ConsoleUser, int64, error)
 	ConsoleUserDetail(ctx context.Context, userID string) (*domain.ConsoleUserDetail, error)
 	SetUserStatus(ctx context.Context, userID string, status domain.UserStatus) error
+	SetUserNotes(ctx context.Context, userID, notes string) error
+	BanUser(ctx context.Context, userID, reason string) error
+	UnbanUser(ctx context.Context, userID string) error
+	ResetUserDevices(ctx context.Context, userID string) (int64, error)
 	BulkSetUserStatus(ctx context.Context, userIDs []string, status domain.UserStatus) (int64, error)
 	BulkRevokeUserSessions(ctx context.Context, userIDs []string) (int64, error)
 	FindUserByEmail(ctx context.Context, email string) (*domain.User, error)
@@ -56,8 +60,12 @@ type AdminConsoleStore interface {
 	ListConsoleLicenses(ctx context.Context, offset, limit int) ([]domain.ConsoleLicense, int64, error)
 	CreateLicense(ctx context.Context, input domain.NewLicense) (*domain.License, error)
 	FindLicenseByID(ctx context.Context, licenseID string) (*domain.License, error)
-	AdminUpdateLicense(ctx context.Context, licenseID string, expiresAt time.Time, maxDevices int) error
+	AdminUpdateLicense(ctx context.Context, licenseID string, expiresAt time.Time, maxDevices, level int, notes string) error
 	AdminRevokeLicense(ctx context.Context, licenseID string) error
+	ListVariables(ctx context.Context) ([]domain.Variable, error)
+	CreateVariable(ctx context.Context, key, value, description string) (*domain.Variable, error)
+	UpdateVariable(ctx context.Context, variableID, value, description string) error
+	DeleteVariable(ctx context.Context, variableID string) error
 	ListConsoleDevices(ctx context.Context, offset, limit int) ([]domain.ConsoleDevice, int64, error)
 	FindConsoleDeviceByID(ctx context.Context, deviceID string) (*domain.ConsoleDeviceDetail, error)
 	AdminRevokeDevice(ctx context.Context, deviceID string) error
@@ -228,6 +236,8 @@ func (router *Router) routeAdmin(writer http.ResponseWriter, request *http.Reque
 			return
 		}
 		router.handleAdminSecurityEvents(writer, request)
+	case len(segments) >= 1 && segments[0] == "variables":
+		router.routeAdminVariables(writer, request, account, segments)
 	case len(segments) == 1 && segments[0] == "roles" && request.Method == http.MethodGet:
 		if !router.requirePermission(writer, request, account, domain.PermAdminsRead) {
 			return
@@ -389,6 +399,10 @@ func (router *Router) writeConsoleError(writer http.ResponseWriter, request *htt
 		writeError(writer, request, http.StatusForbidden, "BUILT_IN_ROLE", "built-in roles cannot be modified")
 	case errors.Is(err, domain.ErrRoleInUse):
 		writeError(writer, request, http.StatusConflict, "ROLE_IN_USE", "role is assigned to an admin account")
+	case errors.Is(err, domain.ErrVariableNotFound):
+		writeError(writer, request, http.StatusNotFound, "VARIABLE_NOT_FOUND", "variable not found")
+	case errors.Is(err, domain.ErrVariableAlreadyExists):
+		writeError(writer, request, http.StatusConflict, "VARIABLE_ALREADY_EXISTS", "a variable with this key already exists")
 	default:
 		writeError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
 	}

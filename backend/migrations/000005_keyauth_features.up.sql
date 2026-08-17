@@ -3,6 +3,9 @@ alter table users
     add column ban_reason text not null default '',
     add column banned_at timestamptz;
 
+alter table users drop constraint users_status_check;
+alter table users add constraint users_status_check check (status in ('active', 'disabled', 'banned'));
+
 alter table licenses
     add column level integer not null default 1,
     add column notes text not null default '';

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/starloader/backend/internal/domain"
 )
 
@@ -167,7 +168,6 @@ func (s *Store) ConsoleUserDetail(ctx context.Context, userID string) (*domain.C
 		}
 		return nil, fmt.Errorf("find console user: %w", err)
 	}
-	_ = detail
 	if detail.Licenses, err = s.listConsoleLicenses(ctx, "where l.user_id = $1", userID); err != nil {
 		return nil, err
 	}
@@ -248,9 +248,17 @@ func (s *Store) UnbanUser(ctx context.Context, userID string) error {
 // ResetUserDevices deletes every device record of a user, forcing the client
 // to re-register its hardware (KeyAuth-style HWID reset).
 func (s *Store) ResetUserDevices(ctx context.Context, userID string) (int64, error) {
-	tag, err := s.db.Exec(ctx, `delete from devices where user_id = $1::uuid`, userID)
+	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return 0, fmt.Errorf("begin user device reset: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	tag, err := tx.Exec(ctx, `delete from devices where user_id = $1::uuid`, userID)
 	if err != nil {
 		return 0, fmt.Errorf("reset user devices: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit user device reset: %w", err)
 	}
 	return tag.RowsAffected(), nil
 }
@@ -269,7 +277,7 @@ func (s *Store) ListConsoleLicenses(ctx context.Context, offset, limit int) ([]d
 
 func (s *Store) listConsoleLicenses(ctx context.Context, tail string, args ...any) ([]domain.ConsoleLicense, error) {
 	rows, err := s.db.Query(ctx, `
-		select l.id::text, l.user_id::text, u.email, l.product, l.status, l.max_devices, l.expires_at, l.created_at
+		select l.id::text, l.user_id::text, u.email, l.product, l.status, l.level, l.max_devices, l.notes, l.expires_at, l.created_at
 		from licenses l
 		join users u on u.id = l.user_id
 		`+tail, args...)
@@ -281,7 +289,7 @@ func (s *Store) listConsoleLicenses(ctx context.Context, tail string, args ...an
 	for rows.Next() {
 		var license domain.ConsoleLicense
 		if err := rows.Scan(&license.ID, &license.UserID, &license.UserEmail, &license.Product,
-			&license.Status, &license.MaxDevices, &license.ExpiresAt, &license.CreatedAt); err != nil {
+			&license.Status, &license.Level, &license.MaxDevices, &license.Notes, &license.ExpiresAt, &license.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan console license: %w", err)
 		}
 		licenses = append(licenses, license)
@@ -304,19 +312,91 @@ func (s *Store) FindLicenseByID(ctx context.Context, licenseID string) (*domain.
 	return license, nil
 }
 
-// AdminUpdateLicense extends expiry and adjusts the device limit. Revoked
-// licenses cannot be modified; a renewed license returns to active status.
-func (s *Store) AdminUpdateLicense(ctx context.Context, licenseID string, expiresAt time.Time, maxDevices int) error {
+// AdminUpdateLicense extends expiry, adjusts the device limit and updates the
+// KeyAuth-style level and notes. Revoked licenses cannot be modified; a
+// renewed license returns to active status.
+func (s *Store) AdminUpdateLicense(ctx context.Context, licenseID string, expiresAt time.Time, maxDevices, level int, notes string) error {
 	err := s.db.QueryRow(ctx, `
 		update licenses
-		set expires_at = $2, max_devices = $3, status = 'active', updated_at = now()
+		set expires_at = $2, max_devices = $3, level = $4, notes = $5, status = 'active', updated_at = now()
 		where id = $1::uuid and status <> 'revoked'
-		returning id`, licenseID, expiresAt, maxDevices).Scan(new(string))
+		returning id`, licenseID, expiresAt, maxDevices, level, notes).Scan(new(string))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ErrLicenseNotFound
 		}
 		return fmt.Errorf("update license: %w", err)
+	}
+	return nil
+}
+
+// --- Variables (KeyAuth-style key-value store) ---
+
+func (s *Store) ListVariables(ctx context.Context) ([]domain.Variable, error) {
+	rows, err := s.db.Query(ctx, `
+		select id::text, key, value, description, created_at, updated_at
+		from variables
+		order by key asc`)
+	if err != nil {
+		return nil, fmt.Errorf("list variables: %w", err)
+	}
+	defer rows.Close()
+	variables := make([]domain.Variable, 0)
+	for rows.Next() {
+		var variable domain.Variable
+		if err := rows.Scan(&variable.ID, &variable.Key, &variable.Value, &variable.Description, &variable.CreatedAt, &variable.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan variable: %w", err)
+		}
+		variables = append(variables, variable)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list variables: %w", err)
+	}
+	return variables, nil
+}
+
+func (s *Store) CreateVariable(ctx context.Context, key, value, description string) (*domain.Variable, error) {
+	row := s.db.QueryRow(ctx, `
+		insert into variables (key, value, description)
+		values ($1, $2, $3)
+		returning id::text, key, value, description, created_at, updated_at`,
+		key, value, description)
+	var variable domain.Variable
+	if err := row.Scan(&variable.ID, &variable.Key, &variable.Value, &variable.Description, &variable.CreatedAt, &variable.UpdatedAt); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return nil, domain.ErrVariableAlreadyExists
+		}
+		return nil, fmt.Errorf("create variable: %w", err)
+	}
+	return &variable, nil
+}
+
+func (s *Store) UpdateVariable(ctx context.Context, variableID, value, description string) error {
+	err := s.db.QueryRow(ctx, `
+		update variables
+		set value = $2, description = $3, updated_at = now()
+		where id = $1::uuid
+		returning id`, variableID, value, description).Scan(new(string))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.ErrVariableNotFound
+		}
+		return fmt.Errorf("update variable: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) DeleteVariable(ctx context.Context, variableID string) error {
+	err := s.db.QueryRow(ctx, `
+		delete from variables
+		where id = $1::uuid
+		returning id`, variableID).Scan(new(string))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.ErrVariableNotFound
+		}
+		return fmt.Errorf("delete variable: %w", err)
 	}
 	return nil
 }

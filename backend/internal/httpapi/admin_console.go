@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -72,6 +73,13 @@ func decodeAdminJSONBody(writer http.ResponseWriter, request *http.Request, targ
 		return err
 	}
 	return nil
+}
+
+func formatTimePtr(value *time.Time) string {
+	if value == nil {
+		return ""
+	}
+	return formatTime(*value)
 }
 
 func formatTime(value time.Time) string {
@@ -209,6 +217,26 @@ func (router *Router) routeAdminUsers(writer http.ResponseWriter, request *http.
 			return
 		}
 		router.handleAdminUserPromote(writer, request, account, segments[1])
+	case len(segments) == 3 && segments[2] == "ban" && request.Method == http.MethodPost:
+		if !router.requirePermission(writer, request, account, domain.PermUsersWrite) {
+			return
+		}
+		router.handleAdminUserBan(writer, request, account, segments[1])
+	case len(segments) == 3 && segments[2] == "unban" && request.Method == http.MethodPost:
+		if !router.requirePermission(writer, request, account, domain.PermUsersWrite) {
+			return
+		}
+		router.handleAdminUserUnban(writer, request, account, segments[1])
+	case len(segments) == 3 && segments[2] == "notes" && request.Method == http.MethodPatch:
+		if !router.requirePermission(writer, request, account, domain.PermUsersWrite) {
+			return
+		}
+		router.handleAdminUserNotes(writer, request, account, segments[1])
+	case len(segments) == 3 && segments[2] == "reset-devices" && request.Method == http.MethodPost:
+		if !router.requirePermission(writer, request, account, domain.PermUsersWrite) {
+			return
+		}
+		router.handleAdminUserResetDevices(writer, request, account, segments[1])
 	case len(segments) == 3 && segments[2] == "password" && request.Method == http.MethodPost:
 		if !router.requirePermission(writer, request, account, domain.PermUsersWrite) {
 			return
@@ -296,17 +324,23 @@ func (router *Router) handleAdminUserDetail(writer http.ResponseWriter, request 
 		return
 	}
 	writeJSON(writer, http.StatusOK, struct {
-		OK       bool                 `json:"ok"`
-		User     consoleUserJSON      `json:"user"`
-		Licenses []consoleLicenseJSON `json:"licenses"`
-		Devices  []consoleDeviceJSON  `json:"devices"`
-		Sessions []consoleSessionJSON `json:"sessions"`
+		OK        bool                 `json:"ok"`
+		User      consoleUserJSON      `json:"user"`
+		Notes     string               `json:"notes"`
+		BanReason string               `json:"ban_reason"`
+		BannedAt  string               `json:"banned_at"`
+		Licenses  []consoleLicenseJSON `json:"licenses"`
+		Devices   []consoleDeviceJSON  `json:"devices"`
+		Sessions  []consoleSessionJSON `json:"sessions"`
 	}{
-		OK:       true,
-		User:     mapConsoleUser(detail.User),
-		Licenses: mapConsoleLicenses(detail.Licenses),
-		Devices:  mapConsoleDevices(detail.Devices),
-		Sessions: mapConsoleSessions(detail.Sessions),
+		OK:        true,
+		User:      mapConsoleUser(detail.User),
+		Notes:     detail.Notes,
+		BanReason: detail.BanReason,
+		BannedAt:  formatTimePtr(detail.BannedAt),
+		Licenses:  mapConsoleLicenses(detail.Licenses),
+		Devices:   mapConsoleDevices(detail.Devices),
+		Sessions:  mapConsoleSessions(detail.Sessions),
 	})
 }
 
@@ -525,6 +559,98 @@ func generateTemporaryPassword() (string, error) {
 	return string(bytes), nil
 }
 
+// handleAdminUserBan bans a user with a required reason. Banned users are
+// rejected by the client login path (status is no longer active).
+func (router *Router) handleAdminUserBan(writer http.ResponseWriter, request *http.Request, account *domain.AdminAccount, userID string) {
+	if !uuidPattern.MatchString(userID) {
+		writeError(writer, request, http.StatusNotFound, "USER_NOT_FOUND", "user not found")
+		return
+	}
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	if err := decodeAdminJSONBody(writer, request, &body); err != nil {
+		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		return
+	}
+	reason := strings.TrimSpace(body.Reason)
+	if reason == "" || len(reason) > 500 {
+		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "a ban reason (max 500 chars) is required")
+		return
+	}
+	if err := router.admin.Console.BanUser(request.Context(), userID, reason); err != nil {
+		router.writeConsoleError(writer, request, err)
+		return
+	}
+	router.auditAdmin(request, account, "USER_BANNED", "user", userID, map[string]string{"reason": reason})
+	writeJSON(writer, http.StatusOK, struct {
+		OK bool `json:"ok"`
+	}{OK: true})
+}
+
+// handleAdminUserUnban clears a user's ban and restores active status.
+func (router *Router) handleAdminUserUnban(writer http.ResponseWriter, request *http.Request, account *domain.AdminAccount, userID string) {
+	if !uuidPattern.MatchString(userID) {
+		writeError(writer, request, http.StatusNotFound, "USER_NOT_FOUND", "user not found")
+		return
+	}
+	if err := router.admin.Console.UnbanUser(request.Context(), userID); err != nil {
+		router.writeConsoleError(writer, request, err)
+		return
+	}
+	router.auditAdmin(request, account, "USER_UNBANNED", "user", userID, nil)
+	writeJSON(writer, http.StatusOK, struct {
+		OK bool `json:"ok"`
+	}{OK: true})
+}
+
+// handleAdminUserNotes updates the free-form admin notes on a user.
+func (router *Router) handleAdminUserNotes(writer http.ResponseWriter, request *http.Request, account *domain.AdminAccount, userID string) {
+	if !uuidPattern.MatchString(userID) {
+		writeError(writer, request, http.StatusNotFound, "USER_NOT_FOUND", "user not found")
+		return
+	}
+	var body struct {
+		Notes string `json:"notes"`
+	}
+	if err := decodeAdminJSONBody(writer, request, &body); err != nil {
+		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		return
+	}
+	notes := strings.TrimSpace(body.Notes)
+	if len(notes) > 4000 {
+		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "notes must be at most 4000 characters")
+		return
+	}
+	if err := router.admin.Console.SetUserNotes(request.Context(), userID, notes); err != nil {
+		router.writeConsoleError(writer, request, err)
+		return
+	}
+	router.auditAdmin(request, account, "USER_NOTES_UPDATED", "user", userID, nil)
+	writeJSON(writer, http.StatusOK, struct {
+		OK    bool   `json:"ok"`
+		Notes string `json:"notes"`
+	}{OK: true, Notes: notes})
+}
+
+// handleAdminUserResetDevices deletes every device of a user (HWID reset).
+func (router *Router) handleAdminUserResetDevices(writer http.ResponseWriter, request *http.Request, account *domain.AdminAccount, userID string) {
+	if !uuidPattern.MatchString(userID) {
+		writeError(writer, request, http.StatusNotFound, "USER_NOT_FOUND", "user not found")
+		return
+	}
+	reset, err := router.admin.Console.ResetUserDevices(request.Context(), userID)
+	if err != nil {
+		router.writeConsoleError(writer, request, err)
+		return
+	}
+	router.auditAdmin(request, account, "USER_DEVICES_RESET", "user", userID, map[string]int64{"devices": reset})
+	writeJSON(writer, http.StatusOK, struct {
+		OK      bool  `json:"ok"`
+		Devices int64 `json:"devices"`
+	}{OK: true, Devices: reset})
+}
+
 // handleAdminUserSessionsRevoke expires every pending or verified auth
 // session of a single user.
 func (router *Router) handleAdminUserSessionsRevoke(writer http.ResponseWriter, request *http.Request, account *domain.AdminAccount, userID string) {
@@ -552,7 +678,9 @@ type consoleLicenseJSON struct {
 	UserEmail  string `json:"user_email"`
 	Product    string `json:"product"`
 	Status     string `json:"status"`
+	Level      int    `json:"level"`
 	MaxDevices int    `json:"max_devices"`
+	Notes      string `json:"notes"`
 	ExpiresAt  string `json:"expires_at"`
 	CreatedAt  string `json:"created_at"`
 }
@@ -566,7 +694,9 @@ func mapConsoleLicenses(licenses []domain.ConsoleLicense) []consoleLicenseJSON {
 			UserEmail:  license.UserEmail,
 			Product:    license.Product,
 			Status:     string(license.Status),
+			Level:      license.Level,
 			MaxDevices: license.MaxDevices,
+			Notes:      license.Notes,
 			ExpiresAt:  formatTime(license.ExpiresAt),
 			CreatedAt:  formatTime(license.CreatedAt),
 		})
@@ -668,19 +798,25 @@ func (router *Router) handleAdminLicenseUpdate(writer http.ResponseWriter, reque
 		return
 	}
 	var body struct {
-		ExtendDays int `json:"extend_days"`
-		MaxDevices int `json:"max_devices"`
+		ExtendDays int    `json:"extend_days"`
+		MaxDevices int    `json:"max_devices"`
+		Level      *int   `json:"level"`
+		Notes      string `json:"notes"`
 	}
 	if err := decodeAdminJSONBody(writer, request, &body); err != nil {
 		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
 		return
 	}
-	if body.ExtendDays == 0 && body.MaxDevices == 0 {
-		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "extend_days or max_devices is required")
+	if body.ExtendDays == 0 && body.MaxDevices == 0 && body.Level == nil && strings.TrimSpace(body.Notes) == "" {
+		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "extend_days, max_devices, level or notes is required")
 		return
 	}
 	if body.ExtendDays < 0 || body.ExtendDays > 3650 || body.MaxDevices < 0 || body.MaxDevices > 10000 {
 		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid extend_days or max_devices")
+		return
+	}
+	if len(body.Notes) > 2000 {
+		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "notes must be at most 2000 characters")
 		return
 	}
 	license, err := router.admin.Console.FindLicenseByID(request.Context(), licenseID)
@@ -700,12 +836,24 @@ func (router *Router) handleAdminLicenseUpdate(writer http.ResponseWriter, reque
 	if maxDevices == 0 {
 		maxDevices = license.MaxDevices
 	}
-	if err := router.admin.Console.AdminUpdateLicense(request.Context(), licenseID, expiresAt, maxDevices); err != nil {
+	level := license.Level
+	if body.Level != nil {
+		if *body.Level < 1 || *body.Level > 100 {
+			writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "level must be between 1 and 100")
+			return
+		}
+		level = *body.Level
+	}
+	notes := license.Notes
+	if strings.TrimSpace(body.Notes) != "" || body.Level != nil {
+		notes = strings.TrimSpace(body.Notes)
+	}
+	if err := router.admin.Console.AdminUpdateLicense(request.Context(), licenseID, expiresAt, maxDevices, level, notes); err != nil {
 		router.writeConsoleError(writer, request, err)
 		return
 	}
 	router.auditAdmin(request, account, "LICENSE_UPDATED", "license", licenseID, map[string]int{
-		"extend_days": body.ExtendDays, "max_devices": maxDevices,
+		"extend_days": body.ExtendDays, "max_devices": maxDevices, "level": level,
 	})
 	writeJSON(writer, http.StatusOK, struct {
 		OK bool `json:"ok"`
@@ -722,6 +870,147 @@ func (router *Router) handleAdminLicenseRevoke(writer http.ResponseWriter, reque
 		return
 	}
 	router.auditAdmin(request, account, "LICENSE_REVOKED", "license", licenseID, nil)
+	writeJSON(writer, http.StatusOK, struct {
+		OK bool `json:"ok"`
+	}{OK: true})
+}
+
+// --- Variables (KeyAuth-style key-value store) ---
+
+type variableJSON struct {
+	ID          string `json:"id"`
+	Key         string `json:"key"`
+	Value       string `json:"value"`
+	Description string `json:"description"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
+func mapVariable(variable domain.Variable) variableJSON {
+	return variableJSON{
+		ID:          variable.ID,
+		Key:         variable.Key,
+		Value:       variable.Value,
+		Description: variable.Description,
+		CreatedAt:   formatTime(variable.CreatedAt),
+		UpdatedAt:   formatTime(variable.UpdatedAt),
+	}
+}
+
+func (router *Router) routeAdminVariables(writer http.ResponseWriter, request *http.Request, account *domain.AdminAccount, segments []string) {
+	switch {
+	case len(segments) == 1 && request.Method == http.MethodGet:
+		if !router.requirePermission(writer, request, account, domain.PermAdminsRead) {
+			return
+		}
+		router.handleAdminVariablesList(writer, request)
+	case len(segments) == 1 && request.Method == http.MethodPost:
+		if !router.requirePermission(writer, request, account, domain.PermAdminsWrite) {
+			return
+		}
+		router.handleAdminVariableCreate(writer, request, account)
+	case len(segments) == 2 && request.Method == http.MethodPatch:
+		if !router.requirePermission(writer, request, account, domain.PermAdminsWrite) {
+			return
+		}
+		router.handleAdminVariableUpdate(writer, request, account, segments[1])
+	case len(segments) == 2 && request.Method == http.MethodDelete:
+		if !router.requirePermission(writer, request, account, domain.PermAdminsWrite) {
+			return
+		}
+		router.handleAdminVariableDelete(writer, request, account, segments[1])
+	default:
+		writeError(writer, request, http.StatusNotFound, "INVALID_REQUEST", "not found")
+	}
+}
+
+func (router *Router) handleAdminVariablesList(writer http.ResponseWriter, request *http.Request) {
+	variables, err := router.admin.Console.ListVariables(request.Context())
+	if err != nil {
+		router.writeConsoleError(writer, request, err)
+		return
+	}
+	items := make([]variableJSON, 0, len(variables))
+	for _, variable := range variables {
+		items = append(items, mapVariable(variable))
+	}
+	writeJSON(writer, http.StatusOK, struct {
+		OK    bool          `json:"ok"`
+		Items []variableJSON `json:"items"`
+		Total int           `json:"total"`
+	}{OK: true, Items: items, Total: len(items)})
+}
+
+var variableKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,63}$`)
+
+func (router *Router) handleAdminVariableCreate(writer http.ResponseWriter, request *http.Request, account *domain.AdminAccount) {
+	var body struct {
+		Key         string `json:"key"`
+		Value       string `json:"value"`
+		Description string `json:"description"`
+	}
+	if err := decodeAdminJSONBody(writer, request, &body); err != nil {
+		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		return
+	}
+	key := strings.ToLower(strings.TrimSpace(body.Key))
+	if !variableKeyPattern.MatchString(key) {
+		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "variable key must be lowercase letters, digits, dots, dashes or underscores (max 64)")
+		return
+	}
+	if len(body.Value) > 10000 || len(body.Description) > 500 {
+		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "value or description too long")
+		return
+	}
+	created, err := router.admin.Console.CreateVariable(request.Context(), key, body.Value, strings.TrimSpace(body.Description))
+	if err != nil {
+		router.writeConsoleError(writer, request, err)
+		return
+	}
+	router.auditAdmin(request, account, "VARIABLE_CREATED", "variable", created.ID, map[string]string{"key": key})
+	writeJSON(writer, http.StatusCreated, struct {
+		OK       bool         `json:"ok"`
+		Variable variableJSON `json:"variable"`
+	}{OK: true, Variable: mapVariable(*created)})
+}
+
+func (router *Router) handleAdminVariableUpdate(writer http.ResponseWriter, request *http.Request, account *domain.AdminAccount, variableID string) {
+	if !uuidPattern.MatchString(variableID) {
+		writeError(writer, request, http.StatusNotFound, "VARIABLE_NOT_FOUND", "variable not found")
+		return
+	}
+	var body struct {
+		Value       string `json:"value"`
+		Description string `json:"description"`
+	}
+	if err := decodeAdminJSONBody(writer, request, &body); err != nil {
+		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		return
+	}
+	if len(body.Value) > 10000 || len(body.Description) > 500 {
+		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "value or description too long")
+		return
+	}
+	if err := router.admin.Console.UpdateVariable(request.Context(), variableID, body.Value, strings.TrimSpace(body.Description)); err != nil {
+		router.writeConsoleError(writer, request, err)
+		return
+	}
+	router.auditAdmin(request, account, "VARIABLE_UPDATED", "variable", variableID, nil)
+	writeJSON(writer, http.StatusOK, struct {
+		OK bool `json:"ok"`
+	}{OK: true})
+}
+
+func (router *Router) handleAdminVariableDelete(writer http.ResponseWriter, request *http.Request, account *domain.AdminAccount, variableID string) {
+	if !uuidPattern.MatchString(variableID) {
+		writeError(writer, request, http.StatusNotFound, "VARIABLE_NOT_FOUND", "variable not found")
+		return
+	}
+	if err := router.admin.Console.DeleteVariable(request.Context(), variableID); err != nil {
+		router.writeConsoleError(writer, request, err)
+		return
+	}
+	router.auditAdmin(request, account, "VARIABLE_DELETED", "variable", variableID, nil)
 	writeJSON(writer, http.StatusOK, struct {
 		OK bool `json:"ok"`
 	}{OK: true})

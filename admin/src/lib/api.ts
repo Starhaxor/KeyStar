@@ -20,6 +20,7 @@ import type {
   RoleMember,
   SecurityEvent,
   UserDetail,
+  Variable,
 } from "./types";
 
 // Same-origin: requests go to this Next.js server and are proxied to the
@@ -287,6 +288,30 @@ export const api = {
       { method: "POST", body: {} }
     );
   },
+  banUser(userId: string, reason: string) {
+    return request<{ ok: boolean }>(`/v1/admin/users/${userId}/ban`, {
+      method: "POST",
+      body: { reason },
+    });
+  },
+  unbanUser(userId: string) {
+    return request<{ ok: boolean }>(`/v1/admin/users/${userId}/unban`, {
+      method: "POST",
+      body: {},
+    });
+  },
+  setUserNotes(userId: string, notes: string) {
+    return request<{ ok: boolean; notes: string }>(
+      `/v1/admin/users/${userId}/notes`,
+      { method: "PATCH", body: { notes } }
+    );
+  },
+  resetUserDevices(userId: string) {
+    return request<{ ok: boolean; devices: number }>(
+      `/v1/admin/users/${userId}/reset-devices`,
+      { method: "POST", body: {} }
+    );
+  },
   // Sets a new password for an end-user. When password is empty the backend
   // generates one and returns it as temp_password exactly once.
   resetUserPassword(userId: string, password?: string) {
@@ -310,10 +335,45 @@ export const api = {
       body: { user_email: userEmail, days, max_devices: maxDevices },
     });
   },
-  updateLicense(licenseId: string, extendDays: number, maxDevices: number) {
+  updateLicense(
+    licenseId: string,
+    extendDays: number,
+    maxDevices: number,
+    level?: number,
+    notes?: string
+  ) {
+    const body: Record<string, unknown> = {
+      extend_days: extendDays,
+      max_devices: maxDevices,
+    };
+    if (level !== undefined) body.level = level;
+    if (notes !== undefined) body.notes = notes;
     return request<{ ok: boolean }>(`/v1/admin/licenses/${licenseId}`, {
       method: "PATCH",
-      body: { extend_days: extendDays, max_devices: maxDevices },
+      body,
+    });
+  },
+  variables() {
+    return request<{ ok: boolean; items: Variable[]; total: number }>(
+      "/v1/admin/variables"
+    );
+  },
+  createVariable(key: string, value: string, description: string) {
+    return request<{ ok: boolean; variable: Variable }>(
+      "/v1/admin/variables",
+      { method: "POST", body: { key, value, description } }
+    );
+  },
+  updateVariable(variableId: string, value: string, description: string) {
+    return request<{ ok: boolean }>(`/v1/admin/variables/${variableId}`, {
+      method: "PATCH",
+      body: { value, description },
+    });
+  },
+  deleteVariable(variableId: string) {
+    return request<{ ok: boolean }>(`/v1/admin/variables/${variableId}`, {
+      method: "DELETE",
+      body: {},
     });
   },
   revokeLicense(licenseId: string) {

@@ -96,6 +96,24 @@ export default function UserDetailPage({
   // Promote to admin
   const [promoteOpen, setPromoteOpen] = useState(false);
 
+  // Notes
+  const [notesText, setNotesText] = useState("");
+  const [notesBusy, setNotesBusy] = useState(false);
+  const [notesError, setNotesError] = useState<string | null>(null);
+  const [notesNotice, setNotesNotice] = useState<string | null>(null);
+
+  // Ban / unban
+  const [banOpen, setBanOpen] = useState(false);
+  const [banReason, setBanReason] = useState("");
+  const [banBusy, setBanBusy] = useState(false);
+  const [banError, setBanError] = useState<string | null>(null);
+
+  // Reset all devices (HWID reset)
+  const [resetDevicesOpen, setResetDevicesOpen] = useState(false);
+  const [resetDevicesBusy, setResetDevicesBusy] = useState(false);
+  const [resetDevicesError, setResetDevicesError] = useState<string | null>(null);
+  const [resetDevicesNotice, setResetDevicesNotice] = useState<string | null>(null);
+
   const canWriteSessions = hasPermission("sessions.write");
   const canWriteLicenses = hasPermission("licenses.write");
   const canWriteDevices = hasPermission("devices.write");
@@ -107,6 +125,7 @@ export default function UserDetailPage({
       setError(null);
       const response = await api.userDetail(id);
       setDetail(response);
+      setNotesText(response.notes ?? "");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load user");
     }
@@ -130,6 +149,74 @@ export default function UserDetailPage({
       setActionError(err instanceof Error ? err.message : "Action failed");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleSaveNotes() {
+    if (!detail) return;
+    setNotesBusy(true);
+    setNotesError(null);
+    setNotesNotice(null);
+    try {
+      await api.setUserNotes(detail.user.id, notesText);
+      setNotesNotice("Notes saved");
+      toast.success("Notes saved", detail.user.email);
+    } catch (err) {
+      setNotesError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setNotesBusy(false);
+    }
+  }
+
+  async function handleBan() {
+    if (!detail) return;
+    setBanBusy(true);
+    setBanError(null);
+    try {
+      await api.banUser(detail.user.id, banReason.trim());
+      setBanOpen(false);
+      setBanReason("");
+      await load();
+      toast.success("User banned", detail.user.email);
+    } catch (err) {
+      setBanError(err instanceof Error ? err.message : "Ban failed");
+    } finally {
+      setBanBusy(false);
+    }
+  }
+
+  async function handleUnban() {
+    if (!detail) return;
+    setBusy(true);
+    setActionError(null);
+    try {
+      await api.unbanUser(detail.user.id);
+      await load();
+      toast.success("User unbanned", detail.user.email);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Action failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleResetDevices() {
+    if (!detail) return;
+    setResetDevicesBusy(true);
+    setResetDevicesError(null);
+    setResetDevicesNotice(null);
+    try {
+      const response = await api.resetUserDevices(detail.user.id);
+      setResetDevicesOpen(false);
+      setResetDevicesNotice(
+        `${response.devices} device${response.devices === 1 ? "" : "s"} reset — hardware will re-register on next launch.`
+      );
+      await load();
+      toast.success("Devices reset", detail.user.email);
+    } catch (err) {
+      setResetDevicesError(err instanceof Error ? err.message : "Reset failed");
+    } finally {
+      setResetDevicesBusy(false);
     }
   }
 
@@ -318,16 +405,46 @@ export default function UserDetailPage({
                 Reset password
               </Button>
             )}
-            <Button
-              variant={nextStatus === "disabled" ? "danger" : "success"}
-              size="sm"
-              onClick={() => {
-                setActionError(null);
-                setConfirmOpen(true);
-              }}
-            >
-              {nextStatus === "disabled" ? "Disable user" : "Enable user"}
-            </Button>
+            {canWriteDevices && devices.length > 0 && (
+              <Button
+                variant="warning"
+                size="sm"
+                onClick={() => {
+                  setResetDevicesError(null);
+                  setResetDevicesOpen(true);
+                }}
+              >
+                Reset devices
+              </Button>
+            )}
+            {user.status === "banned" ? (
+              <Button variant="success" size="sm" onClick={handleUnban} disabled={busy}>
+                Unban user
+              </Button>
+            ) : (
+              <>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={() => {
+                    setBanError(null);
+                    setBanOpen(true);
+                  }}
+                >
+                  Ban user
+                </Button>
+                <Button
+                  variant={nextStatus === "disabled" ? "danger" : "success"}
+                  size="sm"
+                  onClick={() => {
+                    setActionError(null);
+                    setConfirmOpen(true);
+                  }}
+                >
+                  {nextStatus === "disabled" ? "Disable user" : "Enable user"}
+                </Button>
+              </>
+            )}
           </>
         }
       />
@@ -335,6 +452,20 @@ export default function UserDetailPage({
       {revokedNotice && (
         <div className="rounded-xl border border-success-200 bg-success-50 px-4 py-3 text-sm text-success-700 dark:border-success-500/30 dark:bg-success-500/10 dark:text-success-400">
           {revokedNotice}
+        </div>
+      )}
+      {resetDevicesNotice && (
+        <div className="rounded-xl border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-400">
+          {resetDevicesNotice}
+        </div>
+      )}
+      {user.status === "banned" && (
+        <div className="rounded-xl border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-400">
+          <span className="font-semibold">Banned</span>
+          {detail.banned_at && ` · ${formatDateTime(detail.banned_at)}`}
+          {detail.ban_reason && (
+            <span className="mt-1 block">Reason: {detail.ban_reason}</span>
+          )}
         </div>
       )}
 
@@ -431,6 +562,42 @@ export default function UserDetailPage({
               </span>
             </div>
           </div>
+
+          <ConsoleSection
+            title="Notes"
+            description="KeyAuth-style notes visible only to administrators."
+            actions={
+              canWriteUsers ? (
+                <Button
+                  size="sm"
+                  disabled={notesBusy}
+                  onClick={handleSaveNotes}
+                >
+                  {notesBusy ? "Saving..." : "Save notes"}
+                </Button>
+              ) : undefined
+            }
+          >
+            <div className="px-5 py-4">
+              <textarea
+                value={notesText}
+                onChange={(e) => setNotesText(e.target.value)}
+                maxLength={4000}
+                rows={4}
+                placeholder="Internal notes about this user (license history, support context, warnings)..."
+                disabled={!canWriteUsers}
+                className="w-full resize-y rounded-lg border border-gray-300 bg-transparent px-4 py-3 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+              />
+              {notesNotice && (
+                <p className="mt-2 text-sm text-success-600 dark:text-success-400">
+                  {notesNotice}
+                </p>
+              )}
+              {notesError && (
+                <p className="mt-2 text-sm text-error-500">{notesError}</p>
+              )}
+            </div>
+          </ConsoleSection>
         </>
       )}
 
@@ -820,6 +987,69 @@ export default function UserDetailPage({
         error={sessionRevokeError}
         onConfirm={handleSessionRevoke}
         onClose={() => setSessionRevokeTarget(null)}
+      />
+
+      {/* Ban user */}
+      <Modal
+        isOpen={banOpen}
+        onClose={() => !banBusy && setBanOpen(false)}
+        className="max-w-md p-6"
+      >
+        <div className="space-y-5">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-800 dark:text-white/90">
+              Ban user
+            </h3>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              Banned users cannot sign in until unbanned. The reason is recorded
+              and shown on this profile.
+            </p>
+          </div>
+          <div>
+            <Label>Reason *</Label>
+            <textarea
+              value={banReason}
+              onChange={(e) => setBanReason(e.target.value)}
+              rows={3}
+              maxLength={500}
+              placeholder="e.g. license abuse, chargeback, shared account..."
+              className="w-full resize-y rounded-lg border border-gray-300 bg-transparent px-4 py-3 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+            />
+          </div>
+          {banError && (
+            <p className="text-sm text-error-500" role="alert">
+              {banError}
+            </p>
+          )}
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 dark:border-gray-700 dark:text-gray-300"
+              onClick={() => setBanOpen(false)}
+            >
+              Cancel
+            </button>
+            <Button
+              size="sm"
+              disabled={banBusy || banReason.trim() === ""}
+              onClick={handleBan}
+            >
+              {banBusy ? "Banning..." : "Ban user"}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Reset all devices (HWID reset) */}
+      <ConfirmModal
+        isOpen={resetDevicesOpen}
+        title="Reset all devices"
+        message={`Delete every registered device of ${user.email}? All their hardware will need to re-register on the next launch. This is a full HWID reset.`}
+        confirmLabel="Reset devices"
+        busy={resetDevicesBusy}
+        error={resetDevicesError}
+        onConfirm={handleResetDevices}
+        onClose={() => setResetDevicesOpen(false)}
       />
     </div>
   );
