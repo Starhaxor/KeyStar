@@ -95,6 +95,9 @@ function matches(pathname: string, section: Section): boolean {
   );
 }
 
+// Horizontal sub-navigation bar rendered directly under the header.
+// Query-parameter shortcuts (?create=1) are actions and are never
+// highlighted as the current location.
 export default function SubSidebar() {
   const pathname = usePathname();
   const section = sections.find((s) => matches(pathname, s));
@@ -102,38 +105,28 @@ export default function SubSidebar() {
   if (!section) return null;
 
   return (
-    <aside className="hidden w-52 shrink-0 border-r border-gray-200 px-3 py-6 lg:block dark:border-gray-800">
-      <div className="sticky top-20">
-        <h2 className="mb-3 px-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
-          {section.title}
-        </h2>
-        <nav className="flex flex-col gap-1">
-          {section.items.map((item) => {
-            // An item is active only when it is the canonical page itself.
-            // Query-parameter shortcuts (e.g. ?create=1) are actions, never
-            // highlighted as the current location.
-            const hasQuery = item.href.includes("?");
-            const base = item.href.split("?")[0];
-            const active = !hasQuery && pathname === base;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                  active
-                    ? "bg-brand-50 text-brand-600 dark:bg-brand-500/10 dark:text-brand-400"
-                    : "text-gray-600 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-200"
-                }`}
-              >
-                {item.label}
-              </Link>
-            );
-          })}
-        </nav>
-        <p className="mt-8 px-3 text-xs leading-relaxed text-gray-400 dark:text-gray-500">
-          KeyStar licensing console — StarLoader backend.
-        </p>
-      </div>
-    </aside>
+    <div className="flex items-center gap-1 overflow-x-auto border-b border-gray-200 bg-white px-4 py-2 no-scrollbar dark:border-gray-800 dark:bg-gray-900">
+      <span className="mr-2 hidden shrink-0 text-xs font-semibold uppercase tracking-wide text-gray-400 sm:block">
+        {section.title}
+      </span>
+      {section.items.map((item) => {
+        const hasQuery = item.href.includes("?");
+        const base = item.href.split("?")[0];
+        const active = !hasQuery && pathname === base;
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+              active
+                ? "bg-brand-50 text-brand-600 dark:bg-brand-500/10 dark:text-brand-400"
+                : "text-gray-600 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-200"
+            }`}
+          >
+            {item.label}
+          </Link>
+        );
+      })}
+    </div>
   );
 }
