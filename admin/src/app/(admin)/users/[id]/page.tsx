@@ -7,13 +7,29 @@ import ConsoleSection, {
 } from "@/components/console/ConsoleSection";
 import ConfirmModal from "@/components/console/ConfirmModal";
 import LicenseCreateModal from "@/components/console/LicenseCreateModal";
+import RowActions, { type RowAction } from "@/components/console/RowActions";
 import StatusBadge from "@/components/console/StatusBadge";
 import Button from "@/components/ui/button/Button";
+import { Modal } from "@/components/ui/modal";
+import Label from "@/components/form/Label";
 import { useAdminIdentity } from "@/context/AdminIdentityContext";
+import { useToast } from "@/context/ToastContext";
 import { api, formatDateTime } from "@/lib/api";
 import type { UserDetail } from "@/lib/types";
 import Link from "next/link";
 import React, { useCallback, useEffect, useState, use } from "react";
+
+const fieldClasses =
+  "h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90";
+
+type Tab = "profile" | "licenses" | "devices" | "sessions";
+
+const tabs: { id: Tab; label: string }[] = [
+  { id: "profile", label: "Profile" },
+  { id: "licenses", label: "Licenses" },
+  { id: "devices", label: "Devices" },
+  { id: "sessions", label: "Sessions" },
+];
 
 export default function UserDetailPage({
   params,
@@ -22,21 +38,67 @@ export default function UserDetailPage({
 }) {
   const { id } = use(params);
   const { hasPermission } = useAdminIdentity();
+  const toast = useToast();
   const [detail, setDetail] = useState<UserDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>("profile");
+
+  // Account status
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  // Revoke all sessions (header action)
   const [revokeOpen, setRevokeOpen] = useState(false);
   const [revokeBusy, setRevokeBusy] = useState(false);
   const [revokeError, setRevokeError] = useState<string | null>(null);
   const [revokedNotice, setRevokedNotice] = useState<string | null>(null);
 
+  // License actions
   const [licenseOpen, setLicenseOpen] = useState(false);
+  const [extendTarget, setExtendTarget] = useState<
+    UserDetail["licenses"][number] | null
+  >(null);
+  const [extendDays, setExtendDays] = useState(30);
+  const [extendMaxDevices, setExtendMaxDevices] = useState(0);
+  const [extendBusy, setExtendBusy] = useState(false);
+  const [extendError, setExtendError] = useState<string | null>(null);
+  const [licenseRevokeTarget, setLicenseRevokeTarget] = useState<
+    UserDetail["licenses"][number] | null
+  >(null);
+  const [licenseRevokeBusy, setLicenseRevokeBusy] = useState(false);
+  const [licenseRevokeError, setLicenseRevokeError] = useState<string | null>(null);
+
+  // Device actions
+  const [deviceResetTarget, setDeviceResetTarget] = useState<
+    UserDetail["devices"][number] | null
+  >(null);
+  const [deviceResetBusy, setDeviceResetBusy] = useState(false);
+  const [deviceResetError, setDeviceResetError] = useState<string | null>(null);
+  const [deviceRevokeTarget, setDeviceRevokeTarget] = useState<
+    UserDetail["devices"][number] | null
+  >(null);
+  const [deviceRevokeBusy, setDeviceRevokeBusy] = useState(false);
+  const [deviceRevokeError, setDeviceRevokeError] = useState<string | null>(null);
+
+  // Session action
+  const [sessionRevokeTarget, setSessionRevokeTarget] = useState<
+    UserDetail["sessions"][number] | null
+  >(null);
+  const [sessionRevokeBusy, setSessionRevokeBusy] = useState(false);
+  const [sessionRevokeError, setSessionRevokeError] = useState<string | null>(null);
+
+  // Promote to admin
+  const [promoteOpen, setPromoteOpen] = useState(false);
+  const [promotePassword, setPromotePassword] = useState("");
+  const [promoteRole, setPromoteRole] = useState("viewer");
+  const [promoteBusy, setPromoteBusy] = useState(false);
+  const [promoteError, setPromoteError] = useState<string | null>(null);
 
   const canWriteSessions = hasPermission("sessions.write");
   const canWriteLicenses = hasPermission("licenses.write");
+  const canWriteDevices = hasPermission("devices.write");
+  const canWriteAdmins = hasPermission("admins.write");
 
   const load = useCallback(async () => {
     try {
@@ -61,6 +123,7 @@ export default function UserDetailPage({
       await api.setUserStatus(detail.user.id, nextStatus);
       setConfirmOpen(false);
       await load();
+      toast.success(nextStatus === "disabled" ? "User disabled" : "User enabled", detail.user.email);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Action failed");
     } finally {
@@ -81,10 +144,108 @@ export default function UserDetailPage({
           : `${response.revoked} session(s) revoked.`
       );
       await load();
+      toast.success("Sessions revoked", detail.user.email);
     } catch (err) {
       setRevokeError(err instanceof Error ? err.message : "Revoke failed");
     } finally {
       setRevokeBusy(false);
+    }
+  }
+
+  async function handleExtend(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!extendTarget) return;
+    setExtendBusy(true);
+    setExtendError(null);
+    try {
+      await api.updateLicense(extendTarget.id, extendDays, extendMaxDevices);
+      setExtendTarget(null);
+      await load();
+      toast.success("License extended", extendTarget.user_email);
+    } catch (err) {
+      setExtendError(err instanceof Error ? err.message : "Update failed");
+    } finally {
+      setExtendBusy(false);
+    }
+  }
+
+  async function handleLicenseRevoke() {
+    if (!licenseRevokeTarget) return;
+    setLicenseRevokeBusy(true);
+    setLicenseRevokeError(null);
+    try {
+      await api.revokeLicense(licenseRevokeTarget.id);
+      setLicenseRevokeTarget(null);
+      await load();
+      toast.success("License revoked", licenseRevokeTarget.user_email);
+    } catch (err) {
+      setLicenseRevokeError(err instanceof Error ? err.message : "Revoke failed");
+    } finally {
+      setLicenseRevokeBusy(false);
+    }
+  }
+
+  async function handleDeviceReset() {
+    if (!deviceResetTarget) return;
+    setDeviceResetBusy(true);
+    setDeviceResetError(null);
+    try {
+      await api.resetDevice(deviceResetTarget.id);
+      setDeviceResetTarget(null);
+      await load();
+      toast.success("Device reset", deviceResetTarget.user_email);
+    } catch (err) {
+      setDeviceResetError(err instanceof Error ? err.message : "Reset failed");
+    } finally {
+      setDeviceResetBusy(false);
+    }
+  }
+
+  async function handleDeviceRevoke() {
+    if (!deviceRevokeTarget) return;
+    setDeviceRevokeBusy(true);
+    setDeviceRevokeError(null);
+    try {
+      await api.revokeDevice(deviceRevokeTarget.id);
+      setDeviceRevokeTarget(null);
+      await load();
+      toast.success("Device revoked", deviceRevokeTarget.user_email);
+    } catch (err) {
+      setDeviceRevokeError(err instanceof Error ? err.message : "Revoke failed");
+    } finally {
+      setDeviceRevokeBusy(false);
+    }
+  }
+
+  async function handleSessionRevoke() {
+    if (!sessionRevokeTarget) return;
+    setSessionRevokeBusy(true);
+    setSessionRevokeError(null);
+    try {
+      await api.revokeSession(sessionRevokeTarget.id);
+      setSessionRevokeTarget(null);
+      await load();
+      toast.success("Session revoked", sessionRevokeTarget.user_email);
+    } catch (err) {
+      setSessionRevokeError(err instanceof Error ? err.message : "Revoke failed");
+    } finally {
+      setSessionRevokeBusy(false);
+    }
+  }
+
+  async function handlePromote(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!detail) return;
+    setPromoteBusy(true);
+    setPromoteError(null);
+    try {
+      await api.createAdmin(detail.user.email, promotePassword, promoteRole);
+      setPromoteOpen(false);
+      toast.success("Admin account created", detail.user.email);
+    } catch (err) {
+      setPromoteError(err instanceof Error ? err.message : "Create failed");
+    } finally {
+      setPromoteBusy(false);
     }
   }
 
@@ -124,9 +285,23 @@ export default function UserDetailPage({
                 Back to users
               </Button>
             </Link>
+            {canWriteAdmins && (
+              <Button
+                variant="info"
+                size="sm"
+                onClick={() => {
+                  setPromotePassword("");
+                  setPromoteRole("viewer");
+                  setPromoteError(null);
+                  setPromoteOpen(true);
+                }}
+              >
+                Promote to admin
+              </Button>
+            )}
             {canWriteLicenses && (
               <Button
-                variant="outline"
+                variant="success"
                 size="sm"
                 onClick={() => setLicenseOpen(true)}
               >
@@ -135,7 +310,7 @@ export default function UserDetailPage({
             )}
             {canWriteSessions && (
               <Button
-                variant="outline"
+                variant="warning"
                 size="sm"
                 onClick={() => {
                   setRevokeError(null);
@@ -146,6 +321,7 @@ export default function UserDetailPage({
               </Button>
             )}
             <Button
+              variant={nextStatus === "disabled" ? "danger" : "success"}
               size="sm"
               onClick={() => {
                 setActionError(null);
@@ -164,141 +340,449 @@ export default function UserDetailPage({
         </div>
       )}
 
-      <ConsoleSection title="Profile">
-        <div className="grid grid-cols-1 gap-4 px-5 py-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div>
-            <span className="block text-xs uppercase text-gray-400">Status</span>
-            <span className="mt-1 block">
-              <StatusBadge status={user.status} />
-            </span>
-          </div>
-          <div>
-            <span className="block text-xs uppercase text-gray-400">Created</span>
-            <span className="mt-1 block text-sm text-gray-700 dark:text-gray-300">
-              {formatDateTime(user.created_at)}
-            </span>
-          </div>
-          <div>
-            <span className="block text-xs uppercase text-gray-400">Last login</span>
-            <span className="mt-1 block text-sm text-gray-700 dark:text-gray-300">
-              {formatDateTime(user.last_login_at)}
-            </span>
-          </div>
-          <div>
-            <span className="block text-xs uppercase text-gray-400">
-              Active sessions
-            </span>
-            <span className="mt-1 block text-sm text-gray-700 dark:text-gray-300">
-              {user.active_session_count}
-            </span>
-          </div>
-        </div>
-      </ConsoleSection>
+      {/* Horizontal tab bar */}
+      <div className="flex items-center gap-1 overflow-x-auto border-b border-gray-200 no-scrollbar dark:border-gray-800">
+        {tabs.map((item) => {
+          const count =
+            item.id === "licenses"
+              ? licenses.length
+              : item.id === "devices"
+                ? devices.length
+                : item.id === "sessions"
+                  ? sessions.length
+                  : null;
+          const active = tab === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setTab(item.id)}
+              className={`shrink-0 whitespace-nowrap rounded-t-lg border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+                active
+                  ? "border-brand-500 text-brand-600 dark:border-brand-400 dark:text-brand-400"
+                  : "border-transparent text-gray-600 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-200"
+              }`}
+            >
+              {item.label}
+              {count !== null && (
+                <span
+                  className={`ml-2 rounded-full px-2 py-0.5 text-xs ${
+                    active
+                      ? "bg-brand-50 text-brand-600 dark:bg-brand-500/10 dark:text-brand-400"
+                      : "bg-gray-100 text-gray-500 dark:bg-white/[0.05] dark:text-gray-400"
+                  }`}
+                >
+                  {count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
 
-      <ConsoleSection title="Licenses" description={`${licenses.length} license(s)`}>
-        {licenses.length === 0 ? (
-          <EmptyNote message="No licenses for this user." />
-        ) : (
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-gray-200 dark:border-gray-800">
-              <tr className="text-xs uppercase text-gray-400">
-                <th className="px-5 py-3 font-medium">Product</th>
-                <th className="px-5 py-3 font-medium">Status</th>
-                <th className="px-5 py-3 font-medium">Max Devices</th>
-                <th className="px-5 py-3 font-medium">Expires</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-              {licenses.map((license) => (
-                <tr key={license.id}>
-                  <td className="px-5 py-3.5 text-gray-700 dark:text-gray-300">
-                    {license.product}
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <StatusBadge status={license.status} />
-                  </td>
-                  <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
-                    {license.max_devices}
-                  </td>
-                  <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
-                    {formatDateTime(license.expires_at)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </ConsoleSection>
+      {tab === "profile" && (
+        <>
+          <ConsoleSection title="Profile">
+            <div className="grid grid-cols-1 gap-4 px-5 py-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <span className="block text-xs uppercase text-gray-400">Status</span>
+                <span className="mt-1 block">
+                  <StatusBadge status={user.status} />
+                </span>
+              </div>
+              <div>
+                <span className="block text-xs uppercase text-gray-400">Created</span>
+                <span className="mt-1 block text-sm text-gray-700 dark:text-gray-300">
+                  {formatDateTime(user.created_at)}
+                </span>
+              </div>
+              <div>
+                <span className="block text-xs uppercase text-gray-400">Last login</span>
+                <span className="mt-1 block text-sm text-gray-700 dark:text-gray-300">
+                  {formatDateTime(user.last_login_at)}
+                </span>
+              </div>
+              <div>
+                <span className="block text-xs uppercase text-gray-400">
+                  Active sessions
+                </span>
+                <span className="mt-1 block text-sm text-gray-700 dark:text-gray-300">
+                  {user.active_session_count}
+                </span>
+              </div>
+            </div>
+          </ConsoleSection>
 
-      <ConsoleSection title="Devices" description={`${devices.length} device(s)`}>
-        {devices.length === 0 ? (
-          <EmptyNote message="No devices registered." />
-        ) : (
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-gray-200 dark:border-gray-800">
-              <tr className="text-xs uppercase text-gray-400">
-                <th className="px-5 py-3 font-medium">Device</th>
-                <th className="px-5 py-3 font-medium">TPM</th>
-                <th className="px-5 py-3 font-medium">Status</th>
-                <th className="px-5 py-3 font-medium">Last Seen</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-              {devices.map((device) => (
-                <tr key={device.id}>
-                  <td className="px-5 py-3.5 font-mono text-xs text-gray-700 dark:text-gray-300">
-                    {device.id.slice(0, 13)}…
-                  </td>
-                  <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
-                    {device.tpm_registered ? "Yes" : "No"}
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <StatusBadge status={device.status} />
-                  </td>
-                  <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
-                    {formatDateTime(device.last_seen_at)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </ConsoleSection>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
+              <span className="block text-sm text-gray-500 dark:text-gray-400">Licenses</span>
+              <span className="mt-1 block text-2xl font-semibold text-gray-800 dark:text-white/90">
+                {licenses.length}
+              </span>
+            </div>
+            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
+              <span className="block text-sm text-gray-500 dark:text-gray-400">Devices</span>
+              <span className="mt-1 block text-2xl font-semibold text-gray-800 dark:text-white/90">
+                {devices.length}
+              </span>
+            </div>
+            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
+              <span className="block text-sm text-gray-500 dark:text-gray-400">Sessions</span>
+              <span className="mt-1 block text-2xl font-semibold text-gray-800 dark:text-white/90">
+                {sessions.length}
+              </span>
+            </div>
+          </div>
+        </>
+      )}
 
-      <ConsoleSection title="Sessions" description={`${sessions.length} session(s)`}>
-        {sessions.length === 0 ? (
-          <EmptyNote message="No auth sessions." />
-        ) : (
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-gray-200 dark:border-gray-800">
-              <tr className="text-xs uppercase text-gray-400">
-                <th className="px-5 py-3 font-medium">Session</th>
-                <th className="px-5 py-3 font-medium">Status</th>
-                <th className="px-5 py-3 font-medium">Expires</th>
-                <th className="px-5 py-3 font-medium">Created</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-              {sessions.map((session) => (
-                <tr key={session.id}>
-                  <td className="px-5 py-3.5 font-mono text-xs text-gray-700 dark:text-gray-300">
-                    {session.id.slice(0, 13)}…
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <StatusBadge status={session.status} />
-                  </td>
-                  <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
-                    {formatDateTime(session.expires_at)}
-                  </td>
-                  <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
-                    {formatDateTime(session.created_at)}
-                  </td>
+      {tab === "licenses" && (
+        <ConsoleSection
+          title="Licenses"
+          description={`${licenses.length} license(s)`}
+          actions={
+            canWriteLicenses ? (
+              <Button size="sm" onClick={() => setLicenseOpen(true)}>
+                Add license
+              </Button>
+            ) : undefined
+          }
+        >
+          {licenses.length === 0 ? (
+            <EmptyNote message="No licenses for this user." />
+          ) : (
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-gray-200 dark:border-gray-800">
+                <tr className="text-xs uppercase text-gray-400">
+                  <th className="px-5 py-3 font-medium">Product</th>
+                  <th className="px-5 py-3 font-medium">Status</th>
+                  <th className="px-5 py-3 font-medium">Max Devices</th>
+                  <th className="px-5 py-3 font-medium">Expires</th>
+                  <th className="px-5 py-3 font-medium text-right">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                {licenses.map((license) => {
+                  const actions: RowAction[] = [
+                    {
+                      label: "Extend",
+                      tone: "warning",
+                      disabled: license.status === "revoked",
+                      onClick: () => {
+                        setExtendError(null);
+                        setExtendDays(30);
+                        setExtendMaxDevices(license.max_devices);
+                        setExtendTarget(license);
+                      },
+                    },
+                    {
+                      label: "Revoke",
+                      tone: "danger",
+                      disabled: license.status === "revoked",
+                      onClick: () => {
+                        setLicenseRevokeError(null);
+                        setLicenseRevokeTarget(license);
+                      },
+                    },
+                  ];
+                  return (
+                    <tr
+                      key={license.id}
+                      className="hover:bg-gray-50 dark:hover:bg-white/[0.02]"
+                    >
+                      <td className="px-5 py-3.5 text-gray-700 dark:text-gray-300">
+                        {license.product}
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <StatusBadge status={license.status} />
+                      </td>
+                      <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
+                        {license.max_devices}
+                      </td>
+                      <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
+                        {formatDateTime(license.expires_at)}
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex justify-end">
+                          <RowActions actions={actions} />
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </ConsoleSection>
+      )}
+
+      {tab === "devices" && (
+        <ConsoleSection title="Devices" description={`${devices.length} device(s)`}>
+          {devices.length === 0 ? (
+            <EmptyNote message="No devices registered." />
+          ) : (
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-gray-200 dark:border-gray-800">
+                <tr className="text-xs uppercase text-gray-400">
+                  <th className="px-5 py-3 font-medium">Device</th>
+                  <th className="px-5 py-3 font-medium">TPM</th>
+                  <th className="px-5 py-3 font-medium">Status</th>
+                  <th className="px-5 py-3 font-medium">Last Seen</th>
+                  <th className="px-5 py-3 font-medium text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                {devices.map((device) => {
+                  const actions: RowAction[] = [];
+                  if (canWriteDevices) {
+                    actions.push({
+                      label: "Reset",
+                      tone: "warning",
+                      onClick: () => {
+                        setDeviceResetError(null);
+                        setDeviceResetTarget(device);
+                      },
+                    });
+                  }
+                  actions.push({
+                    label: "Revoke",
+                    tone: "danger",
+                    disabled: device.status === "revoked",
+                    onClick: () => {
+                      setDeviceRevokeError(null);
+                      setDeviceRevokeTarget(device);
+                    },
+                  });
+                  return (
+                    <tr
+                      key={device.id}
+                      className="hover:bg-gray-50 dark:hover:bg-white/[0.02]"
+                    >
+                      <td className="px-5 py-3.5 font-mono text-xs text-gray-700 dark:text-gray-300">
+                        {device.id.slice(0, 13)}…
+                      </td>
+                      <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
+                        {device.tpm_registered ? "Yes" : "No"}
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <StatusBadge status={device.status} />
+                      </td>
+                      <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
+                        {formatDateTime(device.last_seen_at)}
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex justify-end">
+                          <RowActions actions={actions} />
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </ConsoleSection>
+      )}
+
+      {tab === "sessions" && (
+        <ConsoleSection title="Sessions" description={`${sessions.length} session(s)`}>
+          {sessions.length === 0 ? (
+            <EmptyNote message="No auth sessions." />
+          ) : (
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-gray-200 dark:border-gray-800">
+                <tr className="text-xs uppercase text-gray-400">
+                  <th className="px-5 py-3 font-medium">Session</th>
+                  <th className="px-5 py-3 font-medium">Status</th>
+                  <th className="px-5 py-3 font-medium">Expires</th>
+                  <th className="px-5 py-3 font-medium">Created</th>
+                  <th className="px-5 py-3 font-medium text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                {sessions.map((session) => {
+                  const actions: RowAction[] = [
+                    {
+                      label: "Revoke",
+                      tone: "danger",
+                      disabled: session.status === "revoked",
+                      onClick: () => {
+                        setSessionRevokeError(null);
+                        setSessionRevokeTarget(session);
+                      },
+                    },
+                  ];
+                  return (
+                    <tr
+                      key={session.id}
+                      className="hover:bg-gray-50 dark:hover:bg-white/[0.02]"
+                    >
+                      <td className="px-5 py-3.5 font-mono text-xs text-gray-700 dark:text-gray-300">
+                        {session.id.slice(0, 13)}…
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <StatusBadge status={session.status} />
+                      </td>
+                      <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
+                        {formatDateTime(session.expires_at)}
+                      </td>
+                      <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
+                        {formatDateTime(session.created_at)}
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex justify-end">
+                          <RowActions actions={actions} />
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </ConsoleSection>
+      )}
+
+      <LicenseCreateModal
+        open={licenseOpen}
+        defaultEmail={user.email}
+        onClose={() => setLicenseOpen(false)}
+        onCreated={load}
+      />
+
+      {/* Extend license */}
+      <Modal
+        isOpen={extendTarget !== null}
+        onClose={() => !extendBusy && setExtendTarget(null)}
+        className="max-w-md p-6"
+      >
+        {extendTarget && (
+          <form onSubmit={handleExtend}>
+            <h3 className="mb-4 text-lg font-semibold text-gray-800 dark:text-white/90">
+              Extend License
+            </h3>
+            <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
+              {extendTarget.user_email} · currently expires{" "}
+              {formatDateTime(extendTarget.expires_at)}
+            </p>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
+                  Extend by (days)
+                </label>
+                <input
+                  className={fieldClasses}
+                  type="number"
+                  min={0}
+                  max={3650}
+                  value={extendDays}
+                  onChange={(e) => setExtendDays(Number(e.target.value))}
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
+                  Max Devices
+                </label>
+                <input
+                  className={fieldClasses}
+                  type="number"
+                  min={1}
+                  max={10000}
+                  value={extendMaxDevices}
+                  onChange={(e) => setExtendMaxDevices(Number(e.target.value))}
+                />
+              </div>
+            </div>
+            {extendError && (
+              <p className="mt-3 text-sm text-error-500" role="alert">
+                {extendError}
+              </p>
+            )}
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                disabled={extendBusy}
+                onClick={() => setExtendTarget(null)}
+                className="inline-flex items-center justify-center font-medium gap-2 rounded-lg transition px-4 py-3 text-sm bg-white text-gray-700 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-400 dark:ring-gray-700 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <Button size="sm" disabled={extendBusy}>
+                {extendBusy ? "Saving..." : "Save"}
+              </Button>
+            </div>
+          </form>
         )}
-      </ConsoleSection>
+      </Modal>
+
+      {/* Promote to admin */}
+      <Modal
+        isOpen={promoteOpen}
+        onClose={() => setPromoteOpen(false)}
+        className="max-w-md p-6"
+      >
+        <form onSubmit={handlePromote} className="space-y-5">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-800 dark:text-white/90">
+              Promote to admin
+            </h3>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              Creates a console account for {user.email}. The new admin must
+              enroll MFA on their first login.
+            </p>
+          </div>
+          <div>
+            <Label>Email</Label>
+            <input
+              type="email"
+              value={user.email}
+              readOnly
+              disabled
+              className={fieldClasses}
+            />
+          </div>
+          <div>
+            <Label>Password</Label>
+            <input
+              type="password"
+              required
+              minLength={12}
+              value={promotePassword}
+              onChange={(e) => setPromotePassword(e.target.value)}
+              placeholder="At least 12 characters"
+              className={fieldClasses}
+            />
+          </div>
+          <div>
+            <Label>Role</Label>
+            <select
+              className={fieldClasses}
+              value={promoteRole}
+              onChange={(e) => setPromoteRole(e.target.value)}
+            >
+              <option value="viewer">viewer</option>
+              <option value="owner">owner</option>
+            </select>
+          </div>
+          {promoteError && (
+            <p className="text-sm text-error-500" role="alert">
+              {promoteError}
+            </p>
+          )}
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 dark:border-gray-700 dark:text-gray-300"
+              onClick={() => setPromoteOpen(false)}
+            >
+              Cancel
+            </button>
+            <Button variant="info" size="sm" disabled={promoteBusy}>
+              {promoteBusy ? "Creating..." : "Create admin"}
+            </Button>
+          </div>
+        </form>
+      </Modal>
 
       <ConfirmModal
         isOpen={confirmOpen}
@@ -315,13 +799,6 @@ export default function UserDetailPage({
         onClose={() => setConfirmOpen(false)}
       />
 
-      <LicenseCreateModal
-        open={licenseOpen}
-        defaultEmail={user.email}
-        onClose={() => setLicenseOpen(false)}
-        onCreated={load}
-      />
-
       <ConfirmModal
         isOpen={revokeOpen}
         title="Revoke sessions"
@@ -331,6 +808,66 @@ export default function UserDetailPage({
         error={revokeError}
         onConfirm={handleRevokeSessions}
         onClose={() => setRevokeOpen(false)}
+      />
+
+      <ConfirmModal
+        isOpen={licenseRevokeTarget !== null}
+        title="Revoke license"
+        message={
+          licenseRevokeTarget
+            ? `Revoke the license of ${licenseRevokeTarget.user_email}? Active sessions for it will be expired. This cannot be undone.`
+            : ""
+        }
+        confirmLabel="Revoke"
+        busy={licenseRevokeBusy}
+        error={licenseRevokeError}
+        onConfirm={handleLicenseRevoke}
+        onClose={() => setLicenseRevokeTarget(null)}
+      />
+
+      <ConfirmModal
+        isOpen={deviceResetTarget !== null}
+        title="Reset device"
+        message={
+          deviceResetTarget
+            ? `Delete the hardware registration for ${deviceResetTarget.user_email}? The device will be able to register again on its next launch.`
+            : ""
+        }
+        confirmLabel="Reset"
+        busy={deviceResetBusy}
+        error={deviceResetError}
+        onConfirm={handleDeviceReset}
+        onClose={() => setDeviceResetTarget(null)}
+      />
+
+      <ConfirmModal
+        isOpen={deviceRevokeTarget !== null}
+        title="Revoke device"
+        message={
+          deviceRevokeTarget
+            ? `Revoke this device for ${deviceRevokeTarget.user_email}? The device will no longer be able to authenticate.`
+            : ""
+        }
+        confirmLabel="Revoke"
+        busy={deviceRevokeBusy}
+        error={deviceRevokeError}
+        onConfirm={handleDeviceRevoke}
+        onClose={() => setDeviceRevokeTarget(null)}
+      />
+
+      <ConfirmModal
+        isOpen={sessionRevokeTarget !== null}
+        title="Revoke session"
+        message={
+          sessionRevokeTarget
+            ? `Revoke this session for ${sessionRevokeTarget.user_email}? They will be signed out immediately.`
+            : ""
+        }
+        confirmLabel="Revoke"
+        busy={sessionRevokeBusy}
+        error={sessionRevokeError}
+        onConfirm={handleSessionRevoke}
+        onClose={() => setSessionRevokeTarget(null)}
       />
     </div>
   );
