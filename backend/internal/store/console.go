@@ -151,19 +151,23 @@ func (s *Store) ConsoleUserDetail(ctx context.Context, userID string) (*domain.C
 			(select count(*)::integer from devices d where d.user_id = u.id),
 			(select count(*)::integer from auth_sessions ss
 				where ss.user_id = u.id and ss.status = 'verified' and ss.expires_at > now()),
-			(select max(ss.created_at) from auth_sessions ss where ss.user_id = u.id)
+			(select max(ss.created_at) from auth_sessions ss where ss.user_id = u.id),
+			u.notes, u.ban_reason, u.banned_at
 		from users u
 		where u.id = $1::uuid`, userID)
 	var user domain.ConsoleUser
+	detail := &domain.ConsoleUserDetail{}
 	err := row.Scan(&user.ID, &user.Email, &user.Status, &user.CreatedAt,
-		&user.LicenseCount, &user.DeviceCount, &user.ActiveSessionCount, &user.LastLoginAt)
+		&user.LicenseCount, &user.DeviceCount, &user.ActiveSessionCount, &user.LastLoginAt,
+		&detail.Notes, &detail.BanReason, &detail.BannedAt)
+	detail.User = user
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, domain.ErrUserNotFound
 		}
 		return nil, fmt.Errorf("find console user: %w", err)
 	}
-	detail := &domain.ConsoleUserDetail{User: user}
+	_ = detail
 	if detail.Licenses, err = s.listConsoleLicenses(ctx, "where l.user_id = $1", userID); err != nil {
 		return nil, err
 	}
@@ -189,6 +193,66 @@ func (s *Store) SetUserStatus(ctx context.Context, userID string, status domain.
 		return fmt.Errorf("set user status: %w", err)
 	}
 	return nil
+}
+
+// SetUserNotes stores free-form admin notes about a user (KeyAuth-style
+// "note" field).
+func (s *Store) SetUserNotes(ctx context.Context, userID, notes string) error {
+	err := s.db.QueryRow(ctx, `
+		update users
+		set notes = $2, updated_at = now()
+		where id = $1::uuid
+		returning id`, userID, notes).Scan(new(string))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.ErrUserNotFound
+		}
+		return fmt.Errorf("set user notes: %w", err)
+	}
+	return nil
+}
+
+// BanUser bans a user with a reason. The client login path rejects any user
+// whose status is not active, so the ban takes effect immediately.
+func (s *Store) BanUser(ctx context.Context, userID, reason string) error {
+	err := s.db.QueryRow(ctx, `
+		update users
+		set status = 'banned', ban_reason = $2, banned_at = now(), updated_at = now()
+		where id = $1::uuid
+		returning id`, userID, reason).Scan(new(string))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.ErrUserNotFound
+		}
+		return fmt.Errorf("ban user: %w", err)
+	}
+	return nil
+}
+
+// UnbanUser clears a ban and restores the user to active.
+func (s *Store) UnbanUser(ctx context.Context, userID string) error {
+	err := s.db.QueryRow(ctx, `
+		update users
+		set status = 'active', ban_reason = '', banned_at = null, updated_at = now()
+		where id = $1::uuid
+		returning id`, userID).Scan(new(string))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.ErrUserNotFound
+		}
+		return fmt.Errorf("unban user: %w", err)
+	}
+	return nil
+}
+
+// ResetUserDevices deletes every device record of a user, forcing the client
+// to re-register its hardware (KeyAuth-style HWID reset).
+func (s *Store) ResetUserDevices(ctx context.Context, userID string) (int64, error) {
+	tag, err := s.db.Exec(ctx, `delete from devices where user_id = $1::uuid`, userID)
+	if err != nil {
+		return 0, fmt.Errorf("reset user devices: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 func (s *Store) ListConsoleLicenses(ctx context.Context, offset, limit int) ([]domain.ConsoleLicense, int64, error) {

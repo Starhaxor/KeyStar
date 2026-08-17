@@ -7,6 +7,7 @@ type UserStatus string
 const (
 	UserStatusActive   UserStatus = "active"
 	UserStatusDisabled UserStatus = "disabled"
+	UserStatusBanned   UserStatus = "banned"
 )
 
 type User struct {

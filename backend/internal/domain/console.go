@@ -16,10 +16,13 @@ type ConsoleUser struct {
 }
 
 type ConsoleUserDetail struct {
-	User     ConsoleUser
-	Licenses []ConsoleLicense
-	Devices  []ConsoleDevice
-	Sessions []ConsoleSession
+	User      ConsoleUser
+	Notes     string
+	BanReason string
+	BannedAt  *time.Time
+	Licenses  []ConsoleLicense
+	Devices   []ConsoleDevice
+	Sessions  []ConsoleSession
 }
 
 type ConsoleLicense struct {
@@ -28,9 +31,22 @@ type ConsoleLicense struct {
 	UserEmail  string
 	Product    string
 	Status     LicenseStatus
+	Level      int
 	MaxDevices int
+	Notes      string
 	ExpiresAt  time.Time
 	CreatedAt  time.Time
+}
+
+// Variable is a key-value setting exposed to the console, mirroring the
+// KeyAuth-style variables store (e.g. app URLs, download links, messages).
+type Variable struct {
+	ID          string
+	Key         string
+	Value       string
+	Description string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // ConsoleDevice deliberately exposes no raw hardware identifiers; only the
