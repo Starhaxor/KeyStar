@@ -166,6 +166,18 @@ export interface PageResult<T> {
   page_size: number;
 }
 
+export interface BanRecord {
+  id: string;
+  user_id: string;
+  user_email: string;
+  reason: string;
+  expires_at: string;
+  status: string;
+  banned_at: string;
+  lifted_at: string;
+  lift_reason: string;
+}
+
 export interface LoginResponse {
   email: string;
   expires_at: string;

@@ -50,6 +50,7 @@ type AdminConsoleStore interface {
 	BanUser(ctx context.Context, userID, reason string, expiresAt *time.Time) error
 	UnbanUser(ctx context.Context, userID string) error
 	AutoUnbanExpired(ctx context.Context, userID string) error
+	ListConsoleBans(ctx context.Context, offset, limit int, search, statusFilter string) ([]domain.BanRecord, int64, error)
 	ResetUserDevices(ctx context.Context, userID string) (int64, error)
 	BulkSetUserStatus(ctx context.Context, userIDs []string, status domain.UserStatus) (int64, error)
 	BulkRevokeUserSessions(ctx context.Context, userIDs []string) (int64, error)
@@ -221,6 +222,11 @@ func (router *Router) routeAdmin(writer http.ResponseWriter, request *http.Reque
 		router.handleAdminOverview(writer, request, account)
 	case len(segments) >= 1 && segments[0] == "users":
 		router.routeAdminUsers(writer, request, account, segments)
+	case len(segments) == 1 && segments[0] == "bans" && request.Method == http.MethodGet:
+		if !router.requirePermission(writer, request, account, domain.PermUsersRead) {
+			return
+		}
+		router.handleAdminBanList(writer, request)
 	case len(segments) >= 1 && segments[0] == "licenses":
 		router.routeAdminLicenses(writer, request, account, segments)
 	case len(segments) >= 1 && segments[0] == "devices":

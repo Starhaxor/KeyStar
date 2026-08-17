@@ -314,6 +314,41 @@ func (router *Router) handleAdminUserList(writer http.ResponseWriter, request *h
 	writeJSON(writer, http.StatusOK, adminPageResponse{OK: true, Items: items, Total: total, Page: page, PageSize: pageSize})
 }
 
+func (router *Router) handleAdminBanList(writer http.ResponseWriter, request *http.Request) {
+	page, pageSize, offset := parseAdminPagination(request)
+	bans, total, err := router.admin.Console.ListConsoleBans(request.Context(), offset, pageSize, request.URL.Query().Get("search"), request.URL.Query().Get("status"))
+	if err != nil {
+		router.writeConsoleError(writer, request, err)
+		return
+	}
+	type banJSON struct {
+		ID         string `json:"id"`
+		UserID     string `json:"user_id"`
+		UserEmail  string `json:"user_email"`
+		Reason     string `json:"reason"`
+		ExpiresAt  string `json:"expires_at"`
+		Status     string `json:"status"`
+		BannedAt   string `json:"banned_at"`
+		LiftedAt   string `json:"lifted_at"`
+		LiftReason string `json:"lift_reason"`
+	}
+	items := make([]banJSON, 0, len(bans))
+	for _, ban := range bans {
+		items = append(items, banJSON{
+			ID:         ban.ID,
+			UserID:     ban.UserID,
+			UserEmail:  ban.UserEmail,
+			Reason:     ban.Reason,
+			ExpiresAt:  formatTimePtr(ban.ExpiresAt),
+			Status:     ban.Status,
+			BannedAt:   formatTime(ban.BannedAt),
+			LiftedAt:   formatTimePtr(ban.LiftedAt),
+			LiftReason: ban.LiftReason,
+		})
+	}
+	writeJSON(writer, http.StatusOK, adminPageResponse{OK: true, Items: items, Total: total, Page: page, PageSize: pageSize})
+}
+
 func (router *Router) handleAdminUserDetail(writer http.ResponseWriter, request *http.Request, userID string) {
 	if !uuidPattern.MatchString(userID) {
 		writeError(writer, request, http.StatusNotFound, "USER_NOT_FOUND", "user not found")

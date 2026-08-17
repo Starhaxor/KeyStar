@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -221,12 +222,17 @@ func (s *Store) SetUserNotes(ctx context.Context, userID, notes string) error {
 	return nil
 }
 
-// BanUser bans a user with a reason. When expiresAt is non-nil the ban is
-// temporary and the account reopens automatically once the timestamp passes
-// (see AutoUnbanExpired). The client login path rejects any non-active user,
-// so the ban takes effect immediately.
+// BanUser bans a user with a reason and records the ban in the bans table.
+// When expiresAt is non-nil the ban is temporary and the account reopens
+// automatically once the timestamp passes (see AutoUnbanExpired). The client
+// login path rejects any non-active user, so the ban takes effect immediately.
 func (s *Store) BanUser(ctx context.Context, userID, reason string, expiresAt *time.Time) error {
-	err := s.db.QueryRow(ctx, `
+	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin ban user: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	err = tx.QueryRow(ctx, `
 		update users
 		set status = 'banned', ban_reason = $2, banned_at = now(),
 		    ban_expires_at = $3, updated_at = now()
@@ -238,28 +244,67 @@ func (s *Store) BanUser(ctx context.Context, userID, reason string, expiresAt *t
 		}
 		return fmt.Errorf("ban user: %w", err)
 	}
+	if _, err := tx.Exec(ctx, `
+		update bans
+		set status = 'lifted', lifted_at = now(), lift_reason = 'superseded'
+		where user_id = $1::uuid and status = 'active'`, userID); err != nil {
+		return fmt.Errorf("supersede previous ban record: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		insert into bans (user_id, reason, expires_at)
+		values ($1::uuid, $2, $3)`, userID, reason, expiresAt); err != nil {
+		return fmt.Errorf("record ban: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit ban user: %w", err)
+	}
 	return nil
 }
 
-// AutoUnbanExpired reopens a user whose temporary ban has expired. It is a
-// no-op unless the user is banned and the ban deadline has passed.
+// AutoUnbanExpired reopens a user whose temporary ban has expired and marks
+// the active ban record as expired. It is a no-op unless the user is banned
+// and the ban deadline has passed.
 func (s *Store) AutoUnbanExpired(ctx context.Context, userID string) error {
-	err := s.db.QueryRow(ctx, `
+	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin auto unban: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	err = tx.QueryRow(ctx, `
 		update users
 		set status = 'active', ban_reason = '', banned_at = null, ban_expires_at = null,
 		    updated_at = now()
 		where id = $1::uuid and status = 'banned'
 		  and ban_expires_at is not null and ban_expires_at <= now()
 		returning id`, userID).Scan(new(string))
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("auto unban expired: %w", err)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("auto unban expired user: %w", err)
+		}
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `
+		update bans
+		set status = 'expired', lifted_at = now(), lift_reason = 'expired'
+		where user_id = $1::uuid and status = 'active'
+		  and expires_at is not null and expires_at <= now()`, userID); err != nil {
+		return fmt.Errorf("expire ban record: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit auto unban: %w", err)
 	}
 	return nil
 }
 
-// UnbanUser clears a ban and restores the user to active.
+// UnbanUser clears a ban, restores the user to active, and lifts the active
+// ban record.
 func (s *Store) UnbanUser(ctx context.Context, userID string) error {
-	err := s.db.QueryRow(ctx, `
+	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin unban user: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	err = tx.QueryRow(ctx, `
 		update users
 		set status = 'active', ban_reason = '', banned_at = null, ban_expires_at = null,
 		    updated_at = now()
@@ -271,7 +316,69 @@ func (s *Store) UnbanUser(ctx context.Context, userID string) error {
 		}
 		return fmt.Errorf("unban user: %w", err)
 	}
+	if _, err := tx.Exec(ctx, `
+		update bans
+		set status = 'lifted', lifted_at = now(), lift_reason = 'admin'
+		where user_id = $1::uuid and status = 'active'`, userID); err != nil {
+		return fmt.Errorf("lift ban record: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit unban user: %w", err)
+	}
 	return nil
+}
+
+// ListConsoleBans pages the ban history. statusFilter limits rows to one ban
+// state (active, lifted, expired); search is a substring match on the user's
+// email.
+func (s *Store) ListConsoleBans(ctx context.Context, offset, limit int, search, statusFilter string) ([]domain.BanRecord, int64, error) {
+	search = strings.ToLower(strings.TrimSpace(search))
+	statusFilter = strings.ToLower(strings.TrimSpace(statusFilter))
+	where := []string{}
+	args := []any{}
+	if search != "" {
+		args = append(args, search)
+		where = append(where, fmt.Sprintf("position($%d in lower(u.email)) > 0", len(args)))
+	}
+	if statusFilter == "active" || statusFilter == "lifted" || statusFilter == "expired" {
+		args = append(args, statusFilter)
+		where = append(where, fmt.Sprintf("b.status = $%d", len(args)))
+	}
+	whereClause := ""
+	if len(where) > 0 {
+		whereClause = "where " + strings.Join(where, " and ")
+	}
+	var total int64
+	if err := s.db.QueryRow(ctx, `
+		select count(*) from bans b join users u on u.id = b.user_id `+whereClause, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count console bans: %w", err)
+	}
+	args = append(args, limit, offset)
+	rows, err := s.db.Query(ctx, `
+		select b.id::text, b.user_id::text, u.email, b.reason, b.expires_at, b.status,
+			b.banned_at, b.lifted_at, b.lift_reason
+		from bans b
+		join users u on u.id = b.user_id
+		`+whereClause+`
+		order by b.banned_at desc, b.id desc
+		limit $`+strconv.Itoa(len(args)-1)+` offset $`+strconv.Itoa(len(args)), args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list console bans: %w", err)
+	}
+	defer rows.Close()
+	bans := make([]domain.BanRecord, 0, limit)
+	for rows.Next() {
+		var ban domain.BanRecord
+		if err := rows.Scan(&ban.ID, &ban.UserID, &ban.UserEmail, &ban.Reason, &ban.ExpiresAt,
+			&ban.Status, &ban.BannedAt, &ban.LiftedAt, &ban.LiftReason); err != nil {
+			return nil, 0, fmt.Errorf("scan console ban: %w", err)
+		}
+		bans = append(bans, ban)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("list console bans: %w", err)
+	}
+	return bans, total, nil
 }
 
 // ResetUserDevices deletes every device record of a user, forcing the client

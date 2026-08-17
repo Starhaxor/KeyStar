@@ -20,45 +20,19 @@ import { useToast } from "@/context/ToastContext";
 import { api, formatDateTime } from "@/lib/api";
 import type { PageResult, ConsoleUser } from "@/lib/types";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import React, { Suspense, useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 
 const inputClasses =
   "h-11 w-full rounded-lg border appearance-none px-4 py-2.5 text-sm shadow-theme-xs focus:outline-hidden focus:ring-3 dark:bg-gray-900 dark:text-white/90 bg-transparent text-gray-800 border-gray-300 focus:border-brand-300 focus:ring-brand-500/10 dark:border-gray-700 dark:focus:border-brand-800 placeholder:text-gray-400";
 
-const VALID_STATUS_FILTERS = ["active", "disabled", "banned"];
-
 export default function UsersPage() {
-  return (
-    <Suspense
-      fallback={
-        <div>
-          <PageTitle
-            title="Users"
-            description="Licensed end users of the product."
-          />
-          <TableSkeleton rows={6} cols={7} />
-        </div>
-      }
-    >
-      <UsersPageContent />
-    </Suspense>
-  );
-}
-
-function UsersPageContent() {
   const { hasPermission } = useAdminIdentity();
   const toast = useToast();
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const statusParam = searchParams.get("status") ?? "";
-  const statusFilter = VALID_STATUS_FILTERS.includes(statusParam)
-    ? statusParam
-    : "";
   const [result, setResult] = useState<PageResult<ConsoleUser> | null>(null);
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -105,18 +79,9 @@ function UsersPageContent() {
     load();
   }, [load]);
 
-  // Reset pagination when the URL-driven status filter changes.
-  useEffect(() => {
-    setPage(1);
-  }, [statusFilter]);
-
-  // Keep the filter shareable: the status filter lives in ?status=
   function updateStatusFilter(next: string) {
-    const params = new URLSearchParams(searchParams.toString());
-    if (next === "") params.delete("status");
-    else params.set("status", next);
-    const query = params.toString();
-    router.replace(query ? `/users?${query}` : "/users");
+    setStatusFilter(next);
+    setPage(1);
   }
 
   // Live search: debounce keystrokes, then refetch from page 1.
@@ -127,18 +92,6 @@ function UsersPageContent() {
     }, 300);
     return () => clearTimeout(timer);
   }, [searchInput]);
-
-  // Open the create modal when arriving via /users?create=1 (sub sidebar).
-  useEffect(() => {
-    if (searchParams.get("create") === "1") {
-      const params = new URLSearchParams(searchParams.toString());
-      params.delete("create");
-      const query = params.toString();
-      router.replace(query ? `/users?${query}` : "/users");
-      openCreate();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   function openCreate() {
     setCreateEmail("");

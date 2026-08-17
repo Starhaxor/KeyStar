@@ -26,6 +26,20 @@ type ConsoleUserDetail struct {
 	Sessions      []ConsoleSession
 }
 
+// BanRecord is one row of the ban history table. A permanent ban has no
+// ExpiresAt; lifted and expired bans carry the timestamp and reason.
+type BanRecord struct {
+	ID         string
+	UserID     string
+	UserEmail  string
+	Reason     string
+	ExpiresAt  *time.Time
+	Status     string
+	BannedAt   time.Time
+	LiftedAt   *time.Time
+	LiftReason string
+}
+
 type ConsoleLicense struct {
 	ID         string
 	UserID     string

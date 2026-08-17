@@ -13,6 +13,7 @@ const statusColors: Record<
   banned: "error",
   revoked: "error",
   expired: "light",
+  lifted: "success",
 };
 
 export default function StatusBadge({ status }: { status: string }) {

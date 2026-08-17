@@ -6,6 +6,7 @@ import type {
   AdminIdentity,
   AdminRole,
   AuditEntry,
+  BanRecord,
   ConsoleDevice,
   ConsoleDeviceDetail,
   ConsoleLicense,
@@ -253,6 +254,11 @@ export const api = {
   users(page: number, search: string, status = "") {
     return request<{ ok: boolean } & PageResult<ConsoleUser>>(
       `/v1/admin/users?${pageQuery(page, { search, status })}`
+    );
+  },
+  bans(page: number, search: string, status = "") {
+    return request<{ ok: boolean } & PageResult<BanRecord>>(
+      `/v1/admin/bans?${pageQuery(page, { search, status })}`
     );
   },
   createUser(email: string, password: string) {
