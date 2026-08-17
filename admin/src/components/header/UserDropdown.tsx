@@ -14,6 +14,7 @@ function initialsFor(email: string): string {
 
 export default function UserDropdown() {
   const [email, setEmail] = useState<string>("");
+  const [role, setRole] = useState<string>("");
   const [isOpen, setIsOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
@@ -23,7 +24,10 @@ export default function UserDropdown() {
     api
       .me()
       .then((identity) => {
-        if (!cancelled) setEmail(identity.email);
+        if (!cancelled) {
+          setEmail(identity.email);
+          setRole(identity.role);
+        }
       })
       .catch(() => {
         // The 401 handler in the API client redirects to /signin.
@@ -78,7 +82,10 @@ export default function UserDropdown() {
                 <p className="truncate text-sm font-medium text-gray-800 dark:text-white/90">
                   {email || "Administrator"}
                 </p>
-                <p className="text-xs text-gray-400">Owner · Admin</p>
+                <p className="text-xs text-gray-400">
+                  {role ? `${role.charAt(0).toUpperCase()}${role.slice(1)}` : "Admin"}{" "}
+                  · Admin
+                </p>
               </div>
             </div>
             <DropdownItem
