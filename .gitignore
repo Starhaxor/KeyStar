@@ -6,3 +6,7 @@ Thumbs.db
 Desktop.ini
 
 admin/banner.png
+
+# Backend secrets (real .env is never committed)
+backend/.env
+backend/*.exe
