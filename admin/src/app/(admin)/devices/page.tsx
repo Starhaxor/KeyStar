@@ -150,7 +150,10 @@ export default function DevicesPage() {
                 {result.items.map((device) => {
                   const parts = hwidCount(device);
                   return (
-                    <tr key={device.id}>
+                    <tr
+                      key={device.id}
+                      className="hover:bg-gray-50 dark:hover:bg-white/[0.02]"
+                    >
                       <td className="px-5 py-3.5 font-mono text-xs text-gray-700 dark:text-gray-300">
                         {device.id.slice(0, 13)}…
                       </td>

@@ -1,10 +1,10 @@
 "use client";
 import ConsoleSection, {
-  EmptyNote,
   ErrorNote,
   LoadingNote,
   PageTitle,
 } from "@/components/console/ConsoleSection";
+import EmptyState from "@/components/console/EmptyState";
 import ConfirmModal from "@/components/console/ConfirmModal";
 import StatusBadge from "@/components/console/StatusBadge";
 import { TableSkeleton } from "@/components/common/Skeleton";
@@ -12,6 +12,7 @@ import Pagination from "@/components/tables/Pagination";
 import { useToast } from "@/context/ToastContext";
 import { api, formatDateTime } from "@/lib/api";
 import type { ConsoleSession, PageResult } from "@/lib/types";
+import { TimeIcon } from "@/icons";
 import React, { useCallback, useEffect, useState } from "react";
 
 export default function SessionsPage() {
@@ -79,7 +80,11 @@ export default function SessionsPage() {
         ) : error ? (
           <ErrorNote message={error} />
         ) : !result || result.items.length === 0 ? (
-          <EmptyNote message="No sessions found." />
+          <EmptyState
+            icon={<TimeIcon />}
+            title="No sessions found"
+            message="Verified auth sessions will appear here."
+          />
         ) : (
           <>
             <table className="w-full text-left text-sm">
@@ -96,7 +101,10 @@ export default function SessionsPage() {
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                 {result.items.map((session) => (
-                  <tr key={session.id}>
+                  <tr
+                    key={session.id}
+                    className="hover:bg-gray-50 dark:hover:bg-white/[0.02]"
+                  >
                     <td className="px-5 py-3.5 font-mono text-xs text-gray-700 dark:text-gray-300">
                       {session.id.slice(0, 13)}…
                     </td>

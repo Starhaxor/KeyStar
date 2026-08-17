@@ -75,7 +75,10 @@ export default function SecurityEventsPage() {
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                 {result.items.map((event) => (
-                  <tr key={event.id}>
+                  <tr
+                    key={event.id}
+                    className="hover:bg-gray-50 dark:hover:bg-white/[0.02]"
+                  >
                     <td className="whitespace-nowrap px-5 py-3.5 text-gray-500 dark:text-gray-400">
                       {formatDateTime(event.created_at)}
                     </td>

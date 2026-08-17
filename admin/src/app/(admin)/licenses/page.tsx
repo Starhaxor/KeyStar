@@ -1,10 +1,11 @@
 "use client";
 import ConsoleSection, {
-  EmptyNote,
   ErrorNote,
   LoadingNote,
   PageTitle,
 } from "@/components/console/ConsoleSection";
+import EmptyState from "@/components/console/EmptyState";
+import { TableSkeleton } from "@/components/common/Skeleton";
 import ConfirmModal from "@/components/console/ConfirmModal";
 import StatusBadge from "@/components/console/StatusBadge";
 import Button from "@/components/ui/button/Button";
@@ -12,6 +13,7 @@ import { Modal } from "@/components/ui/modal";
 import Pagination from "@/components/tables/Pagination";
 import { api, formatDateTime } from "@/lib/api";
 import type { ConsoleLicense, CreatedLicense, PageResult } from "@/lib/types";
+import { DocsIcon } from "@/icons";
 import React, { useCallback, useEffect, useState } from "react";
 
 const fieldClasses =
@@ -143,11 +145,15 @@ export default function LicensesPage() {
         description={result ? `${result.total} license(s) total` : "Loading licenses"}
       >
         {loading && !error ? (
-          <LoadingNote />
+          <TableSkeleton rows={6} cols={7} />
         ) : error ? (
           <ErrorNote message={error} />
         ) : !result || result.items.length === 0 ? (
-          <EmptyNote message="No licenses found." />
+          <EmptyState
+            icon={<DocsIcon />}
+            title="No licenses found"
+            message="Issue a license to an end user to get started."
+          />
         ) : (
           <>
             <table className="w-full text-left text-sm">
@@ -164,7 +170,10 @@ export default function LicensesPage() {
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                 {result.items.map((license) => (
-                  <tr key={license.id}>
+                  <tr
+                    key={license.id}
+                    className="hover:bg-gray-50 dark:hover:bg-white/[0.02]"
+                  >
                     <td className="px-5 py-3.5 text-gray-700 dark:text-gray-300">
                       {license.user_email}
                     </td>

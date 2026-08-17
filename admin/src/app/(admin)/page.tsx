@@ -122,7 +122,10 @@ export default function OverviewPage() {
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                   {overview.recent_audit.map((entry) => (
-                    <tr key={entry.id}>
+                    <tr
+                      key={entry.id}
+                      className="hover:bg-gray-50 dark:hover:bg-white/[0.02]"
+                    >
                       <td className="px-5 py-3 font-medium text-gray-700 dark:text-gray-300">
                         {entry.action}
                       </td>
