@@ -7,6 +7,7 @@ import {
 } from "@/context/AdminIdentityContext";
 import AppHeader from "@/layout/AppHeader";
 import AppSidebar from "@/layout/AppSidebar";
+import SubSidebar from "@/layout/SubSidebar";
 import Backdrop from "@/layout/Backdrop";
 import Link from "next/link";
 import React from "react";
@@ -54,12 +55,18 @@ export default function AdminLayout({
         <div
           className={`flex-1 transition-all  duration-300 ease-in-out ${mainContentMargin}`}
         >
-          {/* Header */}
-          <AppHeader />
-          {/* Page Content */}
-          <div className="p-4 mx-auto max-w-(--breakpoint-2xl) md:p-6">
-            <MfaEnrollmentBanner />
-            {children}
+          <div className="lg:flex">
+            {/* Sub navigation for the active section */}
+            <SubSidebar />
+            <div className="min-w-0 flex-1">
+              {/* Header */}
+              <AppHeader />
+              {/* Page Content */}
+              <div className="p-4 mx-auto max-w-(--breakpoint-2xl) md:p-6">
+                <MfaEnrollmentBanner />
+                {children}
+              </div>
+            </div>
           </div>
         </div>
       </div>

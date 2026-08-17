@@ -5,14 +5,17 @@ import ConsoleSection, {
   LoadingNote,
   PageTitle,
 } from "@/components/console/ConsoleSection";
+import EmptyState from "@/components/console/EmptyState";
 import ConfirmModal from "@/components/console/ConfirmModal";
+import RowActions, { type RowAction } from "@/components/console/RowActions";
 import StatusBadge from "@/components/console/StatusBadge";
 import Pagination from "@/components/tables/Pagination";
 import { Modal } from "@/components/ui/modal";
 import { useAdminIdentity } from "@/context/AdminIdentityContext";
 import { api, formatDateTime } from "@/lib/api";
 import type { ConsoleDevice, ConsoleDeviceDetail, PageResult } from "@/lib/types";
-import React, { useCallback, useEffect, useState } from "react";
+import { BoxCubeIcon } from "@/icons";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 // HWID parts tracked by the backend. Only presence is shown — raw hardware
 // identifiers are stored as HMACs server-side and never leave the backend.
@@ -34,6 +37,7 @@ export default function DevicesPage() {
   const [page, setPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState("");
 
   const [revokeTarget, setRevokeTarget] = useState<ConsoleDevice | null>(null);
   const [revokeBusy, setRevokeBusy] = useState(false);
@@ -111,9 +115,25 @@ export default function DevicesPage() {
     }
   }
 
+  const allItems = result?.items ?? [];
+  const items = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return allItems;
+    return allItems.filter(
+      (device) =>
+        device.user_email.toLowerCase().includes(q) ||
+        device.id.toLowerCase().includes(q) ||
+        device.status.toLowerCase().includes(q)
+    );
+  }, [allItems, filter]);
+
   const totalPages = result
     ? Math.max(1, Math.ceil(result.total / result.page_size))
     : 1;
+
+  const activeCount = allItems.filter((d) => d.status === "active").length;
+  const revokedCount = allItems.filter((d) => d.status === "revoked").length;
+  const tpmCount = allItems.filter((d) => d.tpm_registered).length;
 
   return (
     <div>
@@ -121,16 +141,51 @@ export default function DevicesPage() {
         title="Devices"
         description="Hardware registrations bound to user licenses."
       />
+      {result && (
+        <div className="mb-4 flex flex-wrap gap-2">
+          <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700 dark:bg-white/[0.05] dark:text-gray-300">
+            {result.total} total
+          </span>
+          <span className="rounded-full bg-success-50 px-3 py-1 text-xs font-medium text-success-600 dark:bg-success-500/10 dark:text-success-400">
+            {activeCount} active (this page)
+          </span>
+          <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700 dark:bg-white/[0.05] dark:text-gray-300">
+            {tpmCount} with TPM (this page)
+          </span>
+          <span className="rounded-full bg-error-50 px-3 py-1 text-xs font-medium text-error-600 dark:bg-error-500/10 dark:text-error-400">
+            {revokedCount} revoked (this page)
+          </span>
+        </div>
+      )}
       <ConsoleSection
         title="Device Directory"
         description={result ? `${result.total} device(s) total` : "Loading devices"}
+        actions={
+          <input
+            type="search"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Type to filter..."
+            className="h-10 w-56 rounded-lg border border-gray-300 bg-transparent px-3.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+          />
+        }
       >
         {loading && !error ? (
           <LoadingNote />
         ) : error ? (
           <ErrorNote message={error} />
         ) : !result || result.items.length === 0 ? (
-          <EmptyNote message="No devices found." />
+          <EmptyState
+            icon={<BoxCubeIcon />}
+            title="No devices found"
+            message="Hardware registrations appear here when users activate licenses."
+          />
+        ) : items.length === 0 ? (
+          <EmptyState
+            icon={<BoxCubeIcon />}
+            title="No matching devices"
+            message={`Nothing matches “${filter}” on this page.`}
+          />
         ) : (
           <>
             <table className="w-full text-left text-sm">
@@ -147,8 +202,32 @@ export default function DevicesPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {result.items.map((device) => {
+                {items.map((device) => {
                   const parts = hwidCount(device);
+                  const actions: RowAction[] = [
+                    {
+                      label: "Details",
+                      onClick: () => openDetail(device),
+                    },
+                  ];
+                  if (canWrite) {
+                    actions.push({
+                      label: "Reset",
+                      onClick: () => {
+                        setResetError(null);
+                        setResetTarget(device);
+                      },
+                    });
+                  }
+                  actions.push({
+                    label: "Revoke",
+                    danger: true,
+                    disabled: device.status === "revoked",
+                    onClick: () => {
+                      setRevokeError(null);
+                      setRevokeTarget(device);
+                    },
+                  });
                   return (
                     <tr
                       key={device.id}
@@ -187,34 +266,8 @@ export default function DevicesPage() {
                         {formatDateTime(device.created_at)}
                       </td>
                       <td className="px-5 py-3.5">
-                        <div className="flex justify-end gap-2">
-                          <button
-                            onClick={() => openDetail(device)}
-                            className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/[0.05]"
-                          >
-                            Details
-                          </button>
-                          {canWrite && (
-                            <button
-                              onClick={() => {
-                                setResetError(null);
-                                setResetTarget(device);
-                              }}
-                              className="rounded-lg border border-warning-500/40 px-3 py-1.5 text-xs font-medium text-warning-600 hover:bg-warning-50 dark:hover:bg-warning-500/10"
-                            >
-                              Reset
-                            </button>
-                          )}
-                          <button
-                            onClick={() => {
-                              setRevokeError(null);
-                              setRevokeTarget(device);
-                            }}
-                            disabled={device.status === "revoked"}
-                            className="rounded-lg border border-error-500/40 px-3 py-1.5 text-xs font-medium text-error-500 hover:bg-error-50 disabled:opacity-40 dark:hover:bg-error-500/10"
-                          >
-                            Revoke
-                          </button>
+                        <div className="flex justify-end">
+                          <RowActions actions={actions} />
                         </div>
                       </td>
                     </tr>

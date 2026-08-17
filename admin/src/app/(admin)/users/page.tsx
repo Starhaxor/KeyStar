@@ -1,16 +1,18 @@
 "use client";
 import ConsoleSection, {
-  EmptyNote,
   ErrorNote,
   LoadingNote,
   PageTitle,
 } from "@/components/console/ConsoleSection";
+import EmptyState from "@/components/console/EmptyState";
 import StatusBadge from "@/components/console/StatusBadge";
+import RowActions, { type RowAction } from "@/components/console/RowActions";
 import Label from "@/components/form/Label";
 import Pagination from "@/components/tables/Pagination";
 import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import { TableSkeleton } from "@/components/common/Skeleton";
+import ConfirmModal from "@/components/console/ConfirmModal";
 import { useAdminIdentity } from "@/context/AdminIdentityContext";
 import { useToast } from "@/context/ToastContext";
 import { api, formatDateTime } from "@/lib/api";
@@ -37,6 +39,14 @@ export default function UsersPage() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
+  const [statusTarget, setStatusTarget] = useState<ConsoleUser | null>(null);
+  const [statusBusy, setStatusBusy] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
+
+  const [revokeTarget, setRevokeTarget] = useState<ConsoleUser | null>(null);
+  const [revokeBusy, setRevokeBusy] = useState(false);
+  const [revokeError, setRevokeError] = useState<string | null>(null);
+
   const canWrite = hasPermission("users.write");
 
   const load = useCallback(async () => {
@@ -56,11 +66,24 @@ export default function UsersPage() {
     load();
   }, [load]);
 
-  function handleSearch(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setPage(1);
-    setSearch(searchInput.trim());
-  }
+  // Live search: debounce keystrokes, then refetch from page 1.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPage(1);
+      setSearch(searchInput.trim());
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  // Open the create modal when arriving via /users?create=1 (sub sidebar).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("create") === "1") {
+      window.history.replaceState({}, "", "/users");
+      openCreate();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function openCreate() {
     setCreateEmail("");
@@ -88,9 +111,50 @@ export default function UsersPage() {
     }
   }
 
+  async function handleStatusChange() {
+    if (!statusTarget) return;
+    setStatusBusy(true);
+    setStatusError(null);
+    const next = statusTarget.status === "active" ? "disabled" : "active";
+    try {
+      await api.setUserStatus(statusTarget.id, next);
+      setStatusTarget(null);
+      await load();
+      toast.success(next === "disabled" ? "User disabled" : "User enabled", statusTarget.email);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Update failed";
+      setStatusError(message);
+      toast.error("Update failed", message);
+    } finally {
+      setStatusBusy(false);
+    }
+  }
+
+  async function handleRevoke() {
+    if (!revokeTarget) return;
+    setRevokeBusy(true);
+    setRevokeError(null);
+    try {
+      await api.revokeUserSessions(revokeTarget.id);
+      setRevokeTarget(null);
+      await load();
+      toast.success("Sessions revoked", revokeTarget.email);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Revoke failed";
+      setRevokeError(message);
+      toast.error("Revoke failed", message);
+    } finally {
+      setRevokeBusy(false);
+    }
+  }
+
   const totalPages = result
     ? Math.max(1, Math.ceil(result.total / result.page_size))
     : 1;
+
+  const items = result?.items ?? [];
+  const activeCount = items.filter((u) => u.status === "active").length;
+  const disabledCount = items.length - activeCount;
 
   return (
     <div>
@@ -98,6 +162,20 @@ export default function UsersPage() {
         title="Users"
         description="Licensed end users of the product."
       />
+      {/* Page snapshot summary */}
+      {result && (
+        <div className="mb-4 flex flex-wrap gap-2">
+          <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700 dark:bg-white/[0.05] dark:text-gray-300">
+            {result.total} total
+          </span>
+          <span className="rounded-full bg-success-50 px-3 py-1 text-xs font-medium text-success-600 dark:bg-success-500/10 dark:text-success-400">
+            {activeCount} active (this page)
+          </span>
+          <span className="rounded-full bg-warning-50 px-3 py-1 text-xs font-medium text-warning-600 dark:bg-warning-500/10 dark:text-warning-400">
+            {disabledCount} disabled (this page)
+          </span>
+        </div>
+      )}
       <ConsoleSection
         title="User Directory"
         description={
@@ -105,21 +183,13 @@ export default function UsersPage() {
         }
         actions={
           <div className="flex items-center gap-2">
-            <form onSubmit={handleSearch} className="flex items-center gap-2">
-              <input
-                type="search"
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                placeholder="Search by email..."
-                className="h-10 w-56 rounded-lg border border-gray-300 bg-transparent px-3.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
-              />
-              <button
-                type="submit"
-                className="h-10 rounded-lg bg-brand-500 px-4 text-sm font-medium text-white hover:bg-brand-600"
-              >
-                Search
-              </button>
-            </form>
+            <input
+              type="search"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Type to filter by email..."
+              className="h-10 w-56 rounded-lg border border-gray-300 bg-transparent px-3.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+            />
             {canWrite && (
               <Button size="sm" onClick={openCreate}>
                 Add user
@@ -133,7 +203,10 @@ export default function UsersPage() {
         ) : error ? (
           <ErrorNote message={error} />
         ) : !result || result.items.length === 0 ? (
-          <EmptyNote message="No users found." />
+          <EmptyState
+            title="No users found"
+            message="Users appear here when they register, or add one manually."
+          />
         ) : (
           <>
             <table className="w-full text-left text-sm">
@@ -146,42 +219,80 @@ export default function UsersPage() {
                   <th className="px-5 py-3 font-medium">Active Sessions</th>
                   <th className="px-5 py-3 font-medium">Last Login</th>
                   <th className="px-5 py-3 font-medium">Created</th>
+                  <th className="px-5 py-3 font-medium text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {result.items.map((user) => (
-                  <tr
-                    key={user.id}
-                    className="hover:bg-gray-50 dark:hover:bg-white/[0.02]"
-                  >
-                    <td className="px-5 py-3.5">
-                      <Link
-                        href={`/users/${user.id}`}
-                        className="font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400"
-                      >
-                        {user.email}
-                      </Link>
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <StatusBadge status={user.status} />
-                    </td>
-                    <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
-                      {user.license_count}
-                    </td>
-                    <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
-                      {user.device_count}
-                    </td>
-                    <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
-                      {user.active_session_count}
-                    </td>
-                    <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
-                      {formatDateTime(user.last_login_at)}
-                    </td>
-                    <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
-                      {formatDateTime(user.created_at)}
-                    </td>
-                  </tr>
-                ))}
+                {result.items.map((user) => {
+                  const actions: RowAction[] = [
+                    {
+                      label: "View profile",
+                      href: `/users/${user.id}`,
+                    },
+                  ];
+                  if (canWrite) {
+                    actions.push(
+                      {
+                        label:
+                          user.status === "active"
+                            ? "Disable user"
+                            : "Enable user",
+                        danger: user.status === "active",
+                        onClick: () => {
+                          setStatusError(null);
+                          setStatusTarget(user);
+                        },
+                      },
+                      {
+                        label: "Revoke sessions",
+                        danger: true,
+                        disabled: user.active_session_count === 0,
+                        onClick: () => {
+                          setRevokeError(null);
+                          setRevokeTarget(user);
+                        },
+                      }
+                    );
+                  }
+                  return (
+                    <tr
+                      key={user.id}
+                      className="hover:bg-gray-50 dark:hover:bg-white/[0.02]"
+                    >
+                      <td className="px-5 py-3.5">
+                        <Link
+                          href={`/users/${user.id}`}
+                          className="font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400"
+                        >
+                          {user.email}
+                        </Link>
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <StatusBadge status={user.status} />
+                      </td>
+                      <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
+                        {user.license_count}
+                      </td>
+                      <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
+                        {user.device_count}
+                      </td>
+                      <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
+                        {user.active_session_count}
+                      </td>
+                      <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
+                        {formatDateTime(user.last_login_at)}
+                      </td>
+                      <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
+                        {formatDateTime(user.created_at)}
+                      </td>
+                      <td className="px-5 py-3.5 text-right">
+                        <div className="flex justify-end">
+                          <RowActions actions={actions} />
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
             <div className="flex justify-end border-t border-gray-200 px-5 py-4 dark:border-gray-800">
@@ -252,6 +363,40 @@ export default function UsersPage() {
           </div>
         </form>
       </Modal>
+
+      <ConfirmModal
+        isOpen={statusTarget !== null}
+        title={
+          statusTarget?.status === "active" ? "Disable user" : "Enable user"
+        }
+        message={
+          statusTarget
+            ? statusTarget.status === "active"
+              ? `Disable ${statusTarget.email}? Their licenses stay intact but the account can no longer authenticate.`
+              : `Enable ${statusTarget.email}? The account can authenticate again.`
+            : ""
+        }
+        confirmLabel={statusTarget?.status === "active" ? "Disable" : "Enable"}
+        busy={statusBusy}
+        error={statusError}
+        onConfirm={handleStatusChange}
+        onClose={() => setStatusTarget(null)}
+      />
+
+      <ConfirmModal
+        isOpen={revokeTarget !== null}
+        title="Revoke sessions"
+        message={
+          revokeTarget
+            ? `Sign out all sessions for ${revokeTarget.email}?`
+            : ""
+        }
+        confirmLabel="Revoke"
+        busy={revokeBusy}
+        error={revokeError}
+        onConfirm={handleRevoke}
+        onClose={() => setRevokeTarget(null)}
+      />
     </div>
   );
 }

@@ -6,6 +6,7 @@ import ConsoleSection, {
   PageTitle,
 } from "@/components/console/ConsoleSection";
 import ConfirmModal from "@/components/console/ConfirmModal";
+import LicenseCreateModal from "@/components/console/LicenseCreateModal";
 import StatusBadge from "@/components/console/StatusBadge";
 import Button from "@/components/ui/button/Button";
 import { useAdminIdentity } from "@/context/AdminIdentityContext";
@@ -32,7 +33,10 @@ export default function UserDetailPage({
   const [revokeError, setRevokeError] = useState<string | null>(null);
   const [revokedNotice, setRevokedNotice] = useState<string | null>(null);
 
+  const [licenseOpen, setLicenseOpen] = useState(false);
+
   const canWriteSessions = hasPermission("sessions.write");
+  const canWriteLicenses = hasPermission("licenses.write");
 
   const load = useCallback(async () => {
     try {
@@ -120,6 +124,15 @@ export default function UserDetailPage({
                 Back to users
               </Button>
             </Link>
+            {canWriteLicenses && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setLicenseOpen(true)}
+              >
+                Add license
+              </Button>
+            )}
             {canWriteSessions && (
               <Button
                 variant="outline"
@@ -300,6 +313,13 @@ export default function UserDetailPage({
         error={actionError}
         onConfirm={handleStatusChange}
         onClose={() => setConfirmOpen(false)}
+      />
+
+      <LicenseCreateModal
+        open={licenseOpen}
+        defaultEmail={user.email}
+        onClose={() => setLicenseOpen(false)}
+        onCreated={load}
       />
 
       <ConfirmModal

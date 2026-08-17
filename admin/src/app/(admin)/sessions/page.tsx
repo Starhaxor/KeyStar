@@ -6,6 +6,7 @@ import ConsoleSection, {
 } from "@/components/console/ConsoleSection";
 import EmptyState from "@/components/console/EmptyState";
 import ConfirmModal from "@/components/console/ConfirmModal";
+import RowActions, { type RowAction } from "@/components/console/RowActions";
 import StatusBadge from "@/components/console/StatusBadge";
 import { TableSkeleton } from "@/components/common/Skeleton";
 import Pagination from "@/components/tables/Pagination";
@@ -13,7 +14,7 @@ import { useToast } from "@/context/ToastContext";
 import { api, formatDateTime } from "@/lib/api";
 import type { ConsoleSession, PageResult } from "@/lib/types";
 import { TimeIcon } from "@/icons";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 export default function SessionsPage() {
   const toast = useToast();
@@ -21,6 +22,7 @@ export default function SessionsPage() {
   const [page, setPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState("");
 
   const [revokeTarget, setRevokeTarget] = useState<ConsoleSession | null>(null);
   const [revokeBusy, setRevokeBusy] = useState(false);
@@ -61,9 +63,26 @@ export default function SessionsPage() {
     }
   }
 
+  const allItems = result?.items ?? [];
+  const items = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return allItems;
+    return allItems.filter(
+      (session) =>
+        session.user_email.toLowerCase().includes(q) ||
+        session.id.toLowerCase().includes(q) ||
+        session.license_id.toLowerCase().includes(q) ||
+        session.status.toLowerCase().includes(q)
+    );
+  }, [allItems, filter]);
+
   const totalPages = result
     ? Math.max(1, Math.ceil(result.total / result.page_size))
     : 1;
+
+  const activeCount = allItems.filter((s) => s.status === "active").length;
+  const expiredCount = allItems.filter((s) => s.status === "expired").length;
+  const revokedCount = allItems.filter((s) => s.status === "revoked").length;
 
   return (
     <div>
@@ -71,9 +90,34 @@ export default function SessionsPage() {
         title="Sessions"
         description="Active and recent user authentication sessions."
       />
+      {result && (
+        <div className="mb-4 flex flex-wrap gap-2">
+          <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700 dark:bg-white/[0.05] dark:text-gray-300">
+            {result.total} total
+          </span>
+          <span className="rounded-full bg-success-50 px-3 py-1 text-xs font-medium text-success-600 dark:bg-success-500/10 dark:text-success-400">
+            {activeCount} active (this page)
+          </span>
+          <span className="rounded-full bg-warning-50 px-3 py-1 text-xs font-medium text-warning-600 dark:bg-warning-500/10 dark:text-warning-400">
+            {expiredCount} expired (this page)
+          </span>
+          <span className="rounded-full bg-error-50 px-3 py-1 text-xs font-medium text-error-600 dark:bg-error-500/10 dark:text-error-400">
+            {revokedCount} revoked (this page)
+          </span>
+        </div>
+      )}
       <ConsoleSection
         title="Auth Sessions"
         description={result ? `${result.total} session(s) total` : "Loading sessions"}
+        actions={
+          <input
+            type="search"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Type to filter..."
+            className="h-10 w-56 rounded-lg border border-gray-300 bg-transparent px-3.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+          />
+        }
       >
         {loading && !error ? (
           <TableSkeleton rows={6} cols={7} />
@@ -84,6 +128,12 @@ export default function SessionsPage() {
             icon={<TimeIcon />}
             title="No sessions found"
             message="Verified auth sessions will appear here."
+          />
+        ) : items.length === 0 ? (
+          <EmptyState
+            icon={<TimeIcon />}
+            title="No matching sessions"
+            message={`Nothing matches “${filter}” on this page.`}
           />
         ) : (
           <>
@@ -100,7 +150,19 @@ export default function SessionsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {result.items.map((session) => (
+                {items.map((session) => {
+                  const actions: RowAction[] = [
+                    {
+                      label: "Revoke",
+                      danger: true,
+                      disabled: session.status === "revoked",
+                      onClick: () => {
+                        setRevokeError(null);
+                        setRevokeTarget(session);
+                      },
+                    },
+                  ];
+                  return (
                   <tr
                     key={session.id}
                     className="hover:bg-gray-50 dark:hover:bg-white/[0.02]"
@@ -125,20 +187,12 @@ export default function SessionsPage() {
                     </td>
                     <td className="px-5 py-3.5">
                       <div className="flex justify-end">
-                        <button
-                          onClick={() => {
-                            setRevokeError(null);
-                            setRevokeTarget(session);
-                          }}
-                          disabled={session.status === "revoked"}
-                          className="rounded-lg border border-error-500/40 px-3 py-1.5 text-xs font-medium text-error-500 hover:bg-error-50 disabled:opacity-40 dark:hover:bg-error-500/10"
-                        >
-                          Revoke
-                        </button>
+                        <RowActions actions={actions} />
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
             <div className="flex justify-end border-t border-gray-200 px-5 py-4 dark:border-gray-800">

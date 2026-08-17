@@ -7,14 +7,16 @@ import ConsoleSection, {
 import EmptyState from "@/components/console/EmptyState";
 import { TableSkeleton } from "@/components/common/Skeleton";
 import ConfirmModal from "@/components/console/ConfirmModal";
+import LicenseCreateModal from "@/components/console/LicenseCreateModal";
+import RowActions, { type RowAction } from "@/components/console/RowActions";
 import StatusBadge from "@/components/console/StatusBadge";
 import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import Pagination from "@/components/tables/Pagination";
 import { api, formatDateTime } from "@/lib/api";
-import type { ConsoleLicense, CreatedLicense, PageResult } from "@/lib/types";
+import type { ConsoleLicense, PageResult } from "@/lib/types";
 import { DocsIcon } from "@/icons";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 const fieldClasses =
   "h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90";
@@ -25,14 +27,9 @@ export default function LicensesPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const [filter, setFilter] = useState("");
+
   const [createOpen, setCreateOpen] = useState(false);
-  const [userEmail, setUserEmail] = useState("");
-  const [days, setDays] = useState(30);
-  const [maxDevices, setMaxDevices] = useState(1);
-  const [createBusy, setCreateBusy] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [created, setCreated] = useState<CreatedLicense | null>(null);
-  const [keyCopied, setKeyCopied] = useState(false);
 
   const [extendTarget, setExtendTarget] = useState<ConsoleLicense | null>(null);
   const [extendDays, setExtendDays] = useState(30);
@@ -61,32 +58,26 @@ export default function LicensesPage() {
     load();
   }, [load]);
 
-  async function handleCreate(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setCreateBusy(true);
-    setCreateError(null);
-    try {
-      const response = await api.createLicense(userEmail.trim(), days, maxDevices);
-      setCreated(response);
-      setCreateOpen(false);
-      setKeyCopied(false);
-      await load();
-    } catch (err) {
-      setCreateError(err instanceof Error ? err.message : "License creation failed");
-    } finally {
-      setCreateBusy(false);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("create") === "1") {
+      window.history.replaceState({}, "", "/licenses");
+      setCreateOpen(true);
     }
-  }
+  }, []);
 
-  async function copyKey() {
-    if (!created) return;
-    try {
-      await navigator.clipboard.writeText(created.key);
-      setKeyCopied(true);
-    } catch {
-      setKeyCopied(false);
-    }
-  }
+  const allItems = result?.items ?? [];
+  const items = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return allItems;
+    return allItems.filter(
+      (license) =>
+        license.user_email.toLowerCase().includes(q) ||
+        license.product.toLowerCase().includes(q) ||
+        license.status.toLowerCase().includes(q) ||
+        license.id.toLowerCase().includes(q)
+    );
+  }, [allItems, filter]);
 
   async function handleExtend(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -123,26 +114,51 @@ export default function LicensesPage() {
     ? Math.max(1, Math.ceil(result.total / result.page_size))
     : 1;
 
+  const activeCount = allItems.filter((l) => l.status === "active").length;
+  const revokedCount = allItems.filter((l) => l.status === "revoked").length;
+  const expiredCount = allItems.filter((l) => l.status === "expired").length;
+
   return (
     <div>
       <PageTitle
         title="Licenses"
         description="Issue, extend and revoke product licenses."
         actions={
-          <Button
-            size="sm"
-            onClick={() => {
-              setCreateError(null);
-              setCreateOpen(true);
-            }}
-          >
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
             Create License
           </Button>
         }
       />
+      {result && (
+        <div className="mb-4 flex flex-wrap gap-2">
+          <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700 dark:bg-white/[0.05] dark:text-gray-300">
+            {result.total} total
+          </span>
+          <span className="rounded-full bg-success-50 px-3 py-1 text-xs font-medium text-success-600 dark:bg-success-500/10 dark:text-success-400">
+            {activeCount} active (this page)
+          </span>
+          <span className="rounded-full bg-warning-50 px-3 py-1 text-xs font-medium text-warning-600 dark:bg-warning-500/10 dark:text-warning-400">
+            {expiredCount} expired (this page)
+          </span>
+          <span className="rounded-full bg-error-50 px-3 py-1 text-xs font-medium text-error-600 dark:bg-error-500/10 dark:text-error-400">
+            {revokedCount} revoked (this page)
+          </span>
+        </div>
+      )}
       <ConsoleSection
         title="License Directory"
-        description={result ? `${result.total} license(s) total` : "Loading licenses"}
+        description={
+          result ? `${result.total} license(s) total` : "Loading licenses"
+        }
+        actions={
+          <input
+            type="search"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Type to filter..."
+            className="h-10 w-56 rounded-lg border border-gray-300 bg-transparent px-3.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+          />
+        }
       >
         {loading && !error ? (
           <TableSkeleton rows={6} cols={7} />
@@ -153,6 +169,12 @@ export default function LicensesPage() {
             icon={<DocsIcon />}
             title="No licenses found"
             message="Issue a license to an end user to get started."
+          />
+        ) : items.length === 0 ? (
+          <EmptyState
+            icon={<DocsIcon />}
+            title="No matching licenses"
+            message={`Nothing matches “${filter}” on this page.`}
           />
         ) : (
           <>
@@ -169,57 +191,59 @@ export default function LicensesPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {result.items.map((license) => (
-                  <tr
-                    key={license.id}
-                    className="hover:bg-gray-50 dark:hover:bg-white/[0.02]"
-                  >
-                    <td className="px-5 py-3.5 text-gray-700 dark:text-gray-300">
-                      {license.user_email}
-                    </td>
-                    <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
-                      {license.product}
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <StatusBadge status={license.status} />
-                    </td>
-                    <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
-                      {license.max_devices}
-                    </td>
-                    <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
-                      {formatDateTime(license.expires_at)}
-                    </td>
-                    <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
-                      {formatDateTime(license.created_at)}
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <div className="flex justify-end gap-2">
-                        <button
-                          onClick={() => {
-                            setExtendError(null);
-                            setExtendDays(30);
-                            setExtendMaxDevices(license.max_devices);
-                            setExtendTarget(license);
-                          }}
-                          disabled={license.status === "revoked"}
-                          className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-white/[0.03]"
-                        >
-                          Extend
-                        </button>
-                        <button
-                          onClick={() => {
-                            setRevokeError(null);
-                            setRevokeTarget(license);
-                          }}
-                          disabled={license.status === "revoked"}
-                          className="rounded-lg border border-error-500/40 px-3 py-1.5 text-xs font-medium text-error-500 hover:bg-error-50 disabled:opacity-40 dark:hover:bg-error-500/10"
-                        >
-                          Revoke
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {items.map((license) => {
+                  const actions: RowAction[] = [
+                    {
+                      label: "Extend",
+                      disabled: license.status === "revoked",
+                      onClick: () => {
+                        setExtendError(null);
+                        setExtendDays(30);
+                        setExtendMaxDevices(license.max_devices);
+                        setExtendTarget(license);
+                      },
+                    },
+                    {
+                      label: "Revoke",
+                      danger: true,
+                      disabled: license.status === "revoked",
+                      onClick: () => {
+                        setRevokeError(null);
+                        setRevokeTarget(license);
+                      },
+                    },
+                  ];
+                  return (
+                    <tr
+                      key={license.id}
+                      className="hover:bg-gray-50 dark:hover:bg-white/[0.02]"
+                    >
+                      <td className="px-5 py-3.5 text-gray-700 dark:text-gray-300">
+                        {license.user_email}
+                      </td>
+                      <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
+                        {license.product}
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <StatusBadge status={license.status} />
+                      </td>
+                      <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
+                        {license.max_devices}
+                      </td>
+                      <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
+                        {formatDateTime(license.expires_at)}
+                      </td>
+                      <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
+                        {formatDateTime(license.created_at)}
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex justify-end">
+                          <RowActions actions={actions} />
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
             <div className="flex justify-end border-t border-gray-200 px-5 py-4 dark:border-gray-800">
@@ -235,114 +259,11 @@ export default function LicensesPage() {
         )}
       </ConsoleSection>
 
-      {/* Create license modal */}
-      <Modal
-        isOpen={createOpen}
-        onClose={() => !createBusy && setCreateOpen(false)}
-        className="max-w-md p-6"
-      >
-        <h3 className="mb-4 text-lg font-semibold text-gray-800 dark:text-white/90">
-          Create License
-        </h3>
-        <form onSubmit={handleCreate} className="space-y-4">
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
-              User Email
-            </label>
-            <input
-              className={fieldClasses}
-              type="email"
-              required
-              value={userEmail}
-              onChange={(e) => setUserEmail(e.target.value)}
-              placeholder="user@example.com"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
-                Duration (days)
-              </label>
-              <input
-                className={fieldClasses}
-                type="number"
-                min={1}
-                max={3650}
-                required
-                value={days}
-                onChange={(e) => setDays(Number(e.target.value))}
-              />
-            </div>
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
-                Max Devices
-              </label>
-              <input
-                className={fieldClasses}
-                type="number"
-                min={1}
-                max={10000}
-                required
-                value={maxDevices}
-                onChange={(e) => setMaxDevices(Number(e.target.value))}
-              />
-            </div>
-          </div>
-          {createError && (
-            <p className="text-sm text-error-500" role="alert">
-              {createError}
-            </p>
-          )}
-          <div className="flex justify-end gap-3 pt-2">
-            <button
-              type="button"
-              disabled={createBusy}
-              onClick={() => setCreateOpen(false)}
-              className="inline-flex items-center justify-center font-medium gap-2 rounded-lg transition px-4 py-3 text-sm bg-white text-gray-700 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-400 dark:ring-gray-700 disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <Button size="sm" disabled={createBusy}>
-              {createBusy ? "Creating..." : "Create"}
-            </Button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* One-time key modal */}
-      <Modal
-        isOpen={created !== null}
-        onClose={() => setCreated(null)}
-        className="max-w-lg p-6"
-      >
-        {created && (
-          <div>
-            <h3 className="mb-2 text-lg font-semibold text-gray-800 dark:text-white/90">
-              License Created
-            </h3>
-            <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-              This is the only time the plaintext key is shown. Copy it now —
-              only its HMAC is stored.
-            </p>
-            <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 dark:border-gray-800 dark:bg-white/[0.03]">
-              <code className="flex-1 break-all font-mono text-sm text-gray-800 dark:text-white/90">
-                {created.key}
-              </code>
-              <button
-                onClick={copyKey}
-                className="shrink-0 rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600"
-              >
-                {keyCopied ? "Copied" : "Copy"}
-              </button>
-            </div>
-            <div className="mt-4 flex justify-end">
-              <Button size="sm" onClick={() => setCreated(null)}>
-                Done
-              </Button>
-            </div>
-          </div>
-        )}
-      </Modal>
+      <LicenseCreateModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={load}
+      />
 
       {/* Extend modal */}
       <Modal

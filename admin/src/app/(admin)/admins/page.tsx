@@ -5,14 +5,17 @@ import ConsoleSection, {
   LoadingNote,
   PageTitle,
 } from "@/components/console/ConsoleSection";
+import EmptyState from "@/components/console/EmptyState";
 import StatusBadge from "@/components/console/StatusBadge";
+import RowActions, { type RowAction } from "@/components/console/RowActions";
 import Label from "@/components/form/Label";
 import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import { useAdminIdentity } from "@/context/AdminIdentityContext";
 import { api, formatDateTime } from "@/lib/api";
 import type { AdminAccount, AdminRole } from "@/lib/types";
-import React, { useCallback, useEffect, useState } from "react";
+import { GroupIcon } from "@/icons";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 const selectClasses =
   "h-11 w-full rounded-lg border appearance-none px-4 py-2.5 text-sm shadow-theme-xs focus:outline-hidden focus:ring-3 dark:bg-gray-900 dark:text-white/90 bg-transparent text-gray-800 border-gray-300 focus:border-brand-300 focus:ring-brand-500/10 dark:border-gray-700 dark:focus:border-brand-800";
@@ -30,6 +33,7 @@ export default function AdminsPage() {
   const [roles, setRoles] = useState<AdminRole[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState("");
 
   const [editing, setEditing] = useState<AdminAccount | null>(null);
   const [editRole, setEditRole] = useState("");
@@ -66,6 +70,15 @@ export default function AdminsPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("create") === "1") {
+      window.history.replaceState({}, "", "/admins");
+      openCreate();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function openEdit(admin: AdminAccount) {
     setEditing(admin);
@@ -113,21 +126,61 @@ export default function AdminsPage() {
     }
   }
 
+  const filtered = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return admins;
+    return admins.filter(
+      (admin) =>
+        admin.email.toLowerCase().includes(q) ||
+        admin.role.toLowerCase().includes(q) ||
+        admin.status.toLowerCase().includes(q)
+    );
+  }, [admins, filter]);
+
+  const ownerCount = admins.filter((a) => a.role === "owner").length;
+  const activeCount = admins.filter((a) => a.status === "active").length;
+  const mfaCount = admins.filter((a) => a.mfa_enrolled).length;
+
   return (
     <div>
       <PageTitle
         title="Admins"
         description="Administrator accounts, roles and account status."
       />
+      {!loading && !error && (
+        <div className="mb-4 flex flex-wrap gap-2">
+          <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700 dark:bg-white/[0.05] dark:text-gray-300">
+            {admins.length} total
+          </span>
+          <span className="rounded-full bg-success-50 px-3 py-1 text-xs font-medium text-success-600 dark:bg-success-500/10 dark:text-success-400">
+            {activeCount} active
+          </span>
+          <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-medium text-brand-600 dark:bg-brand-500/10 dark:text-brand-400">
+            {ownerCount} owner
+          </span>
+          <span className="rounded-full bg-warning-50 px-3 py-1 text-xs font-medium text-warning-600 dark:bg-warning-500/10 dark:text-warning-400">
+            {mfaCount} MFA enrolled
+          </span>
+        </div>
+      )}
       <ConsoleSection
         title="Admin Accounts"
         description={`${admins.length} account(s)`}
         actions={
-          canWrite ? (
-            <Button size="sm" onClick={openCreate}>
-              Add admin
-            </Button>
-          ) : undefined
+          <div className="flex items-center gap-2">
+            <input
+              type="search"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Type to filter..."
+              className="h-10 w-56 rounded-lg border border-gray-300 bg-transparent px-3.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+            />
+            {canWrite ? (
+              <Button size="sm" onClick={openCreate}>
+                Add admin
+              </Button>
+            ) : undefined}
+          </div>
         }
       >
         {loading && !error ? (
@@ -135,7 +188,17 @@ export default function AdminsPage() {
         ) : error ? (
           <ErrorNote message={error} />
         ) : admins.length === 0 ? (
-          <EmptyNote message="No admin accounts found." />
+          <EmptyState
+            icon={<GroupIcon />}
+            title="No admin accounts found"
+            message="Console operators will appear here."
+          />
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            icon={<GroupIcon />}
+            title="No matching admins"
+            message={`Nothing matches “${filter}”.`}
+          />
         ) : (
           <table className="w-full text-left text-sm">
             <thead className="border-b border-gray-200 dark:border-gray-800">
@@ -149,10 +212,10 @@ export default function AdminsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-              {admins.map((admin) => {
+              {filtered.map((admin) => {
                 const isSelf = admin.id === identity?.id;
                 return (
-                  <tr key={admin.id}>
+                  <tr key={admin.id} className="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
                     <td className="px-5 py-3.5 text-gray-700 dark:text-gray-300">
                       {admin.email}
                       {isSelf && (
@@ -185,15 +248,20 @@ export default function AdminsPage() {
                     </td>
                     {canWrite && (
                       <td className="px-5 py-3.5 text-right">
-                        {!isSelf && (
-                          <button
-                            type="button"
-                            className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/[0.05]"
-                            onClick={() => openEdit(admin)}
-                          >
-                            Edit
-                          </button>
-                        )}
+                        <div className="flex justify-end">
+                          {!isSelf && (
+                            <RowActions
+                              actions={
+                                [
+                                  {
+                                    label: "Edit account",
+                                    onClick: () => openEdit(admin),
+                                  },
+                                ] as RowAction[]
+                              }
+                            />
+                          )}
+                        </div>
                       </td>
                     )}
                   </tr>

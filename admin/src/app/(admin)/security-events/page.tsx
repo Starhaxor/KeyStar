@@ -5,10 +5,12 @@ import ConsoleSection, {
   LoadingNote,
   PageTitle,
 } from "@/components/console/ConsoleSection";
+import EmptyState from "@/components/console/EmptyState";
 import Pagination from "@/components/tables/Pagination";
 import { api, formatDateTime } from "@/lib/api";
 import type { PageResult, SecurityEvent } from "@/lib/types";
-import React, { useCallback, useEffect, useState } from "react";
+import { AlertIcon } from "@/icons";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 const severityStyles: Record<string, string> = {
   info: "bg-gray-100 text-gray-700 dark:bg-white/[0.05] dark:text-gray-300",
@@ -23,6 +25,7 @@ export default function SecurityEventsPage() {
   const [page, setPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -41,9 +44,25 @@ export default function SecurityEventsPage() {
     load();
   }, [load]);
 
+  const allItems = result?.items ?? [];
+  const items = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return allItems;
+    return allItems.filter(
+      (event) =>
+        event.kind.toLowerCase().includes(q) ||
+        event.severity.toLowerCase().includes(q) ||
+        (event.actor_email ?? "").toLowerCase().includes(q)
+    );
+  }, [allItems, filter]);
+
   const totalPages = result
     ? Math.max(1, Math.ceil(result.total / result.page_size))
     : 1;
+
+  const criticalCount = allItems.filter((e) => e.severity === "critical").length;
+  const warningCount = allItems.filter((e) => e.severity === "warning").length;
+  const mfaCount = allItems.filter((e) => e.kind.toLowerCase().includes("mfa")).length;
 
   return (
     <div>
@@ -51,16 +70,51 @@ export default function SecurityEventsPage() {
         title="Security Events"
         description="Authentication, MFA and authorization signals across the console."
       />
+      {result && (
+        <div className="mb-4 flex flex-wrap gap-2">
+          <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700 dark:bg-white/[0.05] dark:text-gray-300">
+            {result.total} total
+          </span>
+          <span className="rounded-full bg-error-50 px-3 py-1 text-xs font-medium text-error-600 dark:bg-error-500/10 dark:text-error-400">
+            {criticalCount} critical (this page)
+          </span>
+          <span className="rounded-full bg-warning-50 px-3 py-1 text-xs font-medium text-warning-600 dark:bg-warning-500/10 dark:text-warning-400">
+            {warningCount} warnings (this page)
+          </span>
+          <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-medium text-brand-600 dark:bg-brand-500/10 dark:text-brand-400">
+            {mfaCount} MFA events (this page)
+          </span>
+        </div>
+      )}
       <ConsoleSection
         title="Recent Events"
         description={result ? `${result.total} event(s) total` : "Loading events"}
+        actions={
+          <input
+            type="search"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Type to filter..."
+            className="h-10 w-56 rounded-lg border border-gray-300 bg-transparent px-3.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+          />
+        }
       >
         {loading && !error ? (
           <LoadingNote />
         ) : error ? (
           <ErrorNote message={error} />
         ) : !result || result.items.length === 0 ? (
-          <EmptyNote message="No security events recorded yet." />
+          <EmptyState
+            icon={<AlertIcon />}
+            title="No security events yet"
+            message="Authentication, MFA and authorization signals will appear here."
+          />
+        ) : items.length === 0 ? (
+          <EmptyState
+            icon={<AlertIcon />}
+            title="No matching events"
+            message={`Nothing matches “${filter}” on this page.`}
+          />
         ) : (
           <>
             <table className="w-full text-left text-sm">
@@ -74,7 +128,7 @@ export default function SecurityEventsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {result.items.map((event) => (
+                {items.map((event) => (
                   <tr
                     key={event.id}
                     className="hover:bg-gray-50 dark:hover:bg-white/[0.02]"
