@@ -51,6 +51,14 @@ export default function UsersPage() {
 
   const [resetTarget, setResetTarget] = useState<ConsoleUser | null>(null);
 
+  // Bulk selection
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkConfirm, setBulkConfirm] = useState<
+    "enable" | "disable" | "revoke" | null
+  >(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+
   const canWrite = hasPermission("users.write");
 
   const load = useCallback(async () => {
@@ -160,12 +168,99 @@ export default function UsersPage() {
   const activeCount = items.filter((u) => u.status === "active").length;
   const disabledCount = items.length - activeCount;
 
+  const allOnPageSelected =
+    items.length > 0 && items.every((u) => selected.has(u.id));
+
+  function toggleAll() {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allOnPageSelected) {
+        items.forEach((u) => next.delete(u.id));
+      } else {
+        items.forEach((u) => next.add(u.id));
+      }
+      return next;
+    });
+  }
+
+  function toggleOne(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  async function handleBulk() {
+    if (!bulkConfirm || selected.size === 0) return;
+    const ids = Array.from(selected);
+    setBulkBusy(true);
+    setBulkError(null);
+    try {
+      if (bulkConfirm === "revoke") {
+        const response = await api.bulkRevokeUserSessions(ids);
+        toast.success(
+          "Sessions revoked",
+          `${response.revoked} session(s) across ${ids.length} user(s)`
+        );
+      } else {
+        const status = bulkConfirm === "disable" ? "disabled" : "active";
+        const response = await api.bulkSetUserStatus(ids, status);
+        toast.success(
+          status === "disabled" ? "Users disabled" : "Users enabled",
+          `${response.updated} user(s) updated`
+        );
+      }
+      setBulkConfirm(null);
+      setSelected(new Set());
+      await load();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Bulk action failed";
+      setBulkError(message);
+      toast.error("Bulk action failed", message);
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   return (
     <div>
       <PageTitle
         title="Users"
         description="Licensed end users of the product."
       />
+      {/* Bulk action bar */}
+      {selected.size > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 dark:border-brand-500/30 dark:bg-brand-500/10">
+          <span className="text-sm font-medium text-brand-700 dark:text-brand-300">
+            {selected.size} selected
+          </span>
+          {canWrite && (
+            <>
+              <Button size="sm" variant="success" onClick={() => setBulkConfirm("enable")}>
+                Enable
+              </Button>
+              <Button size="sm" variant="danger" onClick={() => setBulkConfirm("disable")}>
+                Disable
+              </Button>
+              <Button size="sm" variant="warning" onClick={() => setBulkConfirm("revoke")}>
+                Revoke sessions
+              </Button>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={() => setSelected(new Set())}
+            className="ml-auto rounded-lg px-2 py-1 text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+          >
+            Clear
+          </button>
+        </div>
+      )}
       {/* Page snapshot summary */}
       {result && (
         <div className="mb-4 flex flex-wrap gap-2">
@@ -229,6 +324,15 @@ export default function UsersPage() {
             <table className="w-full text-left text-sm">
               <thead className="border-b border-gray-200 dark:border-gray-800">
                 <tr className="text-xs uppercase text-gray-400">
+                  <th className="w-12 px-5 py-3">
+                    <input
+                      type="checkbox"
+                      checked={allOnPageSelected}
+                      onChange={toggleAll}
+                      aria-label="Select all users on this page"
+                      className="h-4 w-4 rounded border-gray-300 accent-brand-500 dark:border-gray-700"
+                    />
+                  </th>
                   <th className="px-5 py-3 font-medium">Email</th>
                   <th className="px-5 py-3 font-medium">Status</th>
                   <th className="px-5 py-3 font-medium">Licenses</th>
@@ -280,8 +384,19 @@ export default function UsersPage() {
                   return (
                     <tr
                       key={user.id}
-                      className="hover:bg-gray-50 dark:hover:bg-white/[0.02]"
+                      className={`hover:bg-gray-50 dark:hover:bg-white/[0.02] ${
+                        selected.has(user.id) ? "bg-brand-50/60 dark:bg-brand-500/[0.06]" : ""
+                      }`}
                     >
+                      <td className="px-5 py-3.5">
+                        <input
+                          type="checkbox"
+                          checked={selected.has(user.id)}
+                          onChange={() => toggleOne(user.id)}
+                          aria-label={`Select ${user.email}`}
+                          className="h-4 w-4 rounded border-gray-300 accent-brand-500 dark:border-gray-700"
+                        />
+                      </td>
                       <td className="px-5 py-3.5">
                         <Link
                           href={`/users/${user.id}`}
@@ -435,6 +550,35 @@ export default function UsersPage() {
           toast.success("Password reset", resetTarget.email);
           return { tempPassword: response.temp_password ?? null };
         }}
+      />
+
+      <ConfirmModal
+        isOpen={bulkConfirm !== null}
+        title={
+          bulkConfirm === "revoke"
+            ? "Revoke sessions"
+            : bulkConfirm === "disable"
+              ? "Disable users"
+              : "Enable users"
+        }
+        message={
+          bulkConfirm === "revoke"
+            ? `Sign out all sessions for the ${selected.size} selected user(s)?`
+            : bulkConfirm === "disable"
+              ? `Disable the ${selected.size} selected user(s)? They will no longer be able to authenticate until re-enabled.`
+              : `Enable the ${selected.size} selected user(s)?`
+        }
+        confirmLabel={
+          bulkConfirm === "revoke"
+            ? "Revoke"
+            : bulkConfirm === "disable"
+              ? "Disable"
+              : "Enable"
+        }
+        busy={bulkBusy}
+        error={bulkError}
+        onConfirm={handleBulk}
+        onClose={() => setBulkConfirm(null)}
       />
     </div>
   );

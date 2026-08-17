@@ -241,6 +241,18 @@ export const api = {
       body: { status },
     });
   },
+  bulkSetUserStatus(ids: string[], status: "active" | "disabled") {
+    return request<{ ok: boolean; updated: number }>(
+      "/v1/admin/users/bulk-status",
+      { method: "POST", body: { ids, status } }
+    );
+  },
+  bulkRevokeUserSessions(ids: string[]) {
+    return request<{ ok: boolean; revoked: number }>(
+      "/v1/admin/users/bulk/revoke-sessions",
+      { method: "POST", body: { ids } }
+    );
+  },
   revokeUserSessions(userId: string) {
     return request<{ ok: boolean; revoked: number }>(
       `/v1/admin/users/${userId}/sessions/revoke`,
