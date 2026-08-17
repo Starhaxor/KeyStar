@@ -20,8 +20,10 @@ import type {
   UserDetail,
 } from "./types";
 
-export const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+// Same-origin: requests go to this Next.js server and are proxied to the
+// backend via the /v1 rewrite in next.config.ts. This keeps the session
+// cookie on the admin origin (localhost) instead of the API's host.
+export const API_URL = "";
 
 const SESSION_COOKIE = "starloader_admin_session";
 const CSRF_COOKIE = "starloader_admin_csrf";

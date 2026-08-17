@@ -55,5 +55,7 @@ async function verifySession(
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|images/).*)"],
+  // Guard pages only; /v1/* API calls fall through to the rewrites that
+  // proxy them to the backend, where auth is enforced.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|images/|v1/).*)"],
 };
