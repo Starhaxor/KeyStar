@@ -45,7 +45,7 @@ export default function ActivityChart({ stats }: { stats: DailyStat[] }) {
         foreColor: "#98a2b3",
         zoom: { enabled: false },
       },
-      colors: ["#465fff", "#12b76a", "#f79009", "#7a5af8"],
+      colors: ["#16a34a", "#0ba5ec", "#f79009", "#7a5af8"],
       dataLabels: { enabled: false },
       stroke: { curve: "smooth" as const, width: 2 },
       fill: {
