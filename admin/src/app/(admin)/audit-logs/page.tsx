@@ -7,6 +7,7 @@ import ConsoleSection, {
 } from "@/components/console/ConsoleSection";
 import EmptyState from "@/components/console/EmptyState";
 import { TableSkeleton } from "@/components/common/Skeleton";
+import ExportCsvButton from "@/components/common/ExportCsvButton";
 import Pagination from "@/components/tables/Pagination";
 import { api, formatDateTime } from "@/lib/api";
 import type { AuditEntry, PageResult } from "@/lib/types";
@@ -62,13 +63,26 @@ export default function AuditLogsPage() {
         title="Admin Activity"
         description={result ? `${result.total} event(s) total` : "Loading audit log"}
         actions={
-          <input
-            type="search"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filter by action or admin..."
-            className="h-10 w-60 rounded-lg border border-gray-300 bg-transparent px-3.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
-          />
+          <div className="flex items-center gap-2">
+            <input
+              type="search"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Filter by action or admin..."
+              className="h-10 w-60 rounded-lg border border-gray-300 bg-transparent px-3.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+            />
+            <ExportCsvButton
+              filename="audit-logs.csv"
+              headers={["action", "actor_email", "resource_type", "resource_id", "created_at"]}
+              rows={items.map((entry) => [
+                entry.action,
+                entry.actor_email,
+                entry.resource_type,
+                entry.resource_id,
+                formatDateTime(entry.created_at),
+              ])}
+            />
+          </div>
         }
       >
         {loading && !error ? (

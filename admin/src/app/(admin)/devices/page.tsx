@@ -6,6 +6,7 @@ import ConsoleSection, {
   PageTitle,
 } from "@/components/console/ConsoleSection";
 import EmptyState from "@/components/console/EmptyState";
+import ExportCsvButton from "@/components/common/ExportCsvButton";
 import ConfirmModal from "@/components/console/ConfirmModal";
 import RowActions, { type RowAction } from "@/components/console/RowActions";
 import StatusBadge from "@/components/console/StatusBadge";
@@ -161,13 +162,27 @@ export default function DevicesPage() {
         title="Device Directory"
         description={result ? `${result.total} device(s) total` : "Loading devices"}
         actions={
-          <input
-            type="search"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Type to filter..."
-            className="h-10 w-56 rounded-lg border border-gray-300 bg-transparent px-3.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
-          />
+          <div className="flex items-center gap-2">
+            <input
+              type="search"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Type to filter..."
+              className="h-10 w-56 rounded-lg border border-gray-300 bg-transparent px-3.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+            />
+            <ExportCsvButton
+              filename="devices.csv"
+              headers={["id", "user_email", "tpm_registered", "status", "last_seen_at", "created_at"]}
+              rows={items.map((d) => [
+                d.id,
+                d.user_email,
+                d.tpm_registered ? "yes" : "no",
+                d.status,
+                formatDateTime(d.last_seen_at),
+                formatDateTime(d.created_at),
+              ])}
+            />
+          </div>
         }
       >
         {loading && !error ? (

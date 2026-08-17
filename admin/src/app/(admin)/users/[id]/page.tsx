@@ -7,6 +7,7 @@ import ConsoleSection, {
 } from "@/components/console/ConsoleSection";
 import ConfirmModal from "@/components/console/ConfirmModal";
 import LicenseCreateModal from "@/components/console/LicenseCreateModal";
+import ResetPasswordModal from "@/components/console/ResetPasswordModal";
 import RowActions, { type RowAction } from "@/components/console/RowActions";
 import StatusBadge from "@/components/console/StatusBadge";
 import Button from "@/components/ui/button/Button";
@@ -88,9 +89,11 @@ export default function UserDetailPage({
   const [sessionRevokeBusy, setSessionRevokeBusy] = useState(false);
   const [sessionRevokeError, setSessionRevokeError] = useState<string | null>(null);
 
+  // Password reset
+  const [resetOpen, setResetOpen] = useState(false);
+
   // Promote to admin
   const [promoteOpen, setPromoteOpen] = useState(false);
-  const [promotePassword, setPromotePassword] = useState("");
   const [promoteRole, setPromoteRole] = useState("viewer");
   const [promoteBusy, setPromoteBusy] = useState(false);
   const [promoteError, setPromoteError] = useState<string | null>(null);
@@ -99,6 +102,7 @@ export default function UserDetailPage({
   const canWriteLicenses = hasPermission("licenses.write");
   const canWriteDevices = hasPermission("devices.write");
   const canWriteAdmins = hasPermission("admins.write");
+  const canWriteUsers = hasPermission("users.write");
 
   const load = useCallback(async () => {
     try {
@@ -239,7 +243,7 @@ export default function UserDetailPage({
     setPromoteBusy(true);
     setPromoteError(null);
     try {
-      await api.createAdmin(detail.user.email, promotePassword, promoteRole);
+      await api.promoteToAdmin(detail.user.id, promoteRole);
       setPromoteOpen(false);
       toast.success("Admin account created", detail.user.email);
     } catch (err) {
@@ -290,7 +294,6 @@ export default function UserDetailPage({
                 variant="info"
                 size="sm"
                 onClick={() => {
-                  setPromotePassword("");
                   setPromoteRole("viewer");
                   setPromoteError(null);
                   setPromoteOpen(true);
@@ -318,6 +321,15 @@ export default function UserDetailPage({
                 }}
               >
                 Revoke sessions
+              </Button>
+            )}
+            {canWriteUsers && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setResetOpen(true)}
+              >
+                Reset password
               </Button>
             )}
             <Button
@@ -727,8 +739,9 @@ export default function UserDetailPage({
               Promote to admin
             </h3>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              Creates a console account for {user.email}. The new admin must
-              enroll MFA on their first login.
+              Grants {user.email} access to the admin console with their
+              existing password — no new password is needed. The new admin
+              must enroll MFA on their first login.
             </p>
           </div>
           <div>
@@ -738,18 +751,6 @@ export default function UserDetailPage({
               value={user.email}
               readOnly
               disabled
-              className={fieldClasses}
-            />
-          </div>
-          <div>
-            <Label>Password</Label>
-            <input
-              type="password"
-              required
-              minLength={12}
-              value={promotePassword}
-              onChange={(e) => setPromotePassword(e.target.value)}
-              placeholder="At least 12 characters"
               className={fieldClasses}
             />
           </div>
@@ -853,6 +854,21 @@ export default function UserDetailPage({
         error={deviceRevokeError}
         onConfirm={handleDeviceRevoke}
         onClose={() => setDeviceRevokeTarget(null)}
+      />
+
+      <ResetPasswordModal
+        open={resetOpen}
+        userEmail={user.email}
+        onClose={() => setResetOpen(false)}
+        onReset={async (password) => {
+          const response = await api.resetUserPassword(
+            user.id,
+            password || undefined
+          );
+          await load();
+          toast.success("Password reset", user.email);
+          return { tempPassword: response.temp_password ?? null };
+        }}
       />
 
       <ConfirmModal

@@ -9,6 +9,7 @@ import ConfirmModal from "@/components/console/ConfirmModal";
 import RowActions, { type RowAction } from "@/components/console/RowActions";
 import StatusBadge from "@/components/console/StatusBadge";
 import { TableSkeleton } from "@/components/common/Skeleton";
+import ExportCsvButton from "@/components/common/ExportCsvButton";
 import Pagination from "@/components/tables/Pagination";
 import { useToast } from "@/context/ToastContext";
 import { api, formatDateTime } from "@/lib/api";
@@ -110,13 +111,26 @@ export default function SessionsPage() {
         title="Auth Sessions"
         description={result ? `${result.total} session(s) total` : "Loading sessions"}
         actions={
-          <input
-            type="search"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Type to filter..."
-            className="h-10 w-56 rounded-lg border border-gray-300 bg-transparent px-3.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
-          />
+          <div className="flex items-center gap-2">
+            <input
+              type="search"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Type to filter..."
+              className="h-10 w-56 rounded-lg border border-gray-300 bg-transparent px-3.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+            />
+            <ExportCsvButton
+              filename="sessions.csv"
+              headers={["id", "user_email", "status", "expires_at", "created_at"]}
+              rows={items.map((s) => [
+                s.id,
+                s.user_email,
+                s.status,
+                formatDateTime(s.expires_at),
+                formatDateTime(s.created_at),
+              ])}
+            />
+          </div>
         }
       >
         {loading && !error ? (

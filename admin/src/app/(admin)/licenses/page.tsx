@@ -6,6 +6,7 @@ import ConsoleSection, {
 } from "@/components/console/ConsoleSection";
 import EmptyState from "@/components/console/EmptyState";
 import { TableSkeleton } from "@/components/common/Skeleton";
+import ExportCsvButton from "@/components/common/ExportCsvButton";
 import ConfirmModal from "@/components/console/ConfirmModal";
 import LicenseCreateModal from "@/components/console/LicenseCreateModal";
 import RowActions, { type RowAction } from "@/components/console/RowActions";
@@ -151,13 +152,27 @@ export default function LicensesPage() {
           result ? `${result.total} license(s) total` : "Loading licenses"
         }
         actions={
-          <input
-            type="search"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Type to filter..."
-            className="h-10 w-56 rounded-lg border border-gray-300 bg-transparent px-3.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
-          />
+          <div className="flex items-center gap-2">
+            <input
+              type="search"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Type to filter..."
+              className="h-10 w-56 rounded-lg border border-gray-300 bg-transparent px-3.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+            />
+            <ExportCsvButton
+              filename="licenses.csv"
+              headers={["user_email", "product", "status", "max_devices", "expires_at", "created_at"]}
+              rows={items.map((l) => [
+                l.user_email,
+                l.product,
+                l.status,
+                l.max_devices,
+                formatDateTime(l.expires_at),
+                formatDateTime(l.created_at),
+              ])}
+            />
+          </div>
         }
       >
         {loading && !error ? (

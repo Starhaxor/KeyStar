@@ -13,6 +13,8 @@ import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import { TableSkeleton } from "@/components/common/Skeleton";
 import ConfirmModal from "@/components/console/ConfirmModal";
+import ResetPasswordModal from "@/components/console/ResetPasswordModal";
+import ExportCsvButton from "@/components/common/ExportCsvButton";
 import { useAdminIdentity } from "@/context/AdminIdentityContext";
 import { useToast } from "@/context/ToastContext";
 import { api, formatDateTime } from "@/lib/api";
@@ -46,6 +48,8 @@ export default function UsersPage() {
   const [revokeTarget, setRevokeTarget] = useState<ConsoleUser | null>(null);
   const [revokeBusy, setRevokeBusy] = useState(false);
   const [revokeError, setRevokeError] = useState<string | null>(null);
+
+  const [resetTarget, setResetTarget] = useState<ConsoleUser | null>(null);
 
   const canWrite = hasPermission("users.write");
 
@@ -190,6 +194,19 @@ export default function UsersPage() {
               placeholder="Type to filter by email..."
               className="h-10 w-56 rounded-lg border border-gray-300 bg-transparent px-3.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
             />
+            <ExportCsvButton
+              filename="users.csv"
+              headers={["email", "status", "licenses", "devices", "active_sessions", "last_login_at", "created_at"]}
+              rows={items.map((u) => [
+                u.email,
+                u.status,
+                u.license_count,
+                u.device_count,
+                u.active_session_count,
+                formatDateTime(u.last_login_at),
+                formatDateTime(u.created_at),
+              ])}
+            />
             {canWrite && (
               <Button size="sm" onClick={openCreate}>
                 Add user
@@ -252,6 +269,11 @@ export default function UsersPage() {
                           setRevokeError(null);
                           setRevokeTarget(user);
                         },
+                      },
+                      {
+                        label: "Reset password",
+                        tone: "warning",
+                        onClick: () => setResetTarget(user),
                       }
                     );
                   }
@@ -397,6 +419,22 @@ export default function UsersPage() {
         error={revokeError}
         onConfirm={handleRevoke}
         onClose={() => setRevokeTarget(null)}
+      />
+
+      <ResetPasswordModal
+        open={resetTarget !== null}
+        userEmail={resetTarget?.email ?? ""}
+        onClose={() => setResetTarget(null)}
+        onReset={async (password) => {
+          if (!resetTarget) return { tempPassword: null };
+          const response = await api.resetUserPassword(
+            resetTarget.id,
+            password || undefined
+          );
+          await load();
+          toast.success("Password reset", resetTarget.email);
+          return { tempPassword: response.temp_password ?? null };
+        }}
       />
     </div>
   );

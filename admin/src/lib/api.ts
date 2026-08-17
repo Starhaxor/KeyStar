@@ -173,6 +173,14 @@ export const api = {
       body: { email, password, role },
     });
   },
+  // Turns an existing end-user into a dashboard admin, reusing the user's
+  // existing password hash — no new password is introduced.
+  promoteToAdmin(userId: string, role: string) {
+    return request<{ ok: boolean; admin: AdminAccount }>(
+      `/v1/admin/users/${userId}/promote`,
+      { method: "POST", body: { role } }
+    );
+  },
   roles() {
     return request<{ ok: boolean; items: AdminRole[]; total: number }>(
       "/v1/admin/roles"
@@ -225,6 +233,18 @@ export const api = {
       `/v1/admin/users/${userId}/sessions/revoke`,
       { method: "POST", body: {} }
     );
+  },
+  // Sets a new password for an end-user. When password is empty the backend
+  // generates one and returns it as temp_password exactly once.
+  resetUserPassword(userId: string, password?: string) {
+    return request<{
+      ok: boolean;
+      password_set: boolean;
+      temp_password?: string;
+    }>(`/v1/admin/users/${userId}/password`, {
+      method: "POST",
+      body: { password: password ?? "" },
+    });
   },
   licenses(page: number) {
     return request<{ ok: boolean } & PageResult<ConsoleLicense>>(
