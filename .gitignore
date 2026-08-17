@@ -12,3 +12,5 @@ backend/.env
 backend/*.exe
 
 admin/.env
+
+.staging
