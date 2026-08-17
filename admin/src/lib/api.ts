@@ -20,6 +20,7 @@ import type {
   PageResult,
   RoleMember,
   SecurityEvent,
+  TodayStats,
   UserDetail,
   Variable,
 } from "./types";
@@ -250,6 +251,9 @@ export const api = {
     return request<{ ok: boolean; days: DailyStat[] }>(
       "/v1/admin/overview/stats"
     );
+  },
+  overviewToday() {
+    return request<{ ok: boolean } & TodayStats>("/v1/admin/overview/today");
   },
   users(page: number, search: string, status = "") {
     return request<{ ok: boolean } & PageResult<ConsoleUser>>(

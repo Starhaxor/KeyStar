@@ -4,44 +4,73 @@ import CompositionChart from "@/components/console/CompositionChart";
 import { CardSkeleton, Skeleton, TableSkeleton } from "@/components/common/Skeleton";
 import ConsoleSection, {
   EmptyNote,
-  ErrorNote,
-  LoadingNote,
   PageTitle,
 } from "@/components/console/ConsoleSection";
 import StatCard from "@/components/console/StatCard";
 import { api, formatDateTime } from "@/lib/api";
-import type { DailyStat, Overview } from "@/lib/types";
-import { BoxCubeIcon, DocsIcon, TimeIcon, UserCircleIcon } from "@/icons";
-import React, { useCallback, useEffect, useState } from "react";
+import type { DailyStat, Overview, TodayStats } from "@/lib/types";
+import {
+  AlertIcon,
+  BoltIcon,
+  BoxCubeIcon,
+  DocsIcon,
+  LockIcon,
+  TimeIcon,
+  UserCircleIcon,
+  UserIcon,
+} from "@/icons";
+import React, { useEffect, useState } from "react";
 
 export default function OverviewPage() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [stats, setStats] = useState<DailyStat[] | null>(null);
+  const [today, setToday] = useState<TodayStats | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      setError(null);
-      const [overviewResponse, statsResponse] = await Promise.all([
-        api.overview(),
-        api.overviewStats(),
-      ]);
-      setOverview(overviewResponse);
-      setStats(statsResponse.days);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load overview");
-    }
-  }, []);
-
+  // Fetch on mount and refresh every 60s so the dashboard behaves like a
+  // live operations center. State updates only happen after the awaited
+  // fetch resolves, never synchronously inside the effect.
   useEffect(() => {
-    load();
-  }, [load]);
+    let disposed = false;
+    async function refresh() {
+      try {
+        const [overviewResponse, statsResponse, todayResponse] =
+          await Promise.all([
+            api.overview(),
+            api.overviewStats(),
+            api.overviewToday(),
+          ]);
+        if (disposed) return;
+        setError(null);
+        setOverview(overviewResponse);
+        setStats(statsResponse.days);
+        setToday(todayResponse);
+      } catch (err) {
+        if (disposed) return;
+        setError(
+          err instanceof Error ? err.message : "Failed to load overview"
+        );
+      }
+    }
+    refresh();
+    const timer = setInterval(refresh, 60_000);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+  }, []);
 
   return (
     <div>
       <PageTitle
         title="Overview"
         description="Live snapshot of the StarLoader licensing system."
+        actions={
+          <span className="flex items-center gap-1.5 rounded-full border border-gray-200 px-3 py-1 text-xs font-medium text-gray-500 dark:border-gray-800 dark:text-gray-400">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-success-500" />
+            Live · refreshes every 60s
+          </span>
+        }
       />
       {error && (
         <div className="mb-4 rounded-lg border border-error-500/30 bg-error-50 px-4 py-3 text-sm text-error-600 dark:bg-error-500/10 dark:text-error-500">
@@ -50,16 +79,21 @@ export default function OverviewPage() {
       )}
       {!overview && !error && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            {[0, 1, 2, 3].map((index) => (
-              <div
-                key={index}
-                className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]"
-              >
-                <CardSkeleton />
-              </div>
-            ))}
-          </div>
+          {[0, 1, 2].map((row) => (
+            <div
+              key={row}
+              className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"
+            >
+              {[0, 1, 2, 3].map((index) => (
+                <div
+                  key={index}
+                  className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]"
+                >
+                  <CardSkeleton />
+                </div>
+              ))}
+            </div>
+          ))}
           <div className="rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
             <TableSkeleton rows={5} cols={4} />
           </div>
@@ -89,6 +123,65 @@ export default function OverviewPage() {
               icon={<TimeIcon />}
             />
           </div>
+
+          {today && (
+            <>
+              <div>
+                <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-400">
+                  Today
+                </h2>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                  <StatCard
+                    label="Sessions Today"
+                    value={today.logins_today}
+                    icon={<TimeIcon />}
+                  />
+                  <StatCard
+                    label="Activations Today"
+                    value={today.activations_today}
+                    icon={<BoltIcon />}
+                  />
+                  <StatCard
+                    label="New Devices Today"
+                    value={today.new_devices_today}
+                    icon={<BoxCubeIcon />}
+                  />
+                  <StatCard
+                    label="Admin Logins Today"
+                    value={today.admin_logins_today}
+                    icon={<UserIcon />}
+                  />
+                </div>
+              </div>
+              <div>
+                <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-400">
+                  Watchlist
+                </h2>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                  <StatCard
+                    label="Failed Logins Today"
+                    value={today.failed_logins_today}
+                    icon={<AlertIcon />}
+                  />
+                  <StatCard
+                    label="Permission Denied Today"
+                    value={today.permission_denied_today}
+                    icon={<LockIcon />}
+                  />
+                  <StatCard
+                    label="Banned Users"
+                    value={today.banned_users}
+                    icon={<UserCircleIcon />}
+                  />
+                  <StatCard
+                    label="Expired Licenses"
+                    value={today.expired_licenses}
+                    icon={<DocsIcon />}
+                  />
+                </div>
+              </div>
+            </>
+          )}
 
           <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
             <div className="xl:col-span-2">

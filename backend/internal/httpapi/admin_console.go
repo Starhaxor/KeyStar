@@ -160,6 +160,37 @@ func (router *Router) handleAdminOverviewStats(writer http.ResponseWriter, reque
 	})
 }
 
+// handleAdminOverviewToday returns the operations-center snapshot: counters
+// since UTC midnight plus the totals an operator should watch.
+func (router *Router) handleAdminOverviewToday(writer http.ResponseWriter, request *http.Request) {
+	stats, err := router.admin.Console.ConsoleTodayStats(request.Context())
+	if err != nil {
+		router.writeConsoleError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, struct {
+		OK                    bool  `json:"ok"`
+		LoginsToday           int64 `json:"logins_today"`
+		ActivationsToday      int64 `json:"activations_today"`
+		NewDevicesToday       int64 `json:"new_devices_today"`
+		AdminLoginsToday      int64 `json:"admin_logins_today"`
+		FailedLoginsToday     int64 `json:"failed_logins_today"`
+		PermissionDeniedToday int64 `json:"permission_denied_today"`
+		BannedUsers           int64 `json:"banned_users"`
+		ExpiredLicenses       int64 `json:"expired_licenses"`
+	}{
+		OK:                    true,
+		LoginsToday:           stats.LoginsToday,
+		ActivationsToday:      stats.ActivationsToday,
+		NewDevicesToday:       stats.NewDevicesToday,
+		AdminLoginsToday:      stats.AdminLoginsToday,
+		FailedLoginsToday:     stats.FailedLoginsToday,
+		PermissionDeniedToday: stats.PermissionDeniedToday,
+		BannedUsers:           stats.BannedUsers,
+		ExpiredLicenses:       stats.ExpiredLicenses,
+	})
+}
+
 // Users
 
 type consoleUserJSON struct {

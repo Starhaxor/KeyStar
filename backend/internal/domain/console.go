@@ -109,6 +109,21 @@ type ConsoleOverview struct {
 	RecentAudit    []AuditLog
 }
 
+// ConsoleTodayStats is the dashboard "operations center" snapshot: what
+// happened since UTC midnight plus the counters an operator should watch
+// (failed admin logins, permission denials, banned users, expired licenses).
+// Every value is derived from existing tables in a single aggregated query.
+type ConsoleTodayStats struct {
+	LoginsToday           int64
+	ActivationsToday      int64
+	NewDevicesToday       int64
+	AdminLoginsToday      int64
+	FailedLoginsToday     int64
+	PermissionDeniedToday int64
+	BannedUsers           int64
+	ExpiredLicenses       int64
+}
+
 // DailyStat is one day of the dashboard activity series. Day is a UTC date
 // in YYYY-MM-DD format.
 type DailyStat struct {

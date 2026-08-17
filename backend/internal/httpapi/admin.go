@@ -42,6 +42,7 @@ type AdminAuthService interface {
 // AdminConsoleStore is the persistence boundary for dashboard management.
 type AdminConsoleStore interface {
 	ConsoleOverview(ctx context.Context) (*domain.ConsoleOverview, error)
+	ConsoleTodayStats(ctx context.Context) (*domain.ConsoleTodayStats, error)
 	ConsoleDailyStats(ctx context.Context, days int) ([]domain.DailyStat, error)
 	ListConsoleUsers(ctx context.Context, offset, limit int, search string, status string) ([]domain.ConsoleUser, int64, error)
 	ConsoleUserDetail(ctx context.Context, userID string) (*domain.ConsoleUserDetail, error)
@@ -215,6 +216,11 @@ func (router *Router) routeAdmin(writer http.ResponseWriter, request *http.Reque
 			return
 		}
 		router.handleAdminOverviewStats(writer, request)
+	case len(segments) == 2 && segments[0] == "overview" && segments[1] == "today" && request.Method == http.MethodGet:
+		if !router.requirePermission(writer, request, account, domain.PermOverviewRead) {
+			return
+		}
+		router.handleAdminOverviewToday(writer, request)
 	case len(segments) == 1 && segments[0] == "overview" && request.Method == http.MethodGet:
 		if !router.requirePermission(writer, request, account, domain.PermOverviewRead) {
 			return

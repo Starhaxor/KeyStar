@@ -139,6 +139,17 @@ export interface Overview {
   recent_audit: AuditEntry[];
 }
 
+export interface TodayStats {
+  logins_today: number;
+  activations_today: number;
+  new_devices_today: number;
+  admin_logins_today: number;
+  failed_logins_today: number;
+  permission_denied_today: number;
+  banned_users: number;
+  expired_licenses: number;
+}
+
 export interface DailyStat {
   day: string;
   licenses_created: number;

@@ -36,6 +36,30 @@ func (s *Store) ConsoleOverview(ctx context.Context) (*domain.ConsoleOverview, e
 	return overview, nil
 }
 
+// ConsoleTodayStats aggregates the operations-center counters since UTC
+// midnight in a single query. Expired licenses include both explicitly expired
+// rows and active rows whose deadline has passed.
+func (s *Store) ConsoleTodayStats(ctx context.Context) (*domain.ConsoleTodayStats, error) {
+	var stats domain.ConsoleTodayStats
+	err := s.db.QueryRow(ctx, `
+		select
+			(select count(*) from auth_sessions where created_at >= date_trunc('day', now())),
+			(select count(*) from licenses where created_at >= date_trunc('day', now())),
+			(select count(*) from devices where created_at >= date_trunc('day', now())),
+			(select count(*) from audit_logs where action = 'ADMIN_LOGIN' and created_at >= date_trunc('day', now())),
+			(select count(*) from audit_logs where action = 'ADMIN_LOGIN_FAILED' and created_at >= date_trunc('day', now())),
+			(select count(*) from security_events where kind = 'ADMIN_PERMISSION_DENIED' and created_at >= date_trunc('day', now())),
+			(select count(*) from users where status = 'banned'),
+			(select count(*) from licenses where status = 'expired' or (status = 'active' and expires_at <= now()))`).
+		Scan(&stats.LoginsToday, &stats.ActivationsToday, &stats.NewDevicesToday,
+			&stats.AdminLoginsToday, &stats.FailedLoginsToday, &stats.PermissionDeniedToday,
+			&stats.BannedUsers, &stats.ExpiredLicenses)
+	if err != nil {
+		return nil, fmt.Errorf("console today stats: %w", err)
+	}
+	return &stats, nil
+}
+
 // ConsoleDailyStats returns a per-day activity series (licenses created,
 // devices registered, sessions created, audit events and admin logins) for
 // the trailing days window. Days without events are included with zeroes.
