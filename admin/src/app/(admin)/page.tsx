@@ -1,5 +1,6 @@
 "use client";
 import ActivityChart from "@/components/console/ActivityChart";
+import { CardSkeleton, Skeleton, TableSkeleton } from "@/components/common/Skeleton";
 import ConsoleSection, {
   EmptyNote,
   ErrorNote,
@@ -47,8 +48,20 @@ export default function OverviewPage() {
         </div>
       )}
       {!overview && !error && (
-        <div className="rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
-          <LoadingNote />
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {[0, 1, 2, 3].map((index) => (
+              <div
+                key={index}
+                className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]"
+              >
+                <CardSkeleton />
+              </div>
+            ))}
+          </div>
+          <div className="rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
+            <TableSkeleton rows={5} cols={4} />
+          </div>
         </div>
       )}
       {overview && (
@@ -81,7 +94,9 @@ export default function OverviewPage() {
             description="Licenses, devices, sessions and admin logins over the last 14 days."
           >
             {!stats ? (
-              <LoadingNote />
+              <div className="p-5">
+                <Skeleton className="h-64 w-full" />
+              </div>
             ) : stats.length === 0 ? (
               <EmptyNote message="No activity data yet." />
             ) : (

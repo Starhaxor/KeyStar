@@ -7,12 +7,15 @@ import ConsoleSection, {
 } from "@/components/console/ConsoleSection";
 import ConfirmModal from "@/components/console/ConfirmModal";
 import StatusBadge from "@/components/console/StatusBadge";
+import { TableSkeleton } from "@/components/common/Skeleton";
 import Pagination from "@/components/tables/Pagination";
+import { useToast } from "@/context/ToastContext";
 import { api, formatDateTime } from "@/lib/api";
 import type { ConsoleSession, PageResult } from "@/lib/types";
 import React, { useCallback, useEffect, useState } from "react";
 
 export default function SessionsPage() {
+  const toast = useToast();
   const [result, setResult] = useState<PageResult<ConsoleSession> | null>(null);
   const [page, setPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
@@ -47,8 +50,11 @@ export default function SessionsPage() {
       await api.revokeSession(revokeTarget.id);
       setRevokeTarget(null);
       await load();
+      toast.success("Session revoked", revokeTarget.user_email);
     } catch (err) {
-      setRevokeError(err instanceof Error ? err.message : "Revoke failed");
+      const message = err instanceof Error ? err.message : "Revoke failed";
+      setRevokeError(message);
+      toast.error("Revoke failed", message);
     } finally {
       setRevokeBusy(false);
     }
@@ -69,7 +75,7 @@ export default function SessionsPage() {
         description={result ? `${result.total} session(s) total` : "Loading sessions"}
       >
         {loading && !error ? (
-          <LoadingNote />
+          <TableSkeleton rows={6} cols={7} />
         ) : error ? (
           <ErrorNote message={error} />
         ) : !result || result.items.length === 0 ? (

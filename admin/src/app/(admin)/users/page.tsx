@@ -10,7 +10,9 @@ import Label from "@/components/form/Label";
 import Pagination from "@/components/tables/Pagination";
 import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
+import { TableSkeleton } from "@/components/common/Skeleton";
 import { useAdminIdentity } from "@/context/AdminIdentityContext";
+import { useToast } from "@/context/ToastContext";
 import { api, formatDateTime } from "@/lib/api";
 import type { PageResult, ConsoleUser } from "@/lib/types";
 import Link from "next/link";
@@ -21,6 +23,7 @@ const inputClasses =
 
 export default function UsersPage() {
   const { hasPermission } = useAdminIdentity();
+  const toast = useToast();
   const [result, setResult] = useState<PageResult<ConsoleUser> | null>(null);
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState("");
@@ -75,8 +78,11 @@ export default function UsersPage() {
       setCreateOpen(false);
       setPage(1);
       await load();
+      toast.success("User created", createEmail.trim());
     } catch (err) {
-      setCreateError(err instanceof Error ? err.message : "Create failed");
+      const message = err instanceof Error ? err.message : "Create failed";
+      setCreateError(message);
+      toast.error("Create failed", message);
     } finally {
       setCreating(false);
     }
@@ -123,7 +129,7 @@ export default function UsersPage() {
         }
       >
         {loading && !error ? (
-          <LoadingNote />
+          <TableSkeleton rows={6} cols={7} />
         ) : error ? (
           <ErrorNote message={error} />
         ) : !result || result.items.length === 0 ? (
