@@ -246,7 +246,8 @@ export default function RolesPage() {
                 const expanded = expandedRole === role.id;
                 const members = membersByRole[role.id] ?? [];
                 const membersBusy = membersLoading === role.id;
-                const inUse = role.member_count > 0;
+                const memberCount = role.member_count ?? 0;
+                const inUse = memberCount > 0;
                 return (
                   <React.Fragment key={role.id}>
                     <tr
@@ -323,16 +324,16 @@ export default function RolesPage() {
                         <button
                           type="button"
                           onClick={() => toggleMembers(role)}
-                          disabled={role.member_count === 0}
+                          disabled={memberCount === 0}
                           title={
-                            role.member_count === 0
+                            memberCount === 0
                               ? "No admins assigned to this role"
                               : expanded
                                 ? "Hide members"
                                 : "Show members"
                           }
                           className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
-                            role.member_count === 0
+                            memberCount === 0
                               ? "cursor-default bg-gray-100 text-gray-400 dark:bg-white/[0.05] dark:text-gray-500"
                               : expanded
                                 ? "bg-brand-50 text-brand-600 dark:bg-brand-500/[0.1] dark:text-brand-400"
@@ -342,7 +343,7 @@ export default function RolesPage() {
                           <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
                             <path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm0 1c-2.8 0-5 1.4-5 3.2V14h10v-1.8C13 10.4 10.8 9 8 9z" />
                           </svg>
-                          {role.member_count} member{role.member_count === 1 ? "" : "s"}
+                          {memberCount} member{memberCount === 1 ? "" : "s"}
                         </button>
                       </td>
                       <td className="px-5 py-3.5">
