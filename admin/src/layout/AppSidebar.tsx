@@ -1,5 +1,5 @@
 "use client";
-import React from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
@@ -9,6 +9,7 @@ import {
   AlertIcon,
   BoxCubeIcon,
   ChevronLeftIcon,
+  ChevronDownIcon,
   DocsIcon,
   GridIcon,
   GroupIcon,
@@ -19,25 +20,70 @@ import {
   UserCircleIcon,
 } from "../icons/index";
 
+type SubItem = { label: string; href: string; permission?: string };
 type NavItem = {
   name: string;
   icon: React.ReactNode;
   path: string;
   // permission gates the item in the UI; undefined means always visible.
   permission?: string;
+  children?: SubItem[];
 };
 
 const navItems: NavItem[] = [
   { icon: <GridIcon />, name: "Overview", path: "/", permission: "overview.read" },
-  { icon: <UserCircleIcon />, name: "Users", path: "/users", permission: "users.read" },
-  { icon: <DocsIcon />, name: "Licenses", path: "/licenses", permission: "licenses.read" },
+  {
+    icon: <UserCircleIcon />,
+    name: "Users",
+    path: "/users",
+    permission: "users.read",
+    children: [
+      { label: "Directory", href: "/users" },
+      { label: "Add user", href: "/users?create=1" },
+    ],
+  },
+  {
+    icon: <DocsIcon />,
+    name: "Licenses",
+    path: "/licenses",
+    permission: "licenses.read",
+    children: [
+      { label: "Directory", href: "/licenses" },
+      { label: "Create license", href: "/licenses?create=1" },
+    ],
+  },
   { icon: <BoxCubeIcon />, name: "Devices", path: "/devices", permission: "devices.read" },
   { icon: <TimeIcon />, name: "Sessions", path: "/sessions", permission: "sessions.read" },
-  { icon: <ListIcon />, name: "Audit Log", path: "/audit-logs", permission: "audit.read" },
-  { icon: <GroupIcon />, name: "Admins", path: "/admins", permission: "admins.read" },
-  { icon: <AlertIcon />, name: "Security Events", path: "/security-events", permission: "security.read" },
-  // Security (MFA) is always visible: unenrolled admins are restricted to it.
-  { icon: <LockIcon />, name: "Security", path: "/security" },
+  {
+    icon: <ListIcon />,
+    name: "Audit Log",
+    path: "/audit-logs",
+    permission: "audit.read",
+    children: [
+      { label: "Audit log", href: "/audit-logs" },
+      { label: "Security events", href: "/security-events" },
+    ],
+  },
+  {
+    icon: <GroupIcon />,
+    name: "Admins",
+    path: "/admins",
+    permission: "admins.read",
+    children: [
+      { label: "Accounts", href: "/admins" },
+      { label: "Add admin", href: "/admins?create=1" },
+    ],
+  },
+  {
+    icon: <LockIcon />,
+    name: "Security",
+    path: "/security",
+    children: [
+      { label: "MFA & settings", href: "/security" },
+      { label: "Security events", href: "/security-events" },
+      { label: "Audit log", href: "/audit-logs" },
+    ],
+  },
 ];
 
 function initialsFor(email: string): string {
@@ -51,10 +97,35 @@ const AppSidebar: React.FC = () => {
   const pathname = usePathname();
   const { hasPermission, identity } = useAdminIdentity();
 
+  // Which sections have their submenu expanded. The section containing the
+  // current route is opened automatically.
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
+
   const isActive = (path: string) =>
-    path === "/"
-      ? pathname === "/"
-      : pathname === path || pathname.startsWith(`${path}/`);
+    path === "/" ? pathname === "/" : pathname === path || pathname.startsWith(`${path}/`);
+
+  // A sub-item is the current location only when it is the canonical page
+  // itself; ?create=1 shortcuts are actions, never highlighted.
+  const isChildActive = (child: SubItem) => {
+    if (child.href.includes("?")) return false;
+    return pathname === child.href || pathname.startsWith(`${child.href}/`);
+  };
+
+  const isSectionActive = (nav: NavItem) =>
+    isActive(nav.path) || (nav.children ?? []).some(isChildActive);
+
+  useEffect(() => {
+    setOpenSections((prev) => {
+      const next = { ...prev };
+      for (const nav of navItems) {
+        if (nav.children && isSectionActive(nav)) next[nav.name] = true;
+      }
+      return next;
+    });
+  }, [pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleSection = (name: string) =>
+    setOpenSections((prev) => ({ ...prev, [name]: !prev[name] }));
 
   const visibleItems = navItems.filter(
     (nav) => !nav.permission || hasPermission(nav.permission)
@@ -108,35 +179,90 @@ const AppSidebar: React.FC = () => {
                 {expanded ? "Menu" : <HorizontaLDots />}
               </h2>
               <ul className="flex flex-col gap-4">
-                {visibleItems.map((nav) => (
-                  <li key={nav.name} className="relative">
-                    {isActive(nav.path) && (
-                      <span className="absolute left-[-16px] top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-brand-500" />
-                    )}
-                    <Link
-                      href={nav.path}
-                      title={expanded ? undefined : nav.name}
-                      className={`menu-item group ${
-                        isActive(nav.path)
-                          ? "menu-item-active"
-                          : "menu-item-inactive"
-                      }`}
-                    >
-                      <span
-                        className={`${
-                          isActive(nav.path)
-                            ? "menu-item-icon-active"
-                            : "menu-item-icon-inactive"
-                        }`}
-                      >
-                        {nav.icon}
-                      </span>
-                      {expanded && (
-                        <span className={`menu-item-text`}>{nav.name}</span>
+                {visibleItems.map((nav) => {
+                  const active = isSectionActive(nav);
+                  const sectionOpen = Boolean(openSections[nav.name]);
+                  return (
+                    <li key={nav.name}>
+                      <div className="relative flex items-center">
+                        {active && (
+                          <span className="absolute left-[-16px] top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-brand-500" />
+                        )}
+                        <Link
+                          href={nav.path}
+                          title={expanded ? undefined : nav.name}
+                          className={`menu-item group flex-1 ${
+                            active ? "menu-item-active" : "menu-item-inactive"
+                          }`}
+                        >
+                          <span
+                            className={
+                              active
+                                ? "menu-item-icon-active"
+                                : "menu-item-icon-inactive"
+                            }
+                          >
+                            {nav.icon}
+                          </span>
+                          {expanded && (
+                            <span className="flex-1 text-left">{nav.name}</span>
+                          )}
+                        </Link>
+                        {expanded && nav.children && (
+                          <button
+                            type="button"
+                            onClick={() => toggleSection(nav.name)}
+                            aria-label={`Toggle ${nav.name} submenu`}
+                            aria-expanded={sectionOpen}
+                            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-gray-100 dark:hover:bg-white/5 ${
+                              sectionOpen
+                                ? "text-brand-500 dark:text-brand-400"
+                                : "text-gray-400"
+                            }`}
+                          >
+                            <ChevronDownIcon
+                              className={`transition-transform ${
+                                sectionOpen ? "rotate-180" : ""
+                              }`}
+                            />
+                          </button>
+                        )}
+                      </div>
+                      {expanded && nav.children && sectionOpen && (
+                        <ul className="mt-1 space-y-1">
+                          {nav.children
+                            .filter(
+                              (child) =>
+                                !child.permission ||
+                                hasPermission(child.permission)
+                            )
+                            .map((child) => {
+                              const childActive = isChildActive(child);
+                              return (
+                                <li key={child.href}>
+                                  <Link
+                                    href={child.href}
+                                    className={`menu-dropdown-item ${
+                                      childActive
+                                        ? "menu-dropdown-item-active"
+                                        : "menu-dropdown-item-inactive"
+                                    }`}
+                                  >
+                                    <span
+                                      className={`h-1.5 w-1.5 rounded-full bg-current ${
+                                        childActive ? "opacity-100" : "opacity-40"
+                                      }`}
+                                    />
+                                    {child.label}
+                                  </Link>
+                                </li>
+                              );
+                            })}
+                        </ul>
                       )}
-                    </Link>
-                  </li>
-                ))}
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           </div>

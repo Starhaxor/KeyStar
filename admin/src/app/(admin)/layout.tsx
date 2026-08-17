@@ -7,7 +7,6 @@ import {
 } from "@/context/AdminIdentityContext";
 import AppHeader from "@/layout/AppHeader";
 import AppSidebar from "@/layout/AppSidebar";
-import SubSidebar from "@/layout/SubSidebar";
 import Backdrop from "@/layout/Backdrop";
 import Link from "next/link";
 import React from "react";
@@ -57,8 +56,6 @@ export default function AdminLayout({
         >
           {/* Header */}
           <AppHeader />
-          {/* Horizontal sub-navigation under the header */}
-          <SubSidebar />
           {/* Page Content */}
           <div className="p-4 mx-auto max-w-(--breakpoint-2xl) md:p-6">
             <MfaEnrollmentBanner />
