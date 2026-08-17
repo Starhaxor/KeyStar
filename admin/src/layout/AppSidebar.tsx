@@ -37,20 +37,14 @@ const navItems: NavItem[] = [
     name: "Users",
     path: "/users",
     permission: "users.read",
-    children: [
-      { label: "Directory", href: "/users" },
-      { label: "Add user", href: "/users?create=1" },
-    ],
+    children: [{ label: "Directory", href: "/users" }],
   },
   {
     icon: <DocsIcon />,
     name: "Licenses",
     path: "/licenses",
     permission: "licenses.read",
-    children: [
-      { label: "Directory", href: "/licenses" },
-      { label: "Create license", href: "/licenses?create=1" },
-    ],
+    children: [{ label: "Directory", href: "/licenses" }],
   },
   { icon: <BoxCubeIcon />, name: "Devices", path: "/devices", permission: "devices.read" },
   { icon: <TimeIcon />, name: "Sessions", path: "/sessions", permission: "sessions.read" },
@@ -67,7 +61,7 @@ const navItems: NavItem[] = [
     permission: "admins.read",
     children: [
       { label: "Accounts", href: "/admins" },
-      { label: "Add admin", href: "/admins?create=1" },
+      { label: "Roles & permissions", href: "/roles", permission: "admins.read" },
     ],
   },
   {
