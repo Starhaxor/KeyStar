@@ -207,12 +207,14 @@ export default function DevicesPage() {
                   const actions: RowAction[] = [
                     {
                       label: "Details",
+                      tone: "info",
                       onClick: () => openDetail(device),
                     },
                   ];
                   if (canWrite) {
                     actions.push({
                       label: "Reset",
+                      tone: "warning",
                       onClick: () => {
                         setResetError(null);
                         setResetTarget(device);
@@ -221,7 +223,7 @@ export default function DevicesPage() {
                   }
                   actions.push({
                     label: "Revoke",
-                    danger: true,
+                    tone: "danger",
                     disabled: device.status === "revoked",
                     onClick: () => {
                       setRevokeError(null);

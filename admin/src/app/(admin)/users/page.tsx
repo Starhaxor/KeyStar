@@ -228,6 +228,7 @@ export default function UsersPage() {
                     {
                       label: "View profile",
                       href: `/users/${user.id}`,
+                      tone: "info",
                     },
                   ];
                   if (canWrite) {
@@ -237,7 +238,7 @@ export default function UsersPage() {
                           user.status === "active"
                             ? "Disable user"
                             : "Enable user",
-                        danger: user.status === "active",
+                        tone: user.status === "active" ? "danger" : "success",
                         onClick: () => {
                           setStatusError(null);
                           setStatusTarget(user);
@@ -245,7 +246,7 @@ export default function UsersPage() {
                       },
                       {
                         label: "Revoke sessions",
-                        danger: true,
+                        tone: "danger",
                         disabled: user.active_session_count === 0,
                         onClick: () => {
                           setRevokeError(null);

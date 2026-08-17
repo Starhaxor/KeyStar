@@ -195,6 +195,7 @@ export default function LicensesPage() {
                   const actions: RowAction[] = [
                     {
                       label: "Extend",
+                      tone: "warning",
                       disabled: license.status === "revoked",
                       onClick: () => {
                         setExtendError(null);
@@ -205,7 +206,7 @@ export default function LicensesPage() {
                     },
                     {
                       label: "Revoke",
-                      danger: true,
+                      tone: "danger",
                       disabled: license.status === "revoked",
                       onClick: () => {
                         setRevokeError(null);

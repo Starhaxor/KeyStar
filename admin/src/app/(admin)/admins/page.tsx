@@ -255,6 +255,7 @@ export default function AdminsPage() {
                                 [
                                   {
                                     label: "Edit account",
+                                    tone: "info",
                                     onClick: () => openEdit(admin),
                                   },
                                 ] as RowAction[]

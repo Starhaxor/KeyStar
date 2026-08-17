@@ -109,8 +109,12 @@ export default function SubSidebar() {
         </h2>
         <nav className="flex flex-col gap-1">
           {section.items.map((item) => {
+            // An item is active only when it is the canonical page itself.
+            // Query-parameter shortcuts (e.g. ?create=1) are actions, never
+            // highlighted as the current location.
+            const hasQuery = item.href.includes("?");
             const base = item.href.split("?")[0];
-            const active = pathname === base;
+            const active = !hasQuery && pathname === base;
             return (
               <Link
                 key={item.href}

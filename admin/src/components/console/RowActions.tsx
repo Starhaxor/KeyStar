@@ -3,13 +3,30 @@ import React, { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 
+export type RowActionTone =
+  | "default"
+  | "info"
+  | "success"
+  | "warning"
+  | "danger";
+
 export type RowAction = {
   label: string;
   icon?: React.ReactNode;
   onClick?: () => void;
   href?: string;
+  tone?: RowActionTone;
+  /** @deprecated use tone="danger" */
   danger?: boolean;
   disabled?: boolean;
+};
+
+const toneClasses: Record<RowActionTone, string> = {
+  default: "text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5",
+  info: "text-blue-light-600 hover:bg-blue-light-50 dark:text-blue-light-400 dark:hover:bg-blue-light-500/10",
+  success: "text-success-600 hover:bg-success-50 dark:text-success-400 dark:hover:bg-success-500/10",
+  warning: "text-warning-600 hover:bg-warning-50 dark:text-warning-400 dark:hover:bg-warning-500/10",
+  danger: "text-error-600 hover:bg-error-50 dark:text-error-500 dark:hover:bg-error-500/10",
 };
 
 // Three-dot row action menu. Rendered through a portal with fixed
@@ -59,11 +76,10 @@ export default function RowActions({ actions }: { actions: RowAction[] }) {
             className="fixed z-50 w-48 rounded-xl border border-gray-200 bg-white p-1.5 shadow-theme-lg dark:border-gray-800 dark:bg-gray-dark"
           >
             {actions.map((action, index) => {
-              const classes = `flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
-                action.danger
-                  ? "text-error-600 hover:bg-error-50 dark:text-error-500 dark:hover:bg-error-500/10"
-                  : "text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5"
-              } ${action.disabled ? "pointer-events-none opacity-40" : ""}`;
+              const tone: RowActionTone = action.danger
+                ? "danger"
+                : (action.tone ?? "default");
+              const classes = `flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors ${toneClasses[tone]} ${action.disabled ? "pointer-events-none opacity-40" : ""}`;
               if (action.href) {
                 return (
                   <Link
