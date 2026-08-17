@@ -230,7 +230,15 @@ export default function RolesPage() {
             message={`Nothing matches “${filter}”.`}
           />
         ) : (
-          <table className="w-full text-left text-sm">
+          <table className="w-full table-fixed min-w-[640px] text-left text-sm">
+            <colgroup>
+              <col className="w-[22%]" />
+              <col className="w-[26%]" />
+              <col className="w-[13%]" />
+              <col className="w-[14%]" />
+              <col className="w-[12%]" />
+              {canWrite && <col className="w-[13%]" />}
+            </colgroup>
             <thead className="border-b border-gray-200 dark:border-gray-800">
               <tr className="text-xs uppercase text-gray-400">
                 <th className="px-5 py-3 font-medium">Name</th>
