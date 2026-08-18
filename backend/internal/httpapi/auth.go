@@ -45,5 +45,5 @@ func SessionClaimsFromContext(ctx context.Context) (security.SessionClaims, bool
 }
 
 func writeInvalidSessionToken(writer http.ResponseWriter, request *http.Request) {
-	writeError(writer, request, http.StatusUnauthorized, "INVALID_SESSION_TOKEN", "invalid session token")
+	WriteError(writer, request, http.StatusUnauthorized, "INVALID_SESSION_TOKEN", "invalid session token")
 }

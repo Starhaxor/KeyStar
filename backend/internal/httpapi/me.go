@@ -1,18 +1,12 @@
 package httpapi
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"time"
 
 	"github.com/starloader/backend/internal/domain"
 )
-
-// ProfileRepository loads the safe profile tuple selected by verified session claims.
-type ProfileRepository interface {
-	LoadProfile(context.Context, string, string, string, string) (*domain.UserProfile, error)
-}
 
 type meResponse struct {
 	OK               bool                 `json:"ok"`
@@ -34,7 +28,7 @@ func (router *Router) handleMe(writer http.ResponseWriter, request *http.Request
 		return
 	}
 	if router.profile == nil {
-		writeError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
+		WriteError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
 		return
 	}
 
@@ -44,7 +38,7 @@ func (router *Router) handleMe(writer http.ResponseWriter, request *http.Request
 		return
 	}
 	if err != nil || profile == nil {
-		writeError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
+		WriteError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
 		return
 	}
 	if profile.DeviceID != claims.DeviceID || profile.Product != claims.Product || profile.ApplicationID != claims.ApplicationID || profile.AccountStatus != domain.UserStatusActive {
@@ -54,14 +48,14 @@ func (router *Router) handleMe(writer http.ResponseWriter, request *http.Request
 
 	switch profile.LicenseStatus {
 	case domain.LicenseStatusRevoked:
-		writeError(writer, request, http.StatusForbidden, "LICENSE_REVOKED", "license revoked")
+		WriteError(writer, request, http.StatusForbidden, "LICENSE_REVOKED", "license revoked")
 		return
 	case domain.LicenseStatusExpired:
-		writeError(writer, request, http.StatusForbidden, "LICENSE_EXPIRED", "license expired")
+		WriteError(writer, request, http.StatusForbidden, "LICENSE_EXPIRED", "license expired")
 		return
 	case domain.LicenseStatusActive:
-		if !profile.LicenseExpiresAt.After(router.now().UTC()) {
-			writeError(writer, request, http.StatusForbidden, "LICENSE_EXPIRED", "license expired")
+		if !profile.LicenseExpiresAt.After(router.Now().UTC()) {
+			WriteError(writer, request, http.StatusForbidden, "LICENSE_EXPIRED", "license expired")
 			return
 		}
 	default:
@@ -71,7 +65,7 @@ func (router *Router) handleMe(writer http.ResponseWriter, request *http.Request
 
 	switch profile.DeviceStatus {
 	case domain.DeviceStatusRevoked:
-		writeError(writer, request, http.StatusForbidden, "DEVICE_REVOKED", "device revoked")
+		WriteError(writer, request, http.StatusForbidden, "DEVICE_REVOKED", "device revoked")
 		return
 	case domain.DeviceStatusActive:
 	default:
@@ -79,7 +73,7 @@ func (router *Router) handleMe(writer http.ResponseWriter, request *http.Request
 		return
 	}
 
-	writeJSON(writer, http.StatusOK, meResponse{
+	WriteJSON(writer, http.StatusOK, meResponse{
 		OK: true, Email: profile.Email, AccountStatus: profile.AccountStatus,
 		Product: profile.Product, LicenseStatus: profile.LicenseStatus,
 		LicenseExpiresAt: profile.LicenseExpiresAt.UTC().Format(time.RFC3339), MaxDevices: profile.MaxDevices,

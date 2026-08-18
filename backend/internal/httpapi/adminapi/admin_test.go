@@ -1,4 +1,4 @@
-package httpapi
+package adminapi
 
 import (
 	"bytes"
@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/starloader/backend/internal/domain"
+	"github.com/starloader/backend/internal/httpapi"
 	"github.com/starloader/backend/internal/service/adminauth"
 )
 
@@ -33,13 +34,13 @@ func testOwnerAccount() *domain.AdminAccount {
 }
 
 type fakeAdminAuth struct {
-	token           string
-	account         *domain.AdminAccount
-	loginErr        error
-	loginResult     *adminauth.LoginResult
-	completeMFAToken string
-	completeMFAErr  error
-	loggedOut       []string
+	token             string
+	account           *domain.AdminAccount
+	loginErr          error
+	loginResult       *adminauth.LoginResult
+	completeMFAToken  string
+	completeMFAErr    error
+	loggedOut         []string
 	authenticateCalls int
 }
 
@@ -98,9 +99,9 @@ func (f *fakeAdminAuth) Logout(_ context.Context, token string) error {
 // fakeAdminConsole embeds the interface; tests only exercise the audit and
 // security event paths.
 type fakeAdminConsole struct {
-	AdminConsoleStore
-	auditEntries    []domain.NewAuditLog
-	securityEvents  []domain.NewSecurityEvent
+	httpapi.AdminConsoleStore
+	auditEntries   []domain.NewAuditLog
+	securityEvents []domain.NewSecurityEvent
 }
 
 func (f *fakeAdminConsole) AppendAuditLog(_ context.Context, input domain.NewAuditLog) error {
@@ -116,16 +117,17 @@ func (f *fakeAdminConsole) AppendSecurityEvent(_ context.Context, input domain.N
 func newAdminTestRouter(t *testing.T, auth *fakeAdminAuth) (*Router, *fakeAdminConsole) {
 	t.Helper()
 	console := &fakeAdminConsole{}
-	router := NewRouter(RouterConfig{
-		Admin: AdminConfig{
-			Auth:          auth,
-			Console:       console,
+	core := httpapi.NewRouter(httpapi.RouterConfig{
+		Admin: httpapi.AdminConfig{
+			Auth:           auth,
+			Console:        console,
 			AllowedOrigins: []string{"http://localhost:3000"},
-			CSRFSecret:    []byte("test-csrf-secret"),
-			SessionTTL:    time.Hour,
+			CSRFSecret:     []byte("test-csrf-secret"),
+			SessionTTL:     time.Hour,
 		},
 	})
-	return router, console
+	core.MountAdmin(New(core))
+	return &Router{Router: core}, console
 }
 
 func adminLoginBody(t *testing.T, email, password string) *bytes.Reader {
@@ -159,12 +161,12 @@ func TestAdminLoginSetsSessionAndCSRFCookies(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
 	response := recorder.Result()
-	sessionCookie := responseCookie(response, adminSessionCookieName)
+	sessionCookie := responseCookie(response, httpapi.AdminSessionCookieName)
 	if sessionCookie == nil || sessionCookie.Value != "session-token" || !sessionCookie.HttpOnly {
 		t.Fatalf("session cookie = %#v", sessionCookie)
 	}
-	csrfCookie := responseCookie(response, adminCSRFCookieName)
-	if csrfCookie == nil || csrfCookie.Value != router.adminCSRFToken("session-token") || csrfCookie.HttpOnly {
+	csrfCookie := responseCookie(response, httpapi.AdminCSRFCookieName)
+	if csrfCookie == nil || csrfCookie.Value != router.AdminCSRFToken("session-token") || csrfCookie.HttpOnly {
 		t.Fatalf("csrf cookie = %#v", csrfCookie)
 	}
 }
@@ -188,7 +190,7 @@ func TestAdminLoginReturnsChallengeForEnrolledAccounts(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
-	if cookie := responseCookie(recorder.Result(), adminSessionCookieName); cookie != nil && cookie.MaxAge > 0 {
+	if cookie := responseCookie(recorder.Result(), httpapi.AdminSessionCookieName); cookie != nil && cookie.MaxAge > 0 {
 		t.Fatal("session cookie must not be set before MFA completion")
 	}
 	var body struct {
@@ -216,7 +218,7 @@ func TestAdminMFACompletesLoginWithValidCode(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
-	cookie := responseCookie(recorder.Result(), adminSessionCookieName)
+	cookie := responseCookie(recorder.Result(), httpapi.AdminSessionCookieName)
 	if cookie == nil || cookie.Value != "session-token" {
 		t.Fatalf("session cookie = %#v", cookie)
 	}
@@ -281,7 +283,7 @@ func TestAdminMeRequiresSessionCookie(t *testing.T) {
 	}
 
 	request = httptest.NewRequest(http.MethodGet, "/v1/admin/me", nil)
-	request.AddCookie(&http.Cookie{Name: adminSessionCookieName, Value: "session-token"})
+	request.AddCookie(&http.Cookie{Name: httpapi.AdminSessionCookieName, Value: "session-token"})
 	recorder = httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
@@ -305,7 +307,7 @@ func TestAdminUnenrolledAccountIsGatedToEnrollmentFlow(t *testing.T) {
 	router, _ := newAdminTestRouter(t, auth)
 
 	request := httptest.NewRequest(http.MethodGet, "/v1/admin/overview", nil)
-	request.AddCookie(&http.Cookie{Name: adminSessionCookieName, Value: "session-token"})
+	request.AddCookie(&http.Cookie{Name: httpapi.AdminSessionCookieName, Value: "session-token"})
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusForbidden {
@@ -320,8 +322,8 @@ func TestAdminUnenrolledAccountIsGatedToEnrollmentFlow(t *testing.T) {
 
 	// The enrollment start endpoint stays reachable for unenrolled accounts.
 	request = httptest.NewRequest(http.MethodPost, "/v1/admin/mfa/enroll/start", nil)
-	request.AddCookie(&http.Cookie{Name: adminSessionCookieName, Value: "session-token"})
-	request.Header.Set(adminCSRFHeader, router.adminCSRFToken("session-token"))
+	request.AddCookie(&http.Cookie{Name: httpapi.AdminSessionCookieName, Value: "session-token"})
+	request.Header.Set(httpapi.AdminCSRFHeader, router.AdminCSRFToken("session-token"))
 	recorder = httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
@@ -336,7 +338,7 @@ func TestAdminPermissionDeniedForMissingPermission(t *testing.T) {
 	router, console := newAdminTestRouter(t, auth)
 
 	request := httptest.NewRequest(http.MethodGet, "/v1/admin/users", nil)
-	request.AddCookie(&http.Cookie{Name: adminSessionCookieName, Value: "session-token"})
+	request.AddCookie(&http.Cookie{Name: httpapi.AdminSessionCookieName, Value: "session-token"})
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusForbidden {
@@ -364,7 +366,7 @@ func TestAdminLogoutRequiresCSRFHeader(t *testing.T) {
 	router, console := newAdminTestRouter(t, auth)
 
 	request := httptest.NewRequest(http.MethodPost, "/v1/admin/auth/logout", nil)
-	request.AddCookie(&http.Cookie{Name: adminSessionCookieName, Value: "session-token"})
+	request.AddCookie(&http.Cookie{Name: httpapi.AdminSessionCookieName, Value: "session-token"})
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusForbidden {
@@ -384,8 +386,8 @@ func TestAdminLogoutRequiresCSRFHeader(t *testing.T) {
 	}
 
 	request = httptest.NewRequest(http.MethodPost, "/v1/admin/auth/logout", nil)
-	request.AddCookie(&http.Cookie{Name: adminSessionCookieName, Value: "session-token"})
-	request.Header.Set(adminCSRFHeader, router.adminCSRFToken("session-token"))
+	request.AddCookie(&http.Cookie{Name: httpapi.AdminSessionCookieName, Value: "session-token"})
+	request.Header.Set(httpapi.AdminCSRFHeader, router.AdminCSRFToken("session-token"))
 	recorder = httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
@@ -394,7 +396,7 @@ func TestAdminLogoutRequiresCSRFHeader(t *testing.T) {
 	if len(auth.loggedOut) != 1 || auth.loggedOut[0] != "session-token" {
 		t.Fatalf("loggedOut = %#v", auth.loggedOut)
 	}
-	if cookie := responseCookie(recorder.Result(), adminSessionCookieName); cookie == nil || cookie.MaxAge != -1 {
+	if cookie := responseCookie(recorder.Result(), httpapi.AdminSessionCookieName); cookie == nil || cookie.MaxAge != -1 {
 		t.Fatalf("session cookie was not cleared: %#v", cookie)
 	}
 }
@@ -426,7 +428,7 @@ func TestAdminCORSPreflightAllowsConfiguredOrigin(t *testing.T) {
 }
 
 type fakeStatsConsole struct {
-	AdminConsoleStore
+	httpapi.AdminConsoleStore
 	stats []domain.DailyStat
 }
 
@@ -439,21 +441,22 @@ func TestAdminOverviewStatsReturnsSeries(t *testing.T) {
 	console := &fakeStatsConsole{stats: []domain.DailyStat{
 		{Day: "2026-08-17", LicensesCreated: 2, AdminLogins: 3},
 	}}
-	router := NewRouter(RouterConfig{
-		Admin: AdminConfig{
+	router := httpapi.NewRouter(httpapi.RouterConfig{
+		Admin: httpapi.AdminConfig{
 			Auth: auth, Console: console, AllowedOrigins: []string{"http://localhost:3000"},
 			CSRFSecret: []byte("test-csrf-secret"), SessionTTL: time.Hour,
 		},
 	})
+	router.MountAdmin(New(router))
 	request := httptest.NewRequest(http.MethodGet, "/v1/admin/overview/stats", nil)
-	request.AddCookie(&http.Cookie{Name: adminSessionCookieName, Value: "session-token"})
+	request.AddCookie(&http.Cookie{Name: httpapi.AdminSessionCookieName, Value: "session-token"})
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
 	var body struct {
-		OK   bool           `json:"ok"`
+		OK   bool            `json:"ok"`
 		Days []dailyStatJSON `json:"days"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil || !body.OK || len(body.Days) != 1 {
@@ -469,7 +472,7 @@ func TestAdminUnknownPathReturnsNotFound(t *testing.T) {
 	router, _ := newAdminTestRouter(t, auth)
 
 	request := httptest.NewRequest(http.MethodGet, "/v1/admin/nope", nil)
-	request.AddCookie(&http.Cookie{Name: adminSessionCookieName, Value: "session-token"})
+	request.AddCookie(&http.Cookie{Name: httpapi.AdminSessionCookieName, Value: "session-token"})
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusNotFound {
@@ -478,7 +481,7 @@ func TestAdminUnknownPathReturnsNotFound(t *testing.T) {
 }
 
 func TestAdminNamespaceDisabledWithoutDependencies(t *testing.T) {
-	router := NewRouter(RouterConfig{})
+	router := httpapi.NewRouter(httpapi.RouterConfig{})
 	request := httptest.NewRequest(http.MethodPost, "/v1/admin/auth/login", adminLoginBody(t, "root@example.com", "password"))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()

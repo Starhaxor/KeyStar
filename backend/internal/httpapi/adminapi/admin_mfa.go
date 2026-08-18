@@ -1,4 +1,4 @@
-package httpapi
+package adminapi
 
 import (
 	"errors"
@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/starloader/backend/internal/domain"
+	"github.com/starloader/backend/internal/httpapi"
 	"github.com/starloader/backend/internal/security"
 	"github.com/starloader/backend/internal/service/adminauth"
 )
@@ -15,16 +16,16 @@ import (
 // --- TOTP enrollment ---
 
 func (router *Router) handleAdminMFAEnrollStart(writer http.ResponseWriter, request *http.Request, account *domain.AdminAccount) {
-	secret, provisioningURI, err := router.admin.Auth.StartMFAEnrollment(request.Context(), account, router.adminMFAIssuer())
+	secret, provisioningURI, err := router.Admin.Auth.StartMFAEnrollment(request.Context(), account, router.AdminMFAIssuer())
 	if errors.Is(err, adminauth.ErrMFAAlreadyEnrolled) {
-		writeError(writer, request, http.StatusConflict, "MFA_ALREADY_ENROLLED", "mfa already enrolled")
+		httpapi.WriteError(writer, request, http.StatusConflict, "MFA_ALREADY_ENROLLED", "mfa already enrolled")
 		return
 	}
 	if err != nil {
-		writeError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
+		httpapi.WriteError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
 		return
 	}
-	writeJSON(writer, http.StatusOK, struct {
+	httpapi.WriteJSON(writer, http.StatusOK, struct {
 		OK              bool   `json:"ok"`
 		Secret          string `json:"secret"`
 		ProvisioningURI string `json:"provisioning_uri"`
@@ -35,32 +36,32 @@ func (router *Router) handleAdminMFAEnrollConfirm(writer http.ResponseWriter, re
 	var body struct {
 		Code string `json:"code"`
 	}
-	if err := decodeAdminJSONBody(writer, request, &body); err != nil {
-		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+	if err := httpapi.DecodeJSONBody(writer, request, &body); err != nil {
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
 		return
 	}
 	if strings.TrimSpace(body.Code) == "" {
-		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "code is required")
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "code is required")
 		return
 	}
-	ipAddress := clientIP(request, router.trustedProxies)
-	recoveryCodes, err := router.admin.Auth.ConfirmMFAEnrollment(request.Context(), account, body.Code, ipAddress, request.UserAgent())
+	ipAddress := httpapi.ClientIP(request, router.TrustedProxies())
+	recoveryCodes, err := router.Admin.Auth.ConfirmMFAEnrollment(request.Context(), account, body.Code, ipAddress, request.UserAgent())
 	switch {
 	case errors.Is(err, adminauth.ErrInvalidMFACode):
-		writeError(writer, request, http.StatusBadRequest, "INVALID_MFA_CODE", "invalid mfa code")
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_MFA_CODE", "invalid mfa code")
 		return
 	case errors.Is(err, adminauth.ErrMFANotEnrolled):
-		writeError(writer, request, http.StatusBadRequest, "MFA_ENROLLMENT_NOT_STARTED", "start mfa enrollment first")
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "MFA_ENROLLMENT_NOT_STARTED", "start mfa enrollment first")
 		return
 	case errors.Is(err, adminauth.ErrMFAAlreadyEnrolled):
-		writeError(writer, request, http.StatusConflict, "MFA_ALREADY_ENROLLED", "mfa already enrolled")
+		httpapi.WriteError(writer, request, http.StatusConflict, "MFA_ALREADY_ENROLLED", "mfa already enrolled")
 		return
 	case err != nil:
-		writeError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
+		httpapi.WriteError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
 		return
 	}
-	router.recordSecurityEvent(request, account, "ADMIN_MFA_ENROLLED", "info", nil)
-	writeJSON(writer, http.StatusOK, struct {
+	router.RecordSecurityEvent(request, account, "ADMIN_MFA_ENROLLED", "info", nil)
+	httpapi.WriteJSON(writer, http.StatusOK, struct {
 		OK            bool     `json:"ok"`
 		RecoveryCodes []string `json:"recovery_codes"`
 	}{OK: true, RecoveryCodes: recoveryCodes})
@@ -73,26 +74,26 @@ func (router *Router) handleAdminMFADisable(writer http.ResponseWriter, request 
 	var body struct {
 		Password string `json:"password"`
 	}
-	if err := decodeAdminJSONBody(writer, request, &body); err != nil {
-		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+	if err := httpapi.DecodeJSONBody(writer, request, &body); err != nil {
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
 		return
 	}
 	if body.Password == "" {
-		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "password is required")
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "password is required")
 		return
 	}
-	ipAddress := clientIP(request, router.trustedProxies)
-	if err := router.admin.Auth.DisableMFA(request.Context(), account, body.Password, ipAddress, request.UserAgent()); err != nil {
+	ipAddress := httpapi.ClientIP(request, router.TrustedProxies())
+	if err := router.Admin.Auth.DisableMFA(request.Context(), account, body.Password, ipAddress, request.UserAgent()); err != nil {
 		if errors.Is(err, adminauth.ErrInvalidCredentials) {
-			writeError(writer, request, http.StatusUnauthorized, "INVALID_PASSWORD", "password verification failed")
+			httpapi.WriteError(writer, request, http.StatusUnauthorized, "INVALID_PASSWORD", "password verification failed")
 			return
 		}
-		writeError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
+		httpapi.WriteError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
 		return
 	}
-	router.recordSecurityEvent(request, account, "ADMIN_MFA_DISABLED", "warning", nil)
-	clearAdminCookies(writer, router.admin.CookieSecure)
-	writeJSON(writer, http.StatusOK, struct {
+	router.RecordSecurityEvent(request, account, "ADMIN_MFA_DISABLED", "warning", nil)
+	router.ClearAdminCookies(writer)
+	httpapi.WriteJSON(writer, http.StatusOK, struct {
 		OK bool `json:"ok"`
 	}{OK: true})
 }
@@ -117,34 +118,34 @@ func mapAdminAccount(account domain.AdminAccount) adminAccountJSON {
 		Role:        account.RoleName,
 		Permissions: account.Permissions,
 		MFAEnrolled: account.MFAEnrolled,
-		CreatedAt:   formatTime(account.CreatedAt),
+		CreatedAt:   httpapi.FormatTime(account.CreatedAt),
 	}
 }
 
 func (router *Router) routeAdminAccounts(writer http.ResponseWriter, request *http.Request, account *domain.AdminAccount, segments []string) {
 	switch {
 	case len(segments) == 1 && request.Method == http.MethodGet:
-		if !router.requirePermission(writer, request, account, domain.PermAdminsRead) {
+		if !router.RequirePermission(writer, request, account, domain.PermAdminsRead) {
 			return
 		}
 		router.handleAdminAccountList(writer, request)
 	case len(segments) == 1 && request.Method == http.MethodPost:
-		if !router.requirePermission(writer, request, account, domain.PermAdminsWrite) {
+		if !router.RequirePermission(writer, request, account, domain.PermAdminsWrite) {
 			return
 		}
 		router.handleAdminAccountCreate(writer, request, account)
 	case len(segments) == 2 && request.Method == http.MethodPatch:
-		if !router.requirePermission(writer, request, account, domain.PermAdminsWrite) {
+		if !router.RequirePermission(writer, request, account, domain.PermAdminsWrite) {
 			return
 		}
 		router.handleAdminAccountUpdate(writer, request, account, segments[1])
 	case len(segments) == 3 && segments[2] == "reset-password" && request.Method == http.MethodPost:
-		if !router.requirePermission(writer, request, account, domain.PermAdminsWrite) {
+		if !router.RequirePermission(writer, request, account, domain.PermAdminsWrite) {
 			return
 		}
 		router.handleAdminPasswordReset(writer, request, account, segments[1])
 	default:
-		writeError(writer, request, http.StatusNotFound, "INVALID_REQUEST", "not found")
+		httpapi.WriteError(writer, request, http.StatusNotFound, "INVALID_REQUEST", "not found")
 	}
 }
 
@@ -154,61 +155,61 @@ func (router *Router) routeAdminAccounts(writer http.ResponseWriter, request *ht
 // effect immediately. Self-service password changes are handled separately;
 // self-reset here is rejected.
 func (router *Router) handleAdminPasswordReset(writer http.ResponseWriter, request *http.Request, actor *domain.AdminAccount, adminID string) {
-	if !uuidPattern.MatchString(adminID) {
-		writeError(writer, request, http.StatusNotFound, "ADMIN_NOT_FOUND", "admin not found")
+	if !httpapi.ValidUUID(adminID) {
+		httpapi.WriteError(writer, request, http.StatusNotFound, "ADMIN_NOT_FOUND", "admin not found")
 		return
 	}
 	if adminID == actor.ID {
-		writeError(writer, request, http.StatusBadRequest, "ADMIN_SELF_MODIFICATION", "you cannot reset your own password here")
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "ADMIN_SELF_MODIFICATION", "you cannot reset your own password here")
 		return
 	}
 	var body struct {
 		Password string `json:"password"`
 	}
-	if err := decodeAdminJSONBody(writer, request, &body); err != nil {
-		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+	if err := httpapi.DecodeJSONBody(writer, request, &body); err != nil {
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
 		return
 	}
 	password := body.Password
 	if password == "" {
 		generated, err := generateTemporaryPassword()
 		if err != nil {
-			writeError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
+			httpapi.WriteError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
 			return
 		}
 		password = generated
 	} else if len(password) < minAdminPasswordLength {
-		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "password must be at least 12 characters")
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "password must be at least 12 characters")
 		return
 	}
 	hash, err := security.HashPassword(password)
 	if err != nil {
-		writeError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
+		httpapi.WriteError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
 		return
 	}
-	if err := router.admin.Console.SetAdminPassword(request.Context(), adminID, hash); err != nil {
-		router.writeConsoleError(writer, request, err)
+	if err := router.Admin.Console.SetAdminPassword(request.Context(), adminID, hash); err != nil {
+		router.WriteConsoleError(writer, request, err)
 		return
 	}
-	_ = router.admin.Console.RevokeAllAdminSessions(request.Context(), adminID)
-	router.auditAdmin(request, actor, "ADMIN_PASSWORD_RESET", "admin_account", adminID, nil)
-	writeJSON(writer, http.StatusOK, struct {
+	_ = router.Admin.Console.RevokeAllAdminSessions(request.Context(), adminID)
+	router.AuditAdmin(request, actor, "ADMIN_PASSWORD_RESET", "admin_account", adminID, nil)
+	httpapi.WriteJSON(writer, http.StatusOK, struct {
 		OK           bool   `json:"ok"`
 		TempPassword string `json:"temp_password"`
 	}{OK: true, TempPassword: password})
 }
 
 func (router *Router) handleAdminAccountList(writer http.ResponseWriter, request *http.Request) {
-	accounts, err := router.admin.Console.ListAdminAccounts(request.Context())
+	accounts, err := router.Admin.Console.ListAdminAccounts(request.Context())
 	if err != nil {
-		router.writeConsoleError(writer, request, err)
+		router.WriteConsoleError(writer, request, err)
 		return
 	}
 	items := make([]adminAccountJSON, 0, len(accounts))
 	for _, admin := range accounts {
 		items = append(items, mapAdminAccount(admin))
 	}
-	writeJSON(writer, http.StatusOK, struct {
+	httpapi.WriteJSON(writer, http.StatusOK, struct {
 		OK    bool               `json:"ok"`
 		Items []adminAccountJSON `json:"items"`
 		Total int                `json:"total"`
@@ -224,26 +225,26 @@ func (router *Router) handleAdminAccountCreate(writer http.ResponseWriter, reque
 		Password string `json:"password"`
 		Role     string `json:"role"`
 	}
-	if err := decodeAdminJSONBody(writer, request, &body); err != nil {
-		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+	if err := httpapi.DecodeJSONBody(writer, request, &body); err != nil {
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
 		return
 	}
 	email := strings.ToLower(strings.TrimSpace(body.Email))
 	if email == "" || !strings.Contains(email, "@") || len(email) > 254 {
-		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "a valid email is required")
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "a valid email is required")
 		return
 	}
 	if len(body.Password) < minAdminPasswordLength {
-		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "password must be at least 12 characters")
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "password must be at least 12 characters")
 		return
 	}
 	role := strings.ToLower(strings.TrimSpace(body.Role))
 	if role == "" {
 		role = domain.RoleViewer
 	}
-	roles, err := router.admin.Console.ListRoles(request.Context())
+	roles, err := router.Admin.Console.ListRoles(request.Context())
 	if err != nil {
-		router.writeConsoleError(writer, request, err)
+		router.WriteConsoleError(writer, request, err)
 		return
 	}
 	roleValid := false
@@ -254,25 +255,25 @@ func (router *Router) handleAdminAccountCreate(writer http.ResponseWriter, reque
 		}
 	}
 	if !roleValid {
-		writeError(writer, request, http.StatusBadRequest, "ROLE_NOT_FOUND", "role not found")
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "ROLE_NOT_FOUND", "role not found")
 		return
 	}
 	hash, err := security.HashPassword(body.Password)
 	if err != nil {
-		writeError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
+		httpapi.WriteError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
 		return
 	}
-	created, err := router.admin.Console.CreateAdminAccount(request.Context(), domain.NewAdminAccount{
+	created, err := router.Admin.Console.CreateAdminAccount(request.Context(), domain.NewAdminAccount{
 		Email:        email,
 		PasswordHash: hash,
 		RoleName:     role,
 	})
 	if err != nil {
-		router.writeConsoleError(writer, request, err)
+		router.WriteConsoleError(writer, request, err)
 		return
 	}
-	router.auditAdmin(request, actor, "ADMIN_CREATED", "admin_account", created.ID, map[string]string{"email": created.Email, "role": role})
-	writeJSON(writer, http.StatusCreated, struct {
+	router.AuditAdmin(request, actor, "ADMIN_CREATED", "admin_account", created.ID, map[string]string{"email": created.Email, "role": role})
+	httpapi.WriteJSON(writer, http.StatusCreated, struct {
 		OK    bool             `json:"ok"`
 		Admin adminAccountJSON `json:"admin"`
 	}{OK: true, Admin: mapAdminAccount(*created)})
@@ -282,39 +283,39 @@ func (router *Router) handleAdminAccountCreate(writer http.ResponseWriter, reque
 // Self-modification is rejected: the acting admin manages their own MFA via
 // the /mfa endpoints and cannot lock themselves out or escalate themselves.
 func (router *Router) handleAdminAccountUpdate(writer http.ResponseWriter, request *http.Request, actor *domain.AdminAccount, adminID string) {
-	if !uuidPattern.MatchString(adminID) {
-		writeError(writer, request, http.StatusNotFound, "ADMIN_NOT_FOUND", "admin not found")
+	if !httpapi.ValidUUID(adminID) {
+		httpapi.WriteError(writer, request, http.StatusNotFound, "ADMIN_NOT_FOUND", "admin not found")
 		return
 	}
 	if adminID == actor.ID {
-		writeError(writer, request, http.StatusBadRequest, "ADMIN_SELF_MODIFICATION", "you cannot modify your own account")
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "ADMIN_SELF_MODIFICATION", "you cannot modify your own account")
 		return
 	}
 	var body struct {
 		Status string `json:"status"`
 		Role   string `json:"role"`
 	}
-	if err := decodeAdminJSONBody(writer, request, &body); err != nil {
-		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+	if err := httpapi.DecodeJSONBody(writer, request, &body); err != nil {
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
 		return
 	}
 	status := strings.TrimSpace(body.Status)
 	roleName := strings.ToLower(strings.TrimSpace(body.Role))
 	if status == "" && roleName == "" {
-		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "status or role is required")
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "status or role is required")
 		return
 	}
 	if status != "" && status != string(domain.AdminStatusActive) && status != string(domain.AdminStatusDisabled) {
-		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "status must be active or disabled")
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "status must be active or disabled")
 		return
 	}
 	if status == "" {
 		status = string(domain.AdminStatusActive)
 	}
 	if roleName != "" {
-		roles, err := router.admin.Console.ListRoles(request.Context())
+		roles, err := router.Admin.Console.ListRoles(request.Context())
 		if err != nil {
-			router.writeConsoleError(writer, request, err)
+			router.WriteConsoleError(writer, request, err)
 			return
 		}
 		found := false
@@ -325,29 +326,29 @@ func (router *Router) handleAdminAccountUpdate(writer http.ResponseWriter, reque
 			}
 		}
 		if !found {
-			writeError(writer, request, http.StatusBadRequest, "ROLE_NOT_FOUND", "unknown role")
+			httpapi.WriteError(writer, request, http.StatusBadRequest, "ROLE_NOT_FOUND", "unknown role")
 			return
 		}
 	}
-	target, err := router.admin.Console.FindAdminAccountByID(request.Context(), adminID)
+	target, err := router.Admin.Console.FindAdminAccountByID(request.Context(), adminID)
 	if err != nil {
-		router.writeConsoleError(writer, request, err)
+		router.WriteConsoleError(writer, request, err)
 		return
 	}
 	if status == "" {
 		status = string(target.Status)
 	}
 	if status == string(domain.AdminStatusDisabled) {
-		router.recordSecurityEvent(request, actor, "ADMIN_ACCOUNT_DISABLED", "warning", map[string]string{"target_admin_id": adminID})
+		router.RecordSecurityEvent(request, actor, "ADMIN_ACCOUNT_DISABLED", "warning", map[string]string{"target_admin_id": adminID})
 	}
-	if err := router.admin.Console.UpdateAdminAccountStatusAndRole(request.Context(), adminID, domain.AdminAccountStatus(status), roleName); err != nil {
-		router.writeConsoleError(writer, request, err)
+	if err := router.Admin.Console.UpdateAdminAccountStatusAndRole(request.Context(), adminID, domain.AdminAccountStatus(status), roleName); err != nil {
+		router.WriteConsoleError(writer, request, err)
 		return
 	}
-	router.auditAdmin(request, actor, "ADMIN_ACCOUNT_UPDATED", "admin_account", adminID, map[string]string{
+	router.AuditAdmin(request, actor, "ADMIN_ACCOUNT_UPDATED", "admin_account", adminID, map[string]string{
 		"status": status, "role": roleName,
 	})
-	writeJSON(writer, http.StatusOK, struct {
+	httpapi.WriteJSON(writer, http.StatusOK, struct {
 		OK bool `json:"ok"`
 	}{OK: true})
 }
@@ -375,16 +376,16 @@ func mapRoleJSON(role domain.Role) roleJSON {
 }
 
 func (router *Router) handleAdminRoles(writer http.ResponseWriter, request *http.Request) {
-	roles, err := router.admin.Console.ListRoles(request.Context())
+	roles, err := router.Admin.Console.ListRoles(request.Context())
 	if err != nil {
-		router.writeConsoleError(writer, request, err)
+		router.WriteConsoleError(writer, request, err)
 		return
 	}
 	items := make([]roleJSON, 0, len(roles))
 	for _, role := range roles {
 		items = append(items, mapRoleJSON(role))
 	}
-	writeJSON(writer, http.StatusOK, struct {
+	httpapi.WriteJSON(writer, http.StatusOK, struct {
 		OK    bool       `json:"ok"`
 		Items []roleJSON `json:"items"`
 		Total int        `json:"total"`
@@ -394,13 +395,13 @@ func (router *Router) handleAdminRoles(writer http.ResponseWriter, request *http
 // handleAdminRoleMembers returns the admin accounts assigned to a role. The
 // email list powers the expandable member panel in the Roles page.
 func (router *Router) handleAdminRoleMembers(writer http.ResponseWriter, request *http.Request, roleID string) {
-	if !uuidPattern.MatchString(roleID) {
-		writeError(writer, request, http.StatusNotFound, "ROLE_NOT_FOUND", "role not found")
+	if !httpapi.ValidUUID(roleID) {
+		httpapi.WriteError(writer, request, http.StatusNotFound, "ROLE_NOT_FOUND", "role not found")
 		return
 	}
-	members, err := router.admin.Console.ListRoleMembers(request.Context(), roleID)
+	members, err := router.Admin.Console.ListRoleMembers(request.Context(), roleID)
 	if err != nil {
-		router.writeConsoleError(writer, request, err)
+		router.WriteConsoleError(writer, request, err)
 		return
 	}
 	items := make([]roleMemberJSON, 0, len(members))
@@ -410,10 +411,10 @@ func (router *Router) handleAdminRoleMembers(writer http.ResponseWriter, request
 			Email:       member.Email,
 			Status:      string(member.Status),
 			MFAEnrolled: member.MFAEnrolled,
-			CreatedAt:   formatTime(member.CreatedAt),
+			CreatedAt:   httpapi.FormatTime(member.CreatedAt),
 		})
 	}
-	writeJSON(writer, http.StatusOK, struct {
+	httpapi.WriteJSON(writer, http.StatusOK, struct {
 		OK    bool             `json:"ok"`
 		Items []roleMemberJSON `json:"items"`
 		Total int              `json:"total"`
@@ -456,36 +457,36 @@ func (router *Router) handleAdminRoleCreate(writer http.ResponseWriter, request 
 		Description string   `json:"description"`
 		Permissions []string `json:"permissions"`
 	}
-	if err := decodeAdminJSONBody(writer, request, &body); err != nil {
-		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+	if err := httpapi.DecodeJSONBody(writer, request, &body); err != nil {
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
 		return
 	}
 	name := strings.ToLower(strings.TrimSpace(body.Name))
 	if !roleNamePattern.MatchString(name) {
-		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "role name must be lowercase letters, digits, dashes or underscores (max 32)")
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "role name must be lowercase letters, digits, dashes or underscores (max 32)")
 		return
 	}
 	if len(strings.TrimSpace(body.Description)) > 200 {
-		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "description must be at most 200 characters")
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "description must be at most 200 characters")
 		return
 	}
 	if err := validateRolePermissions(body.Permissions); err != nil {
-		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
 		return
 	}
-	created, err := router.admin.Console.CreateRole(request.Context(), domain.NewRole{
+	created, err := router.Admin.Console.CreateRole(request.Context(), domain.NewRole{
 		Name:        name,
 		Description: strings.TrimSpace(body.Description),
 		Permissions: body.Permissions,
 	})
 	if err != nil {
-		router.writeConsoleError(writer, request, err)
+		router.WriteConsoleError(writer, request, err)
 		return
 	}
-	router.auditAdmin(request, account, "ROLE_CREATED", "role", created.ID, map[string]string{
+	router.AuditAdmin(request, account, "ROLE_CREATED", "role", created.ID, map[string]string{
 		"name": created.Name, "permissions": strings.Join(created.Permissions, ","),
 	})
-	writeJSON(writer, http.StatusOK, struct {
+	httpapi.WriteJSON(writer, http.StatusOK, struct {
 		OK   bool     `json:"ok"`
 		Role roleJSON `json:"role"`
 	}{
@@ -500,34 +501,34 @@ func (router *Router) handleAdminRoleCreate(writer http.ResponseWriter, request 
 // handleAdminRoleUpdate changes the description and permission set of a custom
 // role. Built-in roles are rejected by the store.
 func (router *Router) handleAdminRoleUpdate(writer http.ResponseWriter, request *http.Request, account *domain.AdminAccount, roleID string) {
-	if !uuidPattern.MatchString(roleID) {
-		writeError(writer, request, http.StatusNotFound, "ROLE_NOT_FOUND", "role not found")
+	if !httpapi.ValidUUID(roleID) {
+		httpapi.WriteError(writer, request, http.StatusNotFound, "ROLE_NOT_FOUND", "role not found")
 		return
 	}
 	var body struct {
 		Description string   `json:"description"`
 		Permissions []string `json:"permissions"`
 	}
-	if err := decodeAdminJSONBody(writer, request, &body); err != nil {
-		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+	if err := httpapi.DecodeJSONBody(writer, request, &body); err != nil {
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
 		return
 	}
 	if len(strings.TrimSpace(body.Description)) > 200 {
-		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "description must be at most 200 characters")
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "description must be at most 200 characters")
 		return
 	}
 	if err := validateRolePermissions(body.Permissions); err != nil {
-		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
 		return
 	}
-	if err := router.admin.Console.UpdateRole(request.Context(), roleID, strings.TrimSpace(body.Description), body.Permissions); err != nil {
-		router.writeConsoleError(writer, request, err)
+	if err := router.Admin.Console.UpdateRole(request.Context(), roleID, strings.TrimSpace(body.Description), body.Permissions); err != nil {
+		router.WriteConsoleError(writer, request, err)
 		return
 	}
-	router.auditAdmin(request, account, "ROLE_UPDATED", "role", roleID, map[string]string{
+	router.AuditAdmin(request, account, "ROLE_UPDATED", "role", roleID, map[string]string{
 		"permissions": strings.Join(body.Permissions, ","),
 	})
-	writeJSON(writer, http.StatusOK, struct {
+	httpapi.WriteJSON(writer, http.StatusOK, struct {
 		OK bool `json:"ok"`
 	}{OK: true})
 }
@@ -536,20 +537,20 @@ func (router *Router) handleAdminRoleUpdate(writer http.ResponseWriter, request 
 // and roles still assigned to an admin account are rejected; the acting admin
 // can never delete the role they are currently assigned to.
 func (router *Router) handleAdminRoleDelete(writer http.ResponseWriter, request *http.Request, account *domain.AdminAccount, roleID string) {
-	if !uuidPattern.MatchString(roleID) {
-		writeError(writer, request, http.StatusNotFound, "ROLE_NOT_FOUND", "role not found")
+	if !httpapi.ValidUUID(roleID) {
+		httpapi.WriteError(writer, request, http.StatusNotFound, "ROLE_NOT_FOUND", "role not found")
 		return
 	}
 	if account.RoleID == roleID {
-		writeError(writer, request, http.StatusBadRequest, "ROLE_IN_USE", "you cannot delete the role you are currently assigned to")
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "ROLE_IN_USE", "you cannot delete the role you are currently assigned to")
 		return
 	}
-	if err := router.admin.Console.DeleteRole(request.Context(), roleID); err != nil {
-		router.writeConsoleError(writer, request, err)
+	if err := router.Admin.Console.DeleteRole(request.Context(), roleID); err != nil {
+		router.WriteConsoleError(writer, request, err)
 		return
 	}
-	router.auditAdmin(request, account, "ROLE_DELETED", "role", roleID, nil)
-	writeJSON(writer, http.StatusOK, struct {
+	router.AuditAdmin(request, account, "ROLE_DELETED", "role", roleID, nil)
+	httpapi.WriteJSON(writer, http.StatusOK, struct {
 		OK bool `json:"ok"`
 	}{OK: true})
 }
@@ -568,9 +569,9 @@ type securityEventJSON struct {
 
 func (router *Router) handleAdminSecurityEvents(writer http.ResponseWriter, request *http.Request) {
 	page, pageSize, offset := parseAdminPagination(request)
-	events, total, err := router.admin.Console.ListSecurityEvents(request.Context(), offset, pageSize)
+	events, total, err := router.Admin.Console.ListSecurityEvents(request.Context(), offset, pageSize)
 	if err != nil {
-		router.writeConsoleError(writer, request, err)
+		router.WriteConsoleError(writer, request, err)
 		return
 	}
 	items := make([]securityEventJSON, 0, len(events))
@@ -582,8 +583,8 @@ func (router *Router) handleAdminSecurityEvents(writer http.ResponseWriter, requ
 			AdminAccountID: event.AdminAccountID,
 			ActorEmail:     event.ActorEmail,
 			UserAgent:      event.UserAgent,
-			CreatedAt:      formatTime(event.CreatedAt),
+			CreatedAt:      httpapi.FormatTime(event.CreatedAt),
 		})
 	}
-	writeJSON(writer, http.StatusOK, adminPageResponse{OK: true, Items: items, Total: total, Page: page, PageSize: pageSize})
+	httpapi.WriteJSON(writer, http.StatusOK, adminPageResponse{OK: true, Items: items, Total: total, Page: page, PageSize: pageSize})
 }

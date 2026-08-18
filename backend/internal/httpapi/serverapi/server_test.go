@@ -1,4 +1,4 @@
-package httpapi
+package serverapi
 
 import (
 	"context"
@@ -10,12 +10,42 @@ import (
 	"time"
 
 	"github.com/starloader/backend/internal/domain"
+	"github.com/starloader/backend/internal/httpapi"
 )
+
+const serverTestApplicationID = "019c1111-1111-7111-8111-111111111111"
+
+// serverTestApplicationResolver accepts every well-formed application ID.
+type serverTestApplicationResolver struct{}
+
+func (resolver *serverTestApplicationResolver) FindApplicationByID(_ context.Context, applicationID string) (*domain.Application, error) {
+	if applicationID != serverTestApplicationID {
+		return nil, domain.ErrApplicationNotFound
+	}
+	return &domain.Application{ID: applicationID, OrganizationID: "org-1", Status: domain.ApplicationStatusActive}, nil
+}
+
+// serverTestCredentialVerifier accepts the configured credential for the test
+// application.
+type serverTestCredentialVerifier struct {
+	credential *domain.ApplicationCredential
+	err        error
+}
+
+func (verifier *serverTestCredentialVerifier) Verify(_ context.Context, applicationID, _ string) (*domain.ApplicationCredential, error) {
+	if verifier.err != nil {
+		return nil, verifier.err
+	}
+	if verifier.credential == nil || verifier.credential.ApplicationID != applicationID {
+		return nil, domain.ErrInvalidCredential
+	}
+	return verifier.credential, nil
+}
 
 // fakeServerStore embeds the interface so only the exercised methods need to
 // be implemented.
 type fakeServerStore struct {
-	ServerStore
+	httpapi.ServerStore
 	users       []domain.ServerUser
 	user        *domain.ServerUser
 	userErr     error
@@ -142,20 +172,21 @@ func (fake *fakeServerStore) DeleteVariable(_ context.Context, _, variableID str
 }
 
 func newServerTestRouter(store *fakeServerStore, credential *domain.ApplicationCredential) *Router {
-	verifier := &middlewareTestCredentialVerifier{credential: credential}
-	return NewRouter(RouterConfig{
-		Login:                &fakeLoginService{},
-		DefaultApplicationID: middlewareTestApplicationID,
-		Applications:         &middlewareTestApplicationResolver{},
+	verifier := &serverTestCredentialVerifier{credential: credential}
+	core := httpapi.NewRouter(httpapi.RouterConfig{
+		DefaultApplicationID: serverTestApplicationID,
+		Applications:         &serverTestApplicationResolver{},
 		Credentials:          verifier,
-		Server:               ServerConfig{LicenseHMACKey: []byte("license-hmac-key"), Product: "StarLoader"},
+		Server:               httpapi.ServerConfig{LicenseHMACKey: []byte("license-hmac-key"), Product: "StarLoader"},
 		ServerStore:          store,
 	})
+	core.MountServer(New(core))
+	return &Router{Router: core}
 }
 
 func serverSecretKey() *domain.ApplicationCredential {
 	return &domain.ApplicationCredential{
-		ID: "cred-secret", ApplicationID: middlewareTestApplicationID,
+		ID: "cred-secret", ApplicationID: serverTestApplicationID,
 		Environment: domain.CredentialEnvironmentLive, CredentialType: domain.CredentialSecret,
 		Scopes: []string{"users.read", "users.write", "licenses.read", "licenses.write", "devices.write", "variables.read", "variables.write"},
 		Status: domain.CredentialStatusActive,
@@ -172,6 +203,23 @@ func serverRequest(t *testing.T, router *Router, method, path, body string) *htt
 	return recorder
 }
 
+func assertServerError(t *testing.T, recorder *httptest.ResponseRecorder, status int, code string) {
+	t.Helper()
+	if recorder.Code != status {
+		t.Fatalf("status = %d, want %d; body = %s", recorder.Code, status, recorder.Body.String())
+	}
+	var response struct {
+		OK   bool   `json:"ok"`
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.OK || response.Code != code {
+		t.Fatalf("error response = %#v", response)
+	}
+}
+
 func TestServerAPIRequiresSecretKeyAndScopes(t *testing.T) {
 	store := &fakeServerStore{}
 	router := newServerTestRouter(store, serverSecretKey())
@@ -180,30 +228,31 @@ func TestServerAPIRequiresSecretKeyAndScopes(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/v1/server/users", nil)
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
-	assertErrorResponse(t, recorder, http.StatusUnauthorized, "INVALID_CREDENTIAL")
+	assertServerError(t, recorder, http.StatusUnauthorized, "INVALID_CREDENTIAL")
 
 	// Publishable key is rejected on server endpoints.
 	request = httptest.NewRequest(http.MethodGet, "/v1/server/users", nil)
 	request.Header.Set("Authorization", "Bearer ks_pk_live_0123456789_secretvaluewithcorrectlengthplus1")
 	recorder = httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
-	assertErrorResponse(t, recorder, http.StatusUnauthorized, "INVALID_CREDENTIAL")
+	assertServerError(t, recorder, http.StatusUnauthorized, "INVALID_CREDENTIAL")
 
 	// Missing required scope.
-	verifier := &middlewareTestCredentialVerifier{credential: &domain.ApplicationCredential{
-		ID: "cred-limited", CredentialType: domain.CredentialSecret,
+	verifier := &serverTestCredentialVerifier{credential: &domain.ApplicationCredential{
+		ID: "cred-limited", ApplicationID: serverTestApplicationID, CredentialType: domain.CredentialSecret,
 		Scopes: []string{"users.read"}, Status: domain.CredentialStatusActive,
 	}}
-	limited := NewRouter(RouterConfig{
-		Login:                &fakeLoginService{},
-		DefaultApplicationID: middlewareTestApplicationID,
-		Applications:         &middlewareTestApplicationResolver{},
+	core := httpapi.NewRouter(httpapi.RouterConfig{
+		DefaultApplicationID: serverTestApplicationID,
+		Applications:         &serverTestApplicationResolver{},
 		Credentials:          verifier,
-		Server:               ServerConfig{LicenseHMACKey: []byte("k"), Product: "StarLoader"},
+		Server:               httpapi.ServerConfig{LicenseHMACKey: []byte("k"), Product: "StarLoader"},
 		ServerStore:          store,
 	})
+	core.MountServer(New(core))
+	limited := &Router{Router: core}
 	recorder = serverRequest(t, limited, http.MethodGet, "/v1/server/licenses", "")
-	assertErrorResponse(t, recorder, http.StatusForbidden, "INSUFFICIENT_SCOPE")
+	assertServerError(t, recorder, http.StatusForbidden, "INSUFFICIENT_SCOPE")
 }
 
 func TestServerUsersCRUD(t *testing.T) {
@@ -331,9 +380,9 @@ func TestServerVariablesCRUD(t *testing.T) {
 }
 
 func TestServerAPIDisabledWithoutConfig(t *testing.T) {
-	router := NewRouter(RouterConfig{Login: &fakeLoginService{}})
+	router := httpapi.NewRouter(httpapi.RouterConfig{})
 	request := httptest.NewRequest(http.MethodGet, "/v1/server/users", nil)
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
-	assertErrorResponse(t, recorder, http.StatusServiceUnavailable, "SERVER_ERROR")
+	assertServerError(t, recorder, http.StatusServiceUnavailable, "SERVER_ERROR")
 }

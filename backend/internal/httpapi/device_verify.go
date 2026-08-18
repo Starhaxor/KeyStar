@@ -48,29 +48,29 @@ func (router *Router) handleDeviceVerify(writer http.ResponseWriter, request *ht
 	request = request.WithContext(ctx)
 	mediaType, _, err := mime.ParseMediaType(request.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
-		writeError(writer, request, http.StatusUnsupportedMediaType, "INVALID_REQUEST", "invalid request")
+		WriteError(writer, request, http.StatusUnsupportedMediaType, "INVALID_REQUEST", "invalid request")
 		return
 	}
 	body, err := decodeDeviceVerifyRequest(writer, request)
 	if err != nil {
 		var maxBytesError *http.MaxBytesError
 		if errors.As(err, &maxBytesError) {
-			writeError(writer, request, http.StatusRequestEntityTooLarge, "INVALID_REQUEST", "invalid request")
+			WriteError(writer, request, http.StatusRequestEntityTooLarge, "INVALID_REQUEST", "invalid request")
 			return
 		}
-		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
 		return
 	}
 	if !validDeviceVerifyBody(body) {
-		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
 		return
 	}
 	if !router.sessionLimiter.allow(strings.TrimSpace(body.SessionID)) {
-		writeError(writer, request, http.StatusTooManyRequests, "RATE_LIMITED", "too many requests")
+		WriteError(writer, request, http.StatusTooManyRequests, "RATE_LIMITED", "too many requests")
 		return
 	}
 	if router.deviceVerification == nil {
-		writeError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
+		WriteError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
 		return
 	}
 	applicationID := router.defaultApplicationID
@@ -91,14 +91,14 @@ func (router *Router) handleDeviceVerify(writer http.ResponseWriter, request *ht
 		router.writeDeviceVerifyError(writer, request, err)
 		return
 	}
-	writeJSON(writer, http.StatusOK, deviceVerifyResponse{
+	WriteJSON(writer, http.StatusOK, deviceVerifyResponse{
 		OK: true, Token: verified.Token, TokenExpiresAt: verified.ExpiresAt.UTC().Format(time.RFC3339),
 		LicenseID: verified.LicenseID, DeviceID: verified.DeviceID,
 	})
 }
 
 func decodeDeviceVerifyRequest(writer http.ResponseWriter, request *http.Request) (deviceVerifyRequestBody, error) {
-	request.Body = http.MaxBytesReader(writer, request.Body, maxRequestBodyBytes)
+	request.Body = http.MaxBytesReader(writer, request.Body, MaxRequestBodyBytes)
 	decoder := json.NewDecoder(request.Body)
 	decoder.DisallowUnknownFields()
 	var body deviceVerifyRequestBody
@@ -136,24 +136,24 @@ func validCanonicalUUID(value string) bool {
 func (router *Router) writeDeviceVerifyError(writer http.ResponseWriter, request *http.Request, err error) {
 	switch {
 	case errors.Is(err, service.ErrInvalidVerifyRequest), errors.Is(err, domain.ErrChallengeNotFound):
-		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
 	case errors.Is(err, service.ErrChallengeExpired):
-		writeError(writer, request, http.StatusGone, "CHALLENGE_EXPIRED", "challenge expired")
+		WriteError(writer, request, http.StatusGone, "CHALLENGE_EXPIRED", "challenge expired")
 	case errors.Is(err, domain.ErrChallengeConsumed):
-		writeError(writer, request, http.StatusConflict, "CHALLENGE_CONSUMED", "challenge already consumed")
+		WriteError(writer, request, http.StatusConflict, "CHALLENGE_CONSUMED", "challenge already consumed")
 	case errors.Is(err, service.ErrInvalidDeviceSignature):
-		writeError(writer, request, http.StatusUnauthorized, "INVALID_DEVICE_SIGNATURE", "invalid device signature")
+		WriteError(writer, request, http.StatusUnauthorized, "INVALID_DEVICE_SIGNATURE", "invalid device signature")
 	case errors.Is(err, service.ErrDeviceLimitReached):
-		writeError(writer, request, http.StatusForbidden, "DEVICE_LIMIT_REACHED", "device limit reached")
+		WriteError(writer, request, http.StatusForbidden, "DEVICE_LIMIT_REACHED", "device limit reached")
 	case errors.Is(err, service.ErrDeviceRevoked):
-		writeError(writer, request, http.StatusForbidden, "DEVICE_REVOKED", "device revoked")
+		WriteError(writer, request, http.StatusForbidden, "DEVICE_REVOKED", "device revoked")
 	case errors.Is(err, service.ErrLicenseExpired):
-		writeError(writer, request, http.StatusForbidden, "LICENSE_EXPIRED", "license expired")
+		WriteError(writer, request, http.StatusForbidden, "LICENSE_EXPIRED", "license expired")
 	case errors.Is(err, service.ErrLicenseRevoked):
-		writeError(writer, request, http.StatusForbidden, "LICENSE_REVOKED", "license revoked")
+		WriteError(writer, request, http.StatusForbidden, "LICENSE_REVOKED", "license revoked")
 	case errors.Is(err, service.ErrInvalidCredentials):
-		writeError(writer, request, http.StatusUnauthorized, "INVALID_CREDENTIALS", "invalid credentials")
+		WriteError(writer, request, http.StatusUnauthorized, "INVALID_CREDENTIALS", "invalid credentials")
 	default:
-		writeError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
+		WriteError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
 	}
 }

@@ -142,26 +142,26 @@ func TestApplicationMiddlewareAcceptsValidPublishableCredential(t *testing.T) {
 
 func TestApplicationMiddlewareRejectsWrongCredentialTypeAndScope(t *testing.T) {
 	tests := []struct {
-		name        string
+		name          string
 		authorization string
-		credential  *domain.ApplicationCredential
-		status      int
-		code        string
+		credential    *domain.ApplicationCredential
+		status        int
+		code          string
 	}{
 		{
 			name: "secret key on client endpoint", authorization: "Bearer ks_sk_live_0123456789_secretvaluewithcorrectlengthplus1",
 			credential: &domain.ApplicationCredential{ID: "cred-secret", CredentialType: domain.CredentialSecret, Scopes: []string{"users.read"}, Status: domain.CredentialStatusActive},
-			status: http.StatusUnauthorized, code: "INVALID_CREDENTIAL",
+			status:     http.StatusUnauthorized, code: "INVALID_CREDENTIAL",
 		},
 		{
 			name: "missing scope", authorization: "Bearer ks_pk_live_0123456789_secretvaluewithcorrectlengthplus1",
 			credential: activePublishableCredential("device.verify"),
-			status: http.StatusForbidden, code: "INSUFFICIENT_SCOPE",
+			status:     http.StatusForbidden, code: "INSUFFICIENT_SCOPE",
 		},
 		{
 			name: "malformed bearer", authorization: "Bearer",
 			credential: activePublishableCredential("auth.login"),
-			status: http.StatusUnauthorized, code: "INVALID_CREDENTIAL",
+			status:     http.StatusUnauthorized, code: "INVALID_CREDENTIAL",
 		},
 	}
 	for _, test := range tests {
@@ -214,7 +214,7 @@ func TestAppPrincipalFromContextCarriesCredentialDetails(t *testing.T) {
 	credentials := &middlewareTestCredentialVerifier{credential: activePublishableCredential("auth.login", "variables.read_public")}
 	router := newMiddlewareTestRouter(credentials, &middlewareTestApplicationResolver{}, false)
 	var captured AppPrincipal
-	router.loginHandler = router.requireCredential(domain.CredentialPublishable, "auth.login")(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	router.loginHandler = router.RequireCredential(domain.CredentialPublishable, "auth.login")(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		principal, ok := AppPrincipalFromContext(request.Context())
 		if !ok {
 			t.Error("principal missing from context")
@@ -288,4 +288,3 @@ func TestLoginServiceReceivesResolvedApplicationID(t *testing.T) {
 		t.Fatalf("Login() input = %#v", login.input)
 	}
 }
-

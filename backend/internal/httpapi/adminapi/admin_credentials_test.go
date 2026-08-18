@@ -1,4 +1,4 @@
-package httpapi
+package adminapi
 
 import (
 	"context"
@@ -10,12 +10,13 @@ import (
 	"time"
 
 	"github.com/starloader/backend/internal/domain"
+	"github.com/starloader/backend/internal/httpapi"
 )
 
 // fakeCredentialConsole embeds the interface so the credential handlers can be
 // exercised without reimplementing the whole admin store.
 type fakeCredentialConsole struct {
-	AdminConsoleStore
+	httpapi.AdminConsoleStore
 	credentials  []domain.ApplicationCredential
 	created      domain.NewApplicationCredential
 	createdAt    time.Time
@@ -59,22 +60,23 @@ func (fake *fakeCredentialConsole) RevokeCredential(_ context.Context, applicati
 func newCredentialTestRouter(t *testing.T, console *fakeCredentialConsole) *Router {
 	t.Helper()
 	auth := &fakeAdminAuth{token: "session-token", account: testOwnerAccount()}
-	router := NewRouter(RouterConfig{
-		Admin: AdminConfig{
+	core := httpapi.NewRouter(httpapi.RouterConfig{
+		Admin: httpapi.AdminConfig{
 			Auth: auth, Console: console, AllowedOrigins: []string{"http://localhost:3000"},
 			CSRFSecret: []byte("test-csrf-secret"), SessionTTL: time.Hour,
 		},
 		DefaultApplicationID: "019c1111-1111-7111-8111-111111111111",
 	})
-	return router
+	core.MountAdmin(New(core))
+	return &Router{Router: core}
 }
 
 func credentialAdminRequest(t *testing.T, router *Router, method, path, body string) *http.Request {
 	t.Helper()
 	request := httptest.NewRequest(method, path, strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
-	request.AddCookie(&http.Cookie{Name: adminSessionCookieName, Value: "session-token"})
-	request.Header.Set(adminCSRFHeader, router.adminCSRFToken("session-token"))
+	request.AddCookie(&http.Cookie{Name: httpapi.AdminSessionCookieName, Value: "session-token"})
+	request.Header.Set(httpapi.AdminCSRFHeader, router.AdminCSRFToken("session-token"))
 	request.Header.Set("Origin", "http://localhost:3000")
 	return request
 }
@@ -194,9 +196,10 @@ func TestAdminCredentialRevokeRequiresPermissionAndAudits(t *testing.T) {
 	auth := &fakeAdminAuth{token: "session-token", account: &domain.AdminAccount{
 		ID: "viewer-id", Status: domain.AdminStatusActive, MFAEnrolled: true, Permissions: []string{domain.PermUsersRead},
 	}}
-	router = NewRouter(RouterConfig{
-		Admin: AdminConfig{Auth: auth, Console: viewer, CSRFSecret: []byte("test-csrf-secret"), SessionTTL: time.Hour},
-	})
+	router = &Router{Router: httpapi.NewRouter(httpapi.RouterConfig{
+		Admin: httpapi.AdminConfig{Auth: auth, Console: viewer, CSRFSecret: []byte("test-csrf-secret"), SessionTTL: time.Hour},
+	})}
+	router.MountAdmin(New(router.Router))
 	recorder = httptest.NewRecorder()
 	router.ServeHTTP(recorder, credentialAdminRequest(t, router, http.MethodGet, "/v1/admin/credentials", ""))
 	if recorder.Code != http.StatusForbidden {

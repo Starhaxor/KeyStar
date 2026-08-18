@@ -36,7 +36,7 @@ func recoveryMiddleware(logger *log.Logger, next http.Handler) http.Handler {
 				return
 			}
 			logger.Printf("panic recovered request_id=%s", requestIDFromContext(request.Context()))
-			writeError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
+			WriteError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
 		}()
 		next.ServeHTTP(writer, request)
 	})
@@ -145,7 +145,7 @@ func (limiter *ipRateLimiter) size() int {
 	return len(limiter.buckets)
 }
 
-func clientIP(request *http.Request, trustedProxies []netip.Prefix) string {
+func ClientIP(request *http.Request, trustedProxies []netip.Prefix) string {
 	peer, ok := parseRemoteIP(request.RemoteAddr)
 	if !ok {
 		return "unknown"

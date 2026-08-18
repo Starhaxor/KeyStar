@@ -25,6 +25,8 @@ import (
 	"github.com/starloader/backend/internal/credential"
 	"github.com/starloader/backend/internal/domain"
 	"github.com/starloader/backend/internal/httpapi"
+	"github.com/starloader/backend/internal/httpapi/adminapi"
+	"github.com/starloader/backend/internal/httpapi/serverapi"
 	"github.com/starloader/backend/internal/security"
 	"github.com/starloader/backend/internal/service"
 	"github.com/starloader/backend/internal/service/adminauth"
@@ -218,6 +220,10 @@ func runServer() error {
 		},
 		ServerStore: repository,
 	})
+	// The admin and server namespaces are mounted as separate handlers so each
+	// package owns its routes while sharing the core router middleware.
+	router.MountAdmin(adminapi.New(router))
+	router.MountServer(serverapi.New(router))
 	address := strings.TrimSpace(os.Getenv("SERVER_ADDR"))
 	if address == "" {
 		address = ":8080"

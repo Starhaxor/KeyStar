@@ -14,8 +14,6 @@ import (
 	"github.com/starloader/backend/internal/service"
 )
 
-const maxRequestBodyBytes = 64 * 1024
-
 type loginRequestBody struct {
 	Email             string `json:"email"`
 	Password          string `json:"password"`
@@ -30,8 +28,8 @@ type loginResponse struct {
 }
 
 func (router *Router) handleLogin(writer http.ResponseWriter, request *http.Request) {
-	if !router.loginLimiter.allow(clientIP(request, router.trustedProxies)) {
-		writeError(writer, request, http.StatusTooManyRequests, "RATE_LIMITED", "too many requests")
+	if !router.loginLimiter.allow(ClientIP(request, router.trustedProxies)) {
+		WriteError(writer, request, http.StatusTooManyRequests, "RATE_LIMITED", "too many requests")
 		return
 	}
 	ctx, cancel := context.WithTimeout(request.Context(), router.loginTimeout)
@@ -39,7 +37,7 @@ func (router *Router) handleLogin(writer http.ResponseWriter, request *http.Requ
 	request = request.WithContext(ctx)
 	mediaType, _, err := mime.ParseMediaType(request.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
-		writeError(writer, request, http.StatusUnsupportedMediaType, "INVALID_REQUEST", "invalid request")
+		WriteError(writer, request, http.StatusUnsupportedMediaType, "INVALID_REQUEST", "invalid request")
 		return
 	}
 
@@ -47,18 +45,18 @@ func (router *Router) handleLogin(writer http.ResponseWriter, request *http.Requ
 	if err != nil {
 		var maxBytesError *http.MaxBytesError
 		if errors.As(err, &maxBytesError) {
-			writeError(writer, request, http.StatusRequestEntityTooLarge, "INVALID_REQUEST", "invalid request")
+			WriteError(writer, request, http.StatusRequestEntityTooLarge, "INVALID_REQUEST", "invalid request")
 			return
 		}
-		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
 		return
 	}
 	if strings.TrimSpace(body.Email) == "" || body.Password == "" || strings.TrimSpace(body.DeviceFingerprint) == "" {
-		writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
 		return
 	}
 	if router.login == nil {
-		writeError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
+		WriteError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
 		return
 	}
 
@@ -76,7 +74,7 @@ func (router *Router) handleLogin(writer http.ResponseWriter, request *http.Requ
 		router.writeLoginError(writer, request, err)
 		return
 	}
-	writeJSON(writer, http.StatusOK, loginResponse{
+	WriteJSON(writer, http.StatusOK, loginResponse{
 		OK:                 true,
 		SessionID:          pending.SessionID,
 		Challenge:          base64.StdEncoding.EncodeToString(pending.Challenge),
@@ -85,7 +83,7 @@ func (router *Router) handleLogin(writer http.ResponseWriter, request *http.Requ
 }
 
 func decodeLoginRequest(writer http.ResponseWriter, request *http.Request) (loginRequestBody, error) {
-	request.Body = http.MaxBytesReader(writer, request.Body, maxRequestBodyBytes)
+	request.Body = http.MaxBytesReader(writer, request.Body, MaxRequestBodyBytes)
 	decoder := json.NewDecoder(request.Body)
 	decoder.DisallowUnknownFields()
 	var body loginRequestBody
@@ -105,14 +103,14 @@ func decodeLoginRequest(writer http.ResponseWriter, request *http.Request) (logi
 func (router *Router) writeLoginError(writer http.ResponseWriter, request *http.Request, err error) {
 	switch {
 	case errors.Is(err, service.ErrInvalidCredentials):
-		writeError(writer, request, http.StatusUnauthorized, "INVALID_CREDENTIALS", "invalid credentials")
+		WriteError(writer, request, http.StatusUnauthorized, "INVALID_CREDENTIALS", "invalid credentials")
 	case errors.Is(err, service.ErrLicenseNotFound):
-		writeError(writer, request, http.StatusNotFound, "LICENSE_NOT_FOUND", "license not found")
+		WriteError(writer, request, http.StatusNotFound, "LICENSE_NOT_FOUND", "license not found")
 	case errors.Is(err, service.ErrLicenseExpired):
-		writeError(writer, request, http.StatusForbidden, "LICENSE_EXPIRED", "license expired")
+		WriteError(writer, request, http.StatusForbidden, "LICENSE_EXPIRED", "license expired")
 	case errors.Is(err, service.ErrLicenseRevoked):
-		writeError(writer, request, http.StatusForbidden, "LICENSE_REVOKED", "license revoked")
+		WriteError(writer, request, http.StatusForbidden, "LICENSE_REVOKED", "license revoked")
 	default:
-		writeError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
+		WriteError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
 	}
 }

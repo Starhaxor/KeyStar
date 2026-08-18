@@ -10,16 +10,7 @@ import (
 	"time"
 
 	"github.com/starloader/backend/internal/domain"
-	"github.com/starloader/backend/internal/service"
 )
-
-type LoginService interface {
-	Login(context.Context, service.LoginInput) (service.PendingChallenge, error)
-}
-
-type DeviceVerificationService interface {
-	Verify(context.Context, service.VerifyInput) (service.VerifiedSession, error)
-}
 
 type RouterConfig struct {
 	Login               LoginService
@@ -54,30 +45,73 @@ type RouterConfig struct {
 	ServerStore ServerStore
 }
 
+// Router is the root HTTP handler. It serves the public client API directly
+// and dispatches the /v1/admin and /v1/server namespaces to the handlers
+// mounted with MountAdmin and MountServer (built by the adminapi and serverapi
+// subpackages).
 type Router struct {
-	login               LoginService
-	deviceVerification  DeviceVerificationService
-	profile             ProfileRepository
-	healthCheck         func(context.Context) error
-	healthCheckTimeout  time.Duration
-	loginTimeout        time.Duration
-	deviceVerifyTimeout time.Duration
-	trustedProxies      []netip.Prefix
-	loginLimiter        *ipRateLimiter
-	sessionLimiter      *ipRateLimiter
-	admin               AdminConfig
-	adminLimiter        *ipRateLimiter
-	now                     func() time.Time
-	defaultApplicationID   string
-	applications           ApplicationResolver
-	credentials            CredentialVerifier
+	login                    LoginService
+	deviceVerification       DeviceVerificationService
+	profile                  ProfileRepository
+	healthCheck              func(context.Context) error
+	healthCheckTimeout       time.Duration
+	loginTimeout             time.Duration
+	deviceVerifyTimeout      time.Duration
+	trustedProxies           []netip.Prefix
+	loginLimiter             *ipRateLimiter
+	sessionLimiter           *ipRateLimiter
+	Admin                    AdminConfig
+	adminLimiter             *ipRateLimiter
+	now                      func() time.Time
+	defaultApplicationID     string
+	applications             ApplicationResolver
+	credentials              CredentialVerifier
 	disableLegacyApplication bool
-	server                  ServerConfig
-	serverStore             ServerStore
-	loginHandler            http.Handler
-	deviceVerifyHandler     http.Handler
-	meHandler               http.Handler
-	handler                 http.Handler
+	Server                   ServerConfig
+	ServerStore              ServerStore
+	adminHandler             http.Handler
+	serverHandler            http.Handler
+	loginHandler             http.Handler
+	deviceVerifyHandler      http.Handler
+	meHandler                http.Handler
+	handler                  http.Handler
+}
+
+// Now returns the router clock (injectable in tests).
+func (router *Router) Now() time.Time {
+	return router.now()
+}
+
+// LoginTimeout is the per-login context timeout.
+func (router *Router) LoginTimeout() time.Duration {
+	return router.loginTimeout
+}
+
+// TrustedProxies returns the configured proxy prefixes.
+func (router *Router) TrustedProxies() []netip.Prefix {
+	return router.trustedProxies
+}
+
+// DefaultApplicationID returns the application boundary for requests without
+// an explicit X-KeyStar-App header.
+func (router *Router) DefaultApplicationID() string {
+	return router.defaultApplicationID
+}
+
+// AllowAdminRate gates dashboard login/MFA endpoints with the admin rate
+// limiter.
+func (router *Router) AllowAdminRate(key string) bool {
+	return router.adminLimiter.allow(key)
+}
+
+// MountAdmin attaches the /v1/admin namespace handler.
+func (router *Router) MountAdmin(handler http.Handler) {
+	router.adminHandler = handler
+}
+
+// MountServer attaches the /v1/server namespace handler.
+func (router *Router) MountServer(handler http.Handler) {
+	router.serverHandler = handler
 }
 
 func NewRouter(config RouterConfig) *Router {
@@ -102,28 +136,28 @@ func NewRouter(config RouterConfig) *Router {
 		now = time.Now
 	}
 	router := &Router{
-		login:               config.Login,
-		deviceVerification:  config.DeviceVerification,
-		profile:             config.Profile,
-		healthCheck:         config.HealthCheck,
-		healthCheckTimeout:  healthCheckTimeout,
-		loginTimeout:        loginTimeout,
-		deviceVerifyTimeout: deviceVerifyTimeout,
-		trustedProxies:      append([]netip.Prefix(nil), config.TrustedProxies...),
-		loginLimiter:        newIPRateLimiter(5, time.Minute, config.RateLimitMaxKeys, config.Now),
-		sessionLimiter:      newIPRateLimiter(10, time.Minute, config.RateLimitMaxKeys, config.Now),
-		admin:                config.Admin,
-		adminLimiter:         newIPRateLimiter(10, time.Minute, config.RateLimitMaxKeys, config.Now),
-		now:                     now,
-		defaultApplicationID:    config.DefaultApplicationID,
-		applications:            config.Applications,
-		credentials:             config.Credentials,
+		login:                    config.Login,
+		deviceVerification:       config.DeviceVerification,
+		profile:                  config.Profile,
+		healthCheck:              config.HealthCheck,
+		healthCheckTimeout:       healthCheckTimeout,
+		loginTimeout:             loginTimeout,
+		deviceVerifyTimeout:      deviceVerifyTimeout,
+		trustedProxies:           append([]netip.Prefix(nil), config.TrustedProxies...),
+		loginLimiter:             newIPRateLimiter(5, time.Minute, config.RateLimitMaxKeys, config.Now),
+		sessionLimiter:           newIPRateLimiter(10, time.Minute, config.RateLimitMaxKeys, config.Now),
+		Admin:                    config.Admin,
+		adminLimiter:             newIPRateLimiter(10, time.Minute, config.RateLimitMaxKeys, config.Now),
+		now:                      now,
+		defaultApplicationID:     config.DefaultApplicationID,
+		applications:             config.Applications,
+		credentials:              config.Credentials,
 		disableLegacyApplication: config.DisableLegacyApplication,
-		server:                  config.Server,
-		serverStore:             config.ServerStore,
+		Server:                   config.Server,
+		ServerStore:              config.ServerStore,
 	}
-	router.loginHandler = router.requireCredential(domain.CredentialPublishable, "auth.login")(http.HandlerFunc(router.handleLogin))
-	router.deviceVerifyHandler = router.requireCredential(domain.CredentialPublishable, "device.verify")(http.HandlerFunc(router.handleDeviceVerify))
+	router.loginHandler = router.RequireCredential(domain.CredentialPublishable, "auth.login")(http.HandlerFunc(router.handleLogin))
+	router.deviceVerifyHandler = router.RequireCredential(domain.CredentialPublishable, "device.verify")(http.HandlerFunc(router.handleDeviceVerify))
 	router.meHandler = RequireSession(config.SessionVerifier, http.HandlerFunc(router.handleMe))
 	router.handler = requestIDMiddleware(recoveryMiddleware(logger, http.HandlerFunc(router.route)))
 	return router
@@ -143,15 +177,25 @@ func (router *Router) route(writer http.ResponseWriter, request *http.Request) {
 		router.handleHealth(writer, request)
 	case request.Method == http.MethodGet && request.URL.Path == "/v1/me":
 		router.meHandler.ServeHTTP(writer, request)
-	case strings.HasPrefix(request.URL.Path, adminPathPrefix):
-		router.serveAdmin(writer, request)
-	case strings.HasPrefix(request.URL.Path, serverPathPrefix):
-		router.serveServer(writer, request)
+	case strings.HasPrefix(request.URL.Path, AdminPathPrefix):
+		router.serveMounted(writer, request, router.adminHandler, "admin console unavailable")
+	case strings.HasPrefix(request.URL.Path, ServerPathPrefix):
+		router.serveMounted(writer, request, router.serverHandler, "server api unavailable")
 	case request.URL.Path == "/v1/auth/login" || request.URL.Path == "/v1/device/verify" || request.URL.Path == "/healthz" || request.URL.Path == "/v1/me":
-		writeError(writer, request, http.StatusMethodNotAllowed, "INVALID_REQUEST", "method not allowed")
+		WriteError(writer, request, http.StatusMethodNotAllowed, "INVALID_REQUEST", "method not allowed")
 	default:
-		writeError(writer, request, http.StatusNotFound, "INVALID_REQUEST", "not found")
+		WriteError(writer, request, http.StatusNotFound, "INVALID_REQUEST", "not found")
 	}
+}
+
+// serveMounted dispatches to a mounted namespace handler, answering 503 when
+// the namespace was never mounted or its dependencies are missing.
+func (router *Router) serveMounted(writer http.ResponseWriter, request *http.Request, handler http.Handler, unavailableMessage string) {
+	if handler == nil {
+		WriteError(writer, request, http.StatusServiceUnavailable, "SERVER_ERROR", unavailableMessage)
+		return
+	}
+	handler.ServeHTTP(writer, request)
 }
 
 func (router *Router) handleHealth(writer http.ResponseWriter, request *http.Request) {
@@ -159,11 +203,11 @@ func (router *Router) handleHealth(writer http.ResponseWriter, request *http.Req
 		ctx, cancel := context.WithTimeout(request.Context(), router.healthCheckTimeout)
 		defer cancel()
 		if err := router.healthCheck(ctx); err != nil {
-			writeError(writer, request, http.StatusServiceUnavailable, "SERVER_ERROR", "service unavailable")
+			WriteError(writer, request, http.StatusServiceUnavailable, "SERVER_ERROR", "service unavailable")
 			return
 		}
 	}
-	writeJSON(writer, http.StatusOK, struct {
+	WriteJSON(writer, http.StatusOK, struct {
 		OK bool `json:"ok"`
 	}{OK: true})
 }
