@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/starloader/backend/internal/admin"
 	"github.com/starloader/backend/internal/config"
+	"github.com/starloader/backend/internal/credential"
 	"github.com/starloader/backend/internal/domain"
 	"github.com/starloader/backend/internal/httpapi"
 	"github.com/starloader/backend/internal/security"
@@ -197,6 +198,7 @@ func runServer() error {
 		adminConfig = httpapi.AdminConfig{AllowedOrigins: configuration.AdminAllowedOrigins}
 		log.Printf("admin console disabled: /v1/admin endpoints will return 503")
 	}
+	credentialVerifier := credential.NewVerifier(repository)
 	router := httpapi.NewRouter(httpapi.RouterConfig{
 		Login:                loginService,
 		DeviceVerification:   deviceService,
@@ -208,6 +210,8 @@ func runServer() error {
 		HealthCheck:          pool.Ping,
 		Admin:                adminConfig,
 		DefaultApplicationID: defaultApplication.ID,
+		Applications:         repository,
+		Credentials:          credentialVerifier,
 	})
 	address := strings.TrimSpace(os.Getenv("SERVER_ADDR"))
 	if address == "" {

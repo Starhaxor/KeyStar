@@ -62,8 +62,12 @@ func (router *Router) handleLogin(writer http.ResponseWriter, request *http.Requ
 		return
 	}
 
+	applicationID := router.defaultApplicationID
+	if principal, ok := AppPrincipalFromContext(request.Context()); ok && principal.ApplicationID != "" {
+		applicationID = principal.ApplicationID
+	}
 	pending, err := router.login.Login(request.Context(), service.LoginInput{
-		ApplicationID:     router.defaultApplicationID,
+		ApplicationID:     applicationID,
 		Email:             body.Email,
 		Password:          body.Password,
 		DeviceFingerprint: body.DeviceFingerprint,

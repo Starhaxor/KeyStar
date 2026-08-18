@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/starloader/backend/internal/domain"
 	"github.com/starloader/backend/internal/service"
 )
 
@@ -36,9 +37,16 @@ type RouterConfig struct {
 	Admin               AdminConfig
 	// DefaultApplicationID is the tenant boundary applied to client requests
 	// that do not carry an explicit application context. It is resolved once
-	// at startup from the default StarLoader application; credential-based
-	// resolution replaces it once the platform middleware is active.
+	// at startup from the default StarLoader application.
 	DefaultApplicationID string
+	// Applications resolves the X-KeyStar-App header to a live application.
+	Applications ApplicationResolver
+	// Credentials validates publishable/secret keys presented by clients.
+	Credentials CredentialVerifier
+	// DisableLegacyApplication rejects client requests that carry no
+	// credential. Kept off during migration (phase A) so existing clients
+	// keep working with the default application context.
+	DisableLegacyApplication bool
 }
 
 type Router struct {
@@ -54,8 +62,13 @@ type Router struct {
 	sessionLimiter      *ipRateLimiter
 	admin               AdminConfig
 	adminLimiter        *ipRateLimiter
-	now                 func() time.Time
+	now                   func() time.Time
 	defaultApplicationID string
+	applications         ApplicationResolver
+	credentials          CredentialVerifier
+	disableLegacyApplication bool
+	loginHandler         http.Handler
+	deviceVerifyHandler  http.Handler
 	meHandler            http.Handler
 	handler              http.Handler
 }
@@ -94,9 +107,14 @@ func NewRouter(config RouterConfig) *Router {
 		sessionLimiter:      newIPRateLimiter(10, time.Minute, config.RateLimitMaxKeys, config.Now),
 		admin:                config.Admin,
 		adminLimiter:         newIPRateLimiter(10, time.Minute, config.RateLimitMaxKeys, config.Now),
-		now:                  now,
-		defaultApplicationID: config.DefaultApplicationID,
+		now:                     now,
+		defaultApplicationID:    config.DefaultApplicationID,
+		applications:            config.Applications,
+		credentials:             config.Credentials,
+		disableLegacyApplication: config.DisableLegacyApplication,
 	}
+	router.loginHandler = router.requireCredential(domain.CredentialPublishable, "auth.login")(http.HandlerFunc(router.handleLogin))
+	router.deviceVerifyHandler = router.requireCredential(domain.CredentialPublishable, "device.verify")(http.HandlerFunc(router.handleDeviceVerify))
 	router.meHandler = RequireSession(config.SessionVerifier, http.HandlerFunc(router.handleMe))
 	router.handler = requestIDMiddleware(recoveryMiddleware(logger, http.HandlerFunc(router.route)))
 	return router
@@ -109,9 +127,9 @@ func (router *Router) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 func (router *Router) route(writer http.ResponseWriter, request *http.Request) {
 	switch {
 	case request.Method == http.MethodPost && request.URL.Path == "/v1/auth/login":
-		router.handleLogin(writer, request)
+		router.loginHandler.ServeHTTP(writer, request)
 	case request.Method == http.MethodPost && request.URL.Path == "/v1/device/verify":
-		router.handleDeviceVerify(writer, request)
+		router.deviceVerifyHandler.ServeHTTP(writer, request)
 	case request.Method == http.MethodGet && request.URL.Path == "/healthz":
 		router.handleHealth(writer, request)
 	case request.Method == http.MethodGet && request.URL.Path == "/v1/me":

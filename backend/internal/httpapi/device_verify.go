@@ -73,8 +73,12 @@ func (router *Router) handleDeviceVerify(writer http.ResponseWriter, request *ht
 		writeError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
 		return
 	}
+	applicationID := router.defaultApplicationID
+	if principal, ok := AppPrincipalFromContext(request.Context()); ok && principal.ApplicationID != "" {
+		applicationID = principal.ApplicationID
+	}
 	verified, err := router.deviceVerification.Verify(request.Context(), service.VerifyInput{
-		ApplicationID: router.defaultApplicationID,
+		ApplicationID: applicationID,
 		SessionID:     body.SessionID, Challenge: body.Challenge,
 		ChallengeSignature: body.ChallengeSignature, TPMPublicKey: body.TPMPublicKey,
 		Hardware: service.HardwareSignals{
