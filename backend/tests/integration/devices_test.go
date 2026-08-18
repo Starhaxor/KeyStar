@@ -331,9 +331,10 @@ func newPostgresVerificationFixture(t *testing.T, maxDevices int) *postgresVerif
 	if err != nil {
 		t.Fatal(err)
 	}
+	productID, planID := resolveTestProductPlan(t, ctx, repository, applicationID, "StarLoader")
 	license, err := repository.CreateLicense(ctx, applicationID, domain.NewLicense{
 		LicenseHMAC: "a7a5cc218577a36a399be56de9ba9901391f73cc7446c6ee74846825fcc94343",
-		UserID:      user.ID, Product: "StarLoader", MaxDevices: maxDevices, ExpiresAt: now.Add(24 * time.Hour),
+		UserID:      user.ID, ProductID: productID, PlanID: planID, MaxDevices: maxDevices, ExpiresAt: now.Add(24 * time.Hour),
 	})
 	if err != nil {
 		t.Fatal(err)

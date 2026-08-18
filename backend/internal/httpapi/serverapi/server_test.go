@@ -133,11 +133,15 @@ func (fake *fakeServerStore) FindServerLicenseByID(context.Context, string, stri
 	return fake.license, fake.licenseErr
 }
 
-func (fake *fakeServerStore) CreateLicense(_ context.Context, applicationID string, _ domain.NewLicense) (*domain.License, error) {
+func (fake *fakeServerStore) ResolveProductPlan(_ context.Context, _, name string) (string, string, error) {
+	return "product-1", "plan-1", nil
+}
+
+func (fake *fakeServerStore) CreateLicense(_ context.Context, applicationID string, input domain.NewLicense) (*domain.License, error) {
 	if fake.created != nil {
 		return fake.created, nil
 	}
-	return &domain.License{ID: "license-new", ApplicationID: applicationID, Product: "StarLoader", ExpiresAt: time.Now().Add(24 * time.Hour)}, nil
+	return &domain.License{ID: "license-new", ApplicationID: applicationID, ProductID: input.ProductID, PlanID: input.PlanID, Product: "StarLoader", ExpiresAt: time.Now().Add(24 * time.Hour)}, nil
 }
 
 func (fake *fakeServerStore) AdminUpdateLicense(_ context.Context, _, licenseID string, expiresAt time.Time, _, _ int, _ string) error {

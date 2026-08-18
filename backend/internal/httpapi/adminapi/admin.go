@@ -337,6 +337,8 @@ func (router *Router) WriteConsoleError(writer http.ResponseWriter, request *htt
 		httpapi.WriteError(writer, request, http.StatusNotFound, "LICENSE_NOT_FOUND", "license not found")
 	case errors.Is(err, domain.ErrLicenseAlreadyExists):
 		httpapi.WriteError(writer, request, http.StatusConflict, "LICENSE_ALREADY_EXISTS", "license already exists for user and product")
+	case errors.Is(err, domain.ErrProductInvalidName):
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_PRODUCT", "product name cannot be normalized")
 	case errors.Is(err, domain.ErrDeviceNotFound):
 		httpapi.WriteError(writer, request, http.StatusNotFound, "DEVICE_NOT_FOUND", "device not found")
 	case errors.Is(err, domain.ErrAuthSessionNotFound):

@@ -129,7 +129,8 @@ func createUserAndLicense(t *testing.T, ctx context.Context, repository *store.S
 	license, err := repository.CreateLicense(ctx, applicationID, domain.NewLicense{
 		LicenseHMAC: "8f46bf9ec2d930aaae995b45ad6f7867ad5c8c8ef9b4b1e9c4ab325ce36af7ac",
 		UserID:      user.ID,
-		Product:     "StarLoader",
+		ProductID:   resolveTestProductID(t, ctx, repository, applicationID, "StarLoader"),
+		PlanID:      resolveTestPlanID(t, ctx, repository, applicationID, "StarLoader"),
 		MaxDevices:  1,
 		ExpiresAt:   base.Add(30 * 24 * time.Hour),
 	})
@@ -137,6 +138,29 @@ func createUserAndLicense(t *testing.T, ctx context.Context, repository *store.S
 		t.Fatalf("CreateLicense() error = %v", err)
 	}
 	return user, license
+}
+
+// resolveTestProductPlan resolves a product display name into the application's
+// catalog (find-or-create) and returns its product_id and default plan_id.
+func resolveTestProductPlan(t *testing.T, ctx context.Context, repository *store.Store, applicationID, name string) (string, string) {
+	t.Helper()
+	productID, planID, err := repository.ResolveProductPlan(ctx, applicationID, name)
+	if err != nil {
+		t.Fatalf("ResolveProductPlan(%q) error = %v", name, err)
+	}
+	return productID, planID
+}
+
+func resolveTestProductID(t *testing.T, ctx context.Context, repository *store.Store, applicationID, name string) string {
+	t.Helper()
+	productID, _ := resolveTestProductPlan(t, ctx, repository, applicationID, name)
+	return productID
+}
+
+func resolveTestPlanID(t *testing.T, ctx context.Context, repository *store.Store, applicationID, name string) string {
+	t.Helper()
+	_, planID := resolveTestProductPlan(t, ctx, repository, applicationID, name)
+	return planID
 }
 
 // defaultApplicationIDForTest resolves the default StarLoader application that

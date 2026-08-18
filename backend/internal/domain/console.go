@@ -16,14 +16,14 @@ type ConsoleUser struct {
 }
 
 type ConsoleUserDetail struct {
-	User          ConsoleUser
-	Notes         string
-	BanReason     string
-	BannedAt      *time.Time
-	BanExpiresAt  *time.Time
-	Licenses      []ConsoleLicense
-	Devices       []ConsoleDevice
-	Sessions      []ConsoleSession
+	User         ConsoleUser
+	Notes        string
+	BanReason    string
+	BannedAt     *time.Time
+	BanExpiresAt *time.Time
+	Licenses     []ConsoleLicense
+	Devices      []ConsoleDevice
+	Sessions     []ConsoleSession
 }
 
 // BanRecord is one row of the ban history table. A permanent ban has no
@@ -44,7 +44,9 @@ type ConsoleLicense struct {
 	ID         string
 	UserID     string
 	UserEmail  string
-	Product    string
+	ProductID  string
+	PlanID     string
+	Product    string // resolved product display name (joined from products)
 	Status     LicenseStatus
 	Level      int
 	MaxDevices int

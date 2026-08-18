@@ -348,10 +348,17 @@ func (repository adminLicenseRepository) CreateLicense(ctx context.Context, norm
 	if err != nil {
 		return err
 	}
+	// The CLI product name is resolved into the application's product catalog
+	// and its default plan; the license is bound to both.
+	productID, planID, err := repository.store.ResolveProductPlan(ctx, applicationID, product)
+	if err != nil {
+		return err
+	}
 	_, err = repository.store.CreateLicense(ctx, applicationID, domain.NewLicense{
 		LicenseHMAC: security.HMACHex(repository.hmacKey, normalized),
 		UserID:      user.ID,
-		Product:     product,
+		ProductID:   productID,
+		PlanID:      planID,
 		MaxDevices:  maxDevices,
 		ExpiresAt:   expiresAt,
 	})

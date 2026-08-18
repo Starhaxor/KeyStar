@@ -886,6 +886,13 @@ func (router *Router) handleAdminLicenseCreate(writer http.ResponseWriter, reque
 		router.WriteConsoleError(writer, request, err)
 		return
 	}
+	// The console product name is resolved into the application's product
+	// catalog and its default plan; the license is bound to both.
+	productID, planID, err := router.Admin.Console.ResolveProductPlan(request.Context(), router.DefaultApplicationID(), router.Admin.Product)
+	if err != nil {
+		router.WriteConsoleError(writer, request, err)
+		return
+	}
 	plain, normalized, err := security.GenerateLicense(cryptorand.Reader)
 	if err != nil {
 		httpapi.WriteError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
@@ -894,7 +901,8 @@ func (router *Router) handleAdminLicenseCreate(writer http.ResponseWriter, reque
 	license, err := router.Admin.Console.CreateLicense(request.Context(), router.DefaultApplicationID(), domain.NewLicense{
 		LicenseHMAC: security.HMACHex(router.Admin.LicenseHMACKey, normalized),
 		UserID:      user.ID,
-		Product:     router.Admin.Product,
+		ProductID:   productID,
+		PlanID:      planID,
 		MaxDevices:  body.MaxDevices,
 		ExpiresAt:   expiresAt,
 	})

@@ -15,9 +15,10 @@ import (
 func (s *Store) LoadProfile(ctx context.Context, applicationID, userID, licenseID, deviceID string) (*domain.UserProfile, error) {
 	var profile domain.UserProfile
 	err := s.db.QueryRow(ctx, `
-		select u.application_id::text, u.email, u.status, l.product, l.status, l.expires_at, l.max_devices, d.id::text, d.status
+		select u.application_id::text, u.email, u.status, p.name, l.status, l.expires_at, l.max_devices, d.id::text, d.status
 		from users u
 		join licenses l on l.id = $3 and l.application_id = u.application_id and l.user_id = u.id
+		join products p on p.id = l.product_id
 		join devices d on d.id = $4 and d.application_id = u.application_id and d.license_id = l.id and d.user_id = u.id
 		where u.id = $2 and u.application_id = $1::uuid`, applicationID, userID, licenseID, deviceID,
 	).Scan(

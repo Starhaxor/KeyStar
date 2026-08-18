@@ -12,7 +12,7 @@ import (
 
 const serverUserColumns = `id::text, email, status, notes, ban_reason, banned_at, ban_expires_at, created_at, updated_at`
 
-const serverLicenseColumns = `l.id::text, l.user_id::text, u.email, l.product, l.status, l.level, l.max_devices, l.notes, l.expires_at, l.created_at, l.updated_at`
+const serverLicenseColumns = `l.id::text, l.user_id::text, u.email, l.product_id::text, l.plan_id::text, p.name, l.status, l.level, l.max_devices, l.notes, l.expires_at, l.created_at, l.updated_at`
 
 // ListServerUsers pages the end users of one application newest-first using a
 // UUIDv7 cursor (id < after). limit+1 rows are fetched to report has_more.
@@ -75,6 +75,7 @@ func (s *Store) ListServerLicenses(ctx context.Context, applicationID, after str
 		select `+serverLicenseColumns+`
 		from licenses l
 		join users u on u.id = l.user_id
+		join products p on p.id = l.product_id
 		where l.application_id = $1::uuid and ($2 = '' or l.id < $2::uuid)
 		order by l.id desc
 		limit $3`, applicationID, after, limit+1)
@@ -109,6 +110,7 @@ func (s *Store) FindServerLicenseByID(ctx context.Context, applicationID, licens
 		select `+serverLicenseColumns+`
 		from licenses l
 		join users u on u.id = l.user_id
+		join products p on p.id = l.product_id
 		where l.application_id = $1::uuid and l.id = $2::uuid`, applicationID, licenseID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, domain.ErrLicenseNotFound
@@ -138,7 +140,8 @@ func scanServerUser(row pgx.Row) (*domain.ServerUser, error) {
 func scanServerLicense(row pgx.Row) (*domain.ServerLicense, error) {
 	var license domain.ServerLicense
 	err := row.Scan(
-		&license.ID, &license.UserID, &license.UserEmail, &license.Product, &license.Status,
+		&license.ID, &license.UserID, &license.UserEmail,
+		&license.ProductID, &license.PlanID, &license.Product, &license.Status,
 		&license.Level, &license.MaxDevices, &license.Notes, &license.ExpiresAt,
 		&license.CreatedAt, &license.UpdatedAt,
 	)

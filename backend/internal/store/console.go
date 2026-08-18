@@ -438,9 +438,10 @@ func (s *Store) ListConsoleLicenses(ctx context.Context, offset, limit int) ([]d
 
 func (s *Store) listConsoleLicenses(ctx context.Context, tail string, args ...any) ([]domain.ConsoleLicense, error) {
 	rows, err := s.db.Query(ctx, `
-		select l.id::text, l.user_id::text, u.email, l.product, l.status, l.level, l.max_devices, l.notes, l.expires_at, l.created_at
+		select l.id::text, l.user_id::text, u.email, l.product_id::text, l.plan_id::text, p.name, l.status, l.level, l.max_devices, l.notes, l.expires_at, l.created_at
 		from licenses l
 		join users u on u.id = l.user_id
+		join products p on p.id = l.product_id
 		`+tail, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list console licenses: %w", err)
@@ -449,7 +450,8 @@ func (s *Store) listConsoleLicenses(ctx context.Context, tail string, args ...an
 	licenses := make([]domain.ConsoleLicense, 0)
 	for rows.Next() {
 		var license domain.ConsoleLicense
-		if err := rows.Scan(&license.ID, &license.UserID, &license.UserEmail, &license.Product,
+		if err := rows.Scan(&license.ID, &license.UserID, &license.UserEmail,
+			&license.ProductID, &license.PlanID, &license.Product,
 			&license.Status, &license.Level, &license.MaxDevices, &license.Notes, &license.ExpiresAt, &license.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan console license: %w", err)
 		}
@@ -463,7 +465,9 @@ func (s *Store) listConsoleLicenses(ctx context.Context, tail string, args ...an
 
 func (s *Store) FindLicenseByID(ctx context.Context, applicationID, licenseID string) (*domain.License, error) {
 	license, err := scanLicense(s.db.QueryRow(ctx,
-		`select `+licenseColumns+` from licenses where id = $1::uuid and application_id = $2::uuid`, licenseID, applicationID))
+		`select `+licenseColumns+` from licenses l
+		 join products p on p.id = l.product_id
+		 where l.id = $1::uuid and l.application_id = $2::uuid`, licenseID, applicationID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, domain.ErrLicenseNotFound
 	}
@@ -650,10 +654,11 @@ func (s *Store) FindConsoleDeviceByID(ctx context.Context, deviceID string) (*do
 			d.system_disk_serial_hmac is not null,
 			d.machine_guid_hmac is not null,
 			d.status, d.created_at, d.last_seen_at,
-			l.product, encode(d.tpm_public_key_sha256, 'hex')
+			p.name, encode(d.tpm_public_key_sha256, 'hex')
 		from devices d
 		join users u on u.id = d.user_id
 		join licenses l on l.id = d.license_id
+		join products p on p.id = l.product_id
 		where d.id = $1::uuid`, deviceID)
 	var detail domain.ConsoleDeviceDetail
 	err := row.Scan(&detail.Device.ID, &detail.Device.UserID, &detail.Device.UserEmail, &detail.Device.LicenseID,

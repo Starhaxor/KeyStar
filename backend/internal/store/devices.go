@@ -32,9 +32,10 @@ func (locked *LockedChallenge) PendingChallenge() domain.DeviceChallenge {
 func (locked *LockedChallenge) LockLicense(ctx context.Context) (*domain.License, error) {
 	license, err := scanLicense(locked.tx.QueryRow(ctx, `
 		select `+licenseColumns+`
-		from licenses
-		where id = $1 and application_id = $2::uuid and user_id = $3
-		for update`, locked.licenseID, locked.applicationID, locked.userID))
+		from licenses l
+		join products p on p.id = l.product_id
+		where l.id = $1 and l.application_id = $2::uuid and l.user_id = $3
+		for update of l`, locked.licenseID, locked.applicationID, locked.userID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, domain.ErrLicenseNotFound
 	}

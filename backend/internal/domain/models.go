@@ -55,7 +55,9 @@ type License struct {
 	ApplicationID string
 	LicenseHMAC   string
 	UserID        string
-	Product       string
+	ProductID     string
+	PlanID        string
+	Product       string // resolved product display name (joined from products)
 	Status        LicenseStatus
 	Level         int
 	MaxDevices    int
@@ -69,7 +71,8 @@ type NewLicense struct {
 	ApplicationID string
 	LicenseHMAC   string
 	UserID        string
-	Product       string
+	ProductID     string
+	PlanID        string
 	MaxDevices    int
 	ExpiresAt     time.Time
 }

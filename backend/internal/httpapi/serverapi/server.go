@@ -188,6 +188,8 @@ func (router *Router) writeServerError(writer http.ResponseWriter, request *http
 		httpapi.WriteError(writer, request, http.StatusNotFound, "LICENSE_NOT_FOUND", "license not found")
 	case errors.Is(err, domain.ErrLicenseAlreadyExists):
 		httpapi.WriteError(writer, request, http.StatusConflict, "LICENSE_ALREADY_EXISTS", "license already exists for user and product")
+	case errors.Is(err, domain.ErrProductInvalidName):
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_PRODUCT", "product name cannot be normalized")
 	case errors.Is(err, domain.ErrVariableNotFound):
 		httpapi.WriteError(writer, request, http.StatusNotFound, "VARIABLE_NOT_FOUND", "variable not found")
 	case errors.Is(err, domain.ErrVariableAlreadyExists):

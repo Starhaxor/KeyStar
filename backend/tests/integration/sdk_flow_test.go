@@ -40,8 +40,9 @@ func TestPublicClientFlowWithPublishableCredential(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	productID, planID := resolveTestProductPlan(t, ctx, repository, applicationID, "StarLoader")
 	license, err := repository.CreateLicense(ctx, applicationID, domain.NewLicense{
-		LicenseHMAC: strings.Repeat("f", 64), UserID: user.ID, Product: "StarLoader", MaxDevices: 1, ExpiresAt: now.Add(24 * time.Hour),
+		LicenseHMAC: strings.Repeat("f", 64), UserID: user.ID, ProductID: productID, PlanID: planID, MaxDevices: 1, ExpiresAt: now.Add(24 * time.Hour),
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -108,6 +108,7 @@ type AdminConsoleStore interface {
 	CreateUser(ctx context.Context, applicationID string, input domain.NewUser) (*domain.User, error)
 	RevokeUserSessions(ctx context.Context, applicationID, userID string) (int64, error)
 	ListConsoleLicenses(ctx context.Context, offset, limit int) ([]domain.ConsoleLicense, int64, error)
+	ResolveProductPlan(ctx context.Context, applicationID, name string) (string, string, error)
 	CreateLicense(ctx context.Context, applicationID string, input domain.NewLicense) (*domain.License, error)
 	FindLicenseByID(ctx context.Context, applicationID, licenseID string) (*domain.License, error)
 	AdminUpdateLicense(ctx context.Context, applicationID, licenseID string, expiresAt time.Time, maxDevices, level int, notes string) error
@@ -171,6 +172,7 @@ type ServerStore interface {
 	ResetUserDevices(ctx context.Context, applicationID, userID string) (int64, error)
 	ListServerLicenses(ctx context.Context, applicationID, after string, limit int) ([]domain.ServerLicense, string, bool, error)
 	FindServerLicenseByID(ctx context.Context, applicationID, licenseID string) (*domain.ServerLicense, error)
+	ResolveProductPlan(ctx context.Context, applicationID, name string) (string, string, error)
 	CreateLicense(ctx context.Context, applicationID string, input domain.NewLicense) (*domain.License, error)
 	AdminUpdateLicense(ctx context.Context, applicationID, licenseID string, expiresAt time.Time, maxDevices, level int, notes string) error
 	AdminRevokeLicense(ctx context.Context, applicationID, licenseID string) error

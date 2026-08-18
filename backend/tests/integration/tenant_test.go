@@ -66,8 +66,9 @@ func TestCrossTenantIsolation(t *testing.T) {
 		t.Fatalf("FindUserByID(app B, user A) error = %v, want %v", err, domain.ErrUserNotFound)
 	}
 
+	productID, planID := resolveTestProductPlan(t, ctx, repository, appA, "StarLoader")
 	licenseA, err := repository.CreateLicense(ctx, appA, domain.NewLicense{
-		LicenseHMAC: strings.Repeat("a", 64), UserID: userA.ID, Product: "StarLoader", MaxDevices: 1, ExpiresAt: base.Add(24 * time.Hour),
+		LicenseHMAC: strings.Repeat("a", 64), UserID: userA.ID, ProductID: productID, PlanID: planID, MaxDevices: 1, ExpiresAt: base.Add(24 * time.Hour),
 	})
 	if err != nil {
 		t.Fatalf("CreateLicense(app A) error = %v", err)

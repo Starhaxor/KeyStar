@@ -70,10 +70,12 @@ func TestUserAndLicenseRoundTrip(t *testing.T) {
 
 	expiresAt := base.Add(30 * 24 * time.Hour)
 	licenseHMAC := "5c89e0aeacdc0f1e84682f1d9f4b7bc81c279466603fefb87941b21df91f5fd2"
+	productID, planID := resolveTestProductPlan(t, ctx, repository, applicationID, "StarLoader")
 	createdLicense, err := repository.CreateLicense(ctx, applicationID, domain.NewLicense{
 		LicenseHMAC: licenseHMAC,
 		UserID:      createdUser.ID,
-		Product:     "StarLoader",
+		ProductID:   productID,
+		PlanID:      planID,
 		MaxDevices:  2,
 		ExpiresAt:   expiresAt,
 	})
@@ -118,8 +120,9 @@ func TestLoadProfileBindsUserLicenseAndDevice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateUser() error = %v", err)
 	}
+	productID, planID := resolveTestProductPlan(t, fixture.ctx, fixture.repository, fixture.applicationID, "StarLoader")
 	otherLicense, err := fixture.repository.CreateLicense(fixture.ctx, fixture.applicationID, domain.NewLicense{
-		LicenseHMAC: strings.Repeat("b", 64), UserID: otherUser.ID, Product: "StarLoader", MaxDevices: 1, ExpiresAt: fixture.now.Add(24 * time.Hour),
+		LicenseHMAC: strings.Repeat("b", 64), UserID: otherUser.ID, ProductID: productID, PlanID: planID, MaxDevices: 1, ExpiresAt: fixture.now.Add(24 * time.Hour),
 	})
 	if err != nil {
 		t.Fatalf("CreateLicense() error = %v", err)
@@ -135,8 +138,9 @@ func TestLoadProfileBindsUserLicenseAndDevice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create other device: %v", err)
 	}
+	plusProductID, plusPlanID := resolveTestProductPlan(t, fixture.ctx, fixture.repository, fixture.applicationID, "StarLoader Plus")
 	sameUserLicense, err := fixture.repository.CreateLicense(fixture.ctx, fixture.applicationID, domain.NewLicense{
-		LicenseHMAC: strings.Repeat("d", 64), UserID: fixture.user.ID, Product: "StarLoader Plus", MaxDevices: 2, ExpiresAt: fixture.now.Add(48 * time.Hour),
+		LicenseHMAC: strings.Repeat("d", 64), UserID: fixture.user.ID, ProductID: plusProductID, PlanID: plusPlanID, MaxDevices: 2, ExpiresAt: fixture.now.Add(48 * time.Hour),
 	})
 	if err != nil {
 		t.Fatalf("CreateLicense() for same user error = %v", err)
@@ -184,10 +188,13 @@ func TestSingleLicensePerUserProduct(t *testing.T) {
 	repository := store.New(pool)
 	user, _ := createUserAndLicense(t, ctx, repository, "single-license@example.com", base)
 
-	_, err := repository.CreateLicense(ctx, defaultApplicationIDForTest(t, repository), domain.NewLicense{
+	applicationID := defaultApplicationIDForTest(t, repository)
+	productID, planID := resolveTestProductPlan(t, ctx, repository, applicationID, "StarLoader")
+	_, err := repository.CreateLicense(ctx, applicationID, domain.NewLicense{
 		LicenseHMAC: "cf038a1bf56e961e35dc7252eb82f800553db70ab311e7f88d85afc739128e7e",
 		UserID:      user.ID,
-		Product:     "StarLoader",
+		ProductID:   productID,
+		PlanID:      planID,
 		MaxDevices:  2,
 		ExpiresAt:   base.Add(60 * 24 * time.Hour),
 	})
@@ -270,5 +277,105 @@ func TestRepositoryNotFoundErrorsAreTyped(t *testing.T) {
 				t.Fatalf("error = %v, want typed %s not-found error", err, tt.entity)
 			}
 		})
+	}
+}
+
+// TestProductCatalogAndPlanBinding verifies the Phase 4 normalization: product
+// names resolve into an application-scoped catalog, every license is bound to
+// a product and its default plan, and the resolved display name round-trips.
+func TestProductCatalogAndPlanBinding(t *testing.T) {
+	ctx := context.Background()
+	pool := openTestPool(t, ctx)
+	resetAndMigrate(t, ctx, pool)
+	repository := store.New(pool)
+	applicationID := defaultApplicationIDForTest(t, repository)
+
+	// The default StarLoader application is seeded with a product during
+	// migration 000010; resolving the same name is idempotent.
+	firstProductID, firstPlanID := resolveTestProductPlan(t, ctx, repository, applicationID, "StarLoader")
+	secondProductID, secondPlanID := resolveTestProductPlan(t, ctx, repository, applicationID, "StarLoader")
+	if firstProductID != secondProductID || firstPlanID != secondPlanID {
+		t.Fatalf("ResolveProductPlan is not idempotent: (%s, %s) then (%s, %s)",
+			firstProductID, secondProductID, firstPlanID, secondPlanID)
+	}
+
+	product, err := repository.FindProductByID(ctx, applicationID, firstProductID)
+	if err != nil {
+		t.Fatalf("FindProductByID() error = %v", err)
+	}
+	if product.Name != "StarLoader" || product.Slug != "starloader" || product.Status != "active" {
+		t.Fatalf("seeded product = %#v", product)
+	}
+	plans, err := repository.ListPlans(ctx, firstProductID)
+	if err != nil {
+		t.Fatalf("ListPlans() error = %v", err)
+	}
+	if len(plans) != 1 || plans[0].Code != "default" || plans[0].MaxDevices != 1 {
+		t.Fatalf("default plan = %#v", plans)
+	}
+
+	// A second product is created on demand with its own default plan.
+	plusProductID, plusPlanID := resolveTestProductPlan(t, ctx, repository, applicationID, "StarLoader Plus")
+	if plusProductID == firstProductID || plusPlanID == firstPlanID {
+		t.Fatalf("second product/plan collided with the first: (%s, %s)", plusProductID, plusPlanID)
+	}
+
+	// Licenses bound to distinct products do not collide under the
+	// (user_id, product_id) uniqueness guarantee.
+	user, err := repository.CreateUser(ctx, applicationID, domain.NewUser{Email: "catalog@example.com", PasswordHash: "hash"})
+	if err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+	base := time.Now().UTC().Truncate(time.Second)
+	first, err := repository.CreateLicense(ctx, applicationID, domain.NewLicense{
+		LicenseHMAC: strings.Repeat("1", 64), UserID: user.ID, ProductID: firstProductID, PlanID: firstPlanID,
+		MaxDevices: 2, ExpiresAt: base.Add(24 * time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("CreateLicense() error = %v", err)
+	}
+	second, err := repository.CreateLicense(ctx, applicationID, domain.NewLicense{
+		LicenseHMAC: strings.Repeat("2", 64), UserID: user.ID, ProductID: plusProductID, PlanID: plusPlanID,
+		MaxDevices: 3, ExpiresAt: base.Add(24 * time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("CreateLicense() second product error = %v", err)
+	}
+	if first.Product != "StarLoader" || second.Product != "StarLoader Plus" {
+		t.Fatalf("resolved product names = %q, %q", first.Product, second.Product)
+	}
+	if first.PlanID != firstPlanID || second.PlanID != plusPlanID {
+		t.Fatalf("plan binding lost: %q, %q", first.PlanID, second.PlanID)
+	}
+
+	// The same product again violates the per-product uniqueness.
+	if _, err := repository.CreateLicense(ctx, applicationID, domain.NewLicense{
+		LicenseHMAC: strings.Repeat("3", 64), UserID: user.ID, ProductID: firstProductID, PlanID: firstPlanID,
+		MaxDevices: 1, ExpiresAt: base.Add(24 * time.Hour),
+	}); !errors.Is(err, domain.ErrLicenseAlreadyExists) {
+		t.Fatalf("CreateLicense() duplicate product error = %v, want %v", err, domain.ErrLicenseAlreadyExists)
+	}
+
+	// Products are application-scoped: a second application sees an empty
+	// catalog and cannot resolve the first application's product.
+	organization, err := repository.CreateOrganization(ctx, "second-tenant")
+	if err != nil {
+		t.Fatalf("CreateOrganization() error = %v", err)
+	}
+	otherApp, err := repository.CreateApplication(ctx, domain.NewApplication{
+		OrganizationID: organization.ID, Name: "Second", Slug: "second",
+	})
+	if err != nil {
+		t.Fatalf("CreateApplication() error = %v", err)
+	}
+	otherProducts, err := repository.ListProducts(ctx, otherApp.ID)
+	if err != nil {
+		t.Fatalf("ListProducts(other app) error = %v", err)
+	}
+	if len(otherProducts) != 0 {
+		t.Fatalf("other application catalog = %#v, want empty", otherProducts)
+	}
+	if _, err := repository.FindProductByID(ctx, otherApp.ID, firstProductID); !errors.Is(err, domain.ErrProductNotFound) {
+		t.Fatalf("FindProductByID(other app) error = %v, want %v", err, domain.ErrProductNotFound)
 	}
 }
