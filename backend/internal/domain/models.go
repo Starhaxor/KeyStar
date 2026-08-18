@@ -12,6 +12,7 @@ const (
 
 type User struct {
 	ID            string
+	ApplicationID string
 	Email         string
 	PasswordHash  string
 	Status        UserStatus
@@ -21,12 +22,14 @@ type User struct {
 }
 
 type NewUser struct {
-	Email        string
-	PasswordHash string
+	ApplicationID string
+	Email         string
+	PasswordHash  string
 }
 
 // UserProfile contains the safe account and device information shown to a verified session.
 type UserProfile struct {
+	ApplicationID    string
 	Email            string
 	AccountStatus    UserStatus
 	Product          string
@@ -48,25 +51,27 @@ const (
 )
 
 type License struct {
-	ID          string
-	LicenseHMAC string
-	UserID      string
-	Product     string
-	Status      LicenseStatus
-	Level       int
-	MaxDevices  int
-	Notes       string
-	ExpiresAt   time.Time
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID            string
+	ApplicationID string
+	LicenseHMAC   string
+	UserID        string
+	Product       string
+	Status        LicenseStatus
+	Level         int
+	MaxDevices    int
+	Notes         string
+	ExpiresAt     time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 type NewLicense struct {
-	LicenseHMAC string
-	UserID      string
-	Product     string
-	MaxDevices  int
-	ExpiresAt   time.Time
+	ApplicationID string
+	LicenseHMAC   string
+	UserID        string
+	Product       string
+	MaxDevices    int
+	ExpiresAt     time.Time
 }
 
 type DeviceStatus string
@@ -78,6 +83,7 @@ const (
 
 type Device struct {
 	ID                    string
+	ApplicationID         string
 	UserID                string
 	LicenseID             string
 	TPMPublicKey          []byte
@@ -95,6 +101,7 @@ type Device struct {
 }
 
 type NewDevice struct {
+	ApplicationID         string
 	UserID                string
 	LicenseID             string
 	TPMPublicKey          []byte
@@ -110,6 +117,7 @@ type NewDevice struct {
 
 type UpdateDevice struct {
 	ID                    string
+	ApplicationID         string
 	SMBIOSUUIDHMAC        string
 	MotherboardSerialHMAC string
 	BIOSSerialHMAC        string
@@ -128,13 +136,14 @@ const (
 )
 
 type AuthSession struct {
-	ID        string
-	UserID    string
-	LicenseID string
-	Status    SessionStatus
-	ExpiresAt time.Time
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID            string
+	ApplicationID string
+	UserID        string
+	LicenseID     string
+	Status        SessionStatus
+	ExpiresAt     time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 type DeviceChallenge struct {
@@ -154,6 +163,7 @@ type PendingSession struct {
 }
 
 type NewPendingSession struct {
+	ApplicationID   string
 	UserID          string
 	LicenseID       string
 	ChallengeSHA256 []byte

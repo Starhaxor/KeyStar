@@ -42,6 +42,7 @@ type HardwareSignals struct {
 }
 
 type VerifyInput struct {
+	ApplicationID      string
 	SessionID          string
 	Challenge          string
 	ChallengeSignature string
@@ -67,7 +68,7 @@ type DeviceTransaction interface {
 }
 
 type DeviceRepository interface {
-	WithLockedChallenge(context.Context, string, func(DeviceTransaction) error) error
+	WithLockedChallenge(context.Context, string, string, func(DeviceTransaction) error) error
 }
 
 type SessionTokenIssuer interface {
@@ -101,11 +102,11 @@ func NewStoreDeviceRepository(repository *store.Store) DeviceRepository {
 	return &storeDeviceRepository{store: repository}
 }
 
-func (repository *storeDeviceRepository) WithLockedChallenge(ctx context.Context, sessionID string, callback func(DeviceTransaction) error) error {
+func (repository *storeDeviceRepository) WithLockedChallenge(ctx context.Context, applicationID, sessionID string, callback func(DeviceTransaction) error) error {
 	if repository == nil || repository.store == nil {
 		return errors.New("device repository is not configured")
 	}
-	return repository.store.WithLockedChallenge(ctx, sessionID, func(locked *store.LockedChallenge) error {
+	return repository.store.WithLockedChallenge(ctx, applicationID, sessionID, func(locked *store.LockedChallenge) error {
 		return callback(locked)
 	})
 }
@@ -126,6 +127,9 @@ func (service *DeviceService) Verify(ctx context.Context, input VerifyInput) (Ve
 	if service == nil || service.repository == nil || service.tokenIssuer == nil || len(service.hardwareHMACKey) == 0 ||
 		strings.TrimSpace(service.issuer) == "" || strings.TrimSpace(service.audience) == "" || strings.TrimSpace(service.product) == "" {
 		return VerifiedSession{}, errors.New("device service is not configured")
+	}
+	if strings.TrimSpace(input.ApplicationID) == "" {
+		return VerifiedSession{}, ErrInvalidVerifyRequest
 	}
 	sessionID := strings.TrimSpace(input.SessionID)
 	if sessionID == "" || len(sessionID) > maxSessionIDBytes || !hardwareInputIsBounded(input.Hardware) {
@@ -149,10 +153,10 @@ func (service *DeviceService) Verify(ctx context.Context, input VerifyInput) (Ve
 	}
 	policyNow := service.now().UTC()
 	var deviceID, licenseID, userID string
-	err = service.repository.WithLockedChallenge(ctx, sessionID, func(transaction DeviceTransaction) error {
+	err = service.repository.WithLockedChallenge(ctx, input.ApplicationID, sessionID, func(transaction DeviceTransaction) error {
 		session := transaction.PendingSession()
 		deviceChallenge := transaction.PendingChallenge()
-		if session.ID != sessionID || deviceChallenge.SessionID != sessionID {
+		if session.ID != sessionID || deviceChallenge.SessionID != sessionID || session.ApplicationID != input.ApplicationID {
 			return ErrInvalidVerifyRequest
 		}
 		if session.Status == domain.SessionStatusExpired {
@@ -240,7 +244,7 @@ func (service *DeviceService) Verify(ctx context.Context, input VerifyInput) (Ve
 	issuedAt := policyNow.Truncate(time.Second)
 	expiresAt := issuedAt.Add(sessionTokenLifetime)
 	token, err := service.tokenIssuer.Issue(security.SessionClaims{
-		Subject: userID, LicenseID: licenseID, DeviceID: deviceID, Product: service.product,
+		Subject: userID, ApplicationID: input.ApplicationID, LicenseID: licenseID, DeviceID: deviceID, Product: service.product,
 		Features: []string{}, Issuer: service.issuer, Audience: service.audience,
 		IssuedAt: issuedAt, ExpiresAt: expiresAt,
 	})

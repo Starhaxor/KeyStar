@@ -28,10 +28,11 @@ func TestEd25519SessionTokenRoundTripPreservesRequiredClaims(t *testing.T) {
 	}
 	verifier.now = func() time.Time { return now }
 	want := SessionClaims{
-		Subject:   "user-1",
-		LicenseID: "license-1",
-		DeviceID:  "device-1",
-		Product:   "StarLoader",
+		Subject:       "user-1",
+		ApplicationID: "app-1",
+		LicenseID:     "license-1",
+		DeviceID:      "device-1",
+		Product:       "StarLoader",
 		Features:  []string{"launch"},
 		Issuer:    "starloader",
 		Audience:  "starloader-client",
@@ -62,7 +63,7 @@ func TestTokenVerifierEnforcesIdentityAndExpiration(t *testing.T) {
 	}
 	now := time.Unix(1_786_350_600, 0).UTC()
 	claims := SessionClaims{
-		Subject: "user-1", LicenseID: "license-1", DeviceID: "device-1",
+		Subject: "user-1", ApplicationID: "app-1", LicenseID: "license-1", DeviceID: "device-1",
 		Product: "StarLoader", Issuer: "starloader", Audience: "starloader-client",
 		IssuedAt: now, ExpiresAt: now.Add(time.Hour),
 	}
@@ -114,10 +115,11 @@ func TestTokenIssuerRejectsMissingLicenseOrDevice(t *testing.T) {
 	}
 	issuer.now = func() time.Time { return now }
 	valid := SessionClaims{
-		Subject: "user", LicenseID: "license", DeviceID: "device", Product: "StarLoader",
+		Subject: "user", ApplicationID: "app", LicenseID: "license", DeviceID: "device", Product: "StarLoader",
 		Issuer: "starloader", Audience: "client", IssuedAt: now, ExpiresAt: now.Add(time.Hour),
 	}
 	for _, mutate := range []func(*SessionClaims){
+		func(claims *SessionClaims) { claims.ApplicationID = "" },
 		func(claims *SessionClaims) { claims.LicenseID = "" },
 		func(claims *SessionClaims) { claims.DeviceID = "" },
 	} {
@@ -140,7 +142,7 @@ func TestTokenVerifierRejectsChangedSignature(t *testing.T) {
 	verifier, _ := NewTokenVerifier(publicKey, "starloader", "client", "StarLoader")
 	verifier.now = func() time.Time { return now }
 	token, err := issuer.Issue(SessionClaims{
-		Subject: "user", LicenseID: "license", DeviceID: "device", Product: "StarLoader",
+		Subject: "user", ApplicationID: "app", LicenseID: "license", DeviceID: "device", Product: "StarLoader",
 		Issuer: "starloader", Audience: "client", IssuedAt: now, ExpiresAt: now.Add(time.Hour),
 	})
 	if err != nil {
@@ -238,7 +240,7 @@ func TestTokenVerifierRequiresExactOneHourLifetime(t *testing.T) {
 
 func requiredTokenClaims(issuedAt time.Time, lifetime time.Duration) SessionClaims {
 	return SessionClaims{
-		Subject: "user", LicenseID: "license", DeviceID: "device", Product: "StarLoader",
+		Subject: "user", ApplicationID: "app", LicenseID: "license", DeviceID: "device", Product: "StarLoader",
 		Features: []string{}, Issuer: "starloader", Audience: "client",
 		IssuedAt: issuedAt, ExpiresAt: issuedAt.Add(lifetime),
 	}

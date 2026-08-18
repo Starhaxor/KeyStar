@@ -29,6 +29,7 @@ var (
 )
 
 type LoginInput struct {
+	ApplicationID     string
 	Email             string
 	Password          string
 	DeviceFingerprint string
@@ -41,10 +42,10 @@ type PendingChallenge struct {
 }
 
 type LoginRepository interface {
-	FindUserByEmail(context.Context, string) (*domain.User, error)
-	FindLicenseByUserAndProduct(context.Context, string, string) (*domain.License, error)
-	CreatePendingSession(context.Context, domain.NewPendingSession) (*domain.PendingSession, error)
-	AutoUnbanExpired(context.Context, string) error
+	FindUserByEmail(context.Context, string, string) (*domain.User, error)
+	FindLicenseByUserAndProduct(context.Context, string, string, string) (*domain.License, error)
+	CreatePendingSession(context.Context, string, domain.NewPendingSession) (*domain.PendingSession, error)
+	AutoUnbanExpired(context.Context, string, string) error
 }
 
 type LoginService struct {
@@ -70,8 +71,11 @@ func (service *LoginService) Login(ctx context.Context, input LoginInput) (Pendi
 		return PendingChallenge{}, errors.New("login service is not configured")
 	}
 
+	if strings.TrimSpace(input.ApplicationID) == "" {
+		return PendingChallenge{}, errors.New("login application is required")
+	}
 	email := strings.ToLower(strings.TrimSpace(input.Email))
-	user, err := service.repository.FindUserByEmail(ctx, email)
+	user, err := service.repository.FindUserByEmail(ctx, input.ApplicationID, email)
 	if errors.Is(err, domain.ErrUserNotFound) {
 		// Match the expensive password work performed for a known user so the
 		// response timing does not expose whether the email exists.
@@ -95,14 +99,14 @@ func (service *LoginService) Login(ctx context.Context, input LoginInput) (Pendi
 	if user.Status == domain.UserStatusBanned && user.BanExpiresAt != nil && !user.BanExpiresAt.After(service.now().UTC()) {
 		// Temporary ban reached its deadline: reopen the account and let the
 		// login proceed as normal.
-		_ = service.repository.AutoUnbanExpired(ctx, user.ID)
+		_ = service.repository.AutoUnbanExpired(ctx, input.ApplicationID, user.ID)
 		user.Status = domain.UserStatusActive
 	}
 	if user.Status != domain.UserStatusActive {
 		return PendingChallenge{}, ErrInvalidCredentials
 	}
 
-	license, err := service.repository.FindLicenseByUserAndProduct(ctx, user.ID, service.product)
+	license, err := service.repository.FindLicenseByUserAndProduct(ctx, input.ApplicationID, user.ID, service.product)
 	if errors.Is(err, domain.ErrLicenseNotFound) {
 		return PendingChallenge{}, ErrLicenseNotFound
 	}
@@ -132,7 +136,8 @@ func (service *LoginService) Login(ctx context.Context, input LoginInput) (Pendi
 	}
 	digest := sha256.Sum256(challenge)
 	expiresAt := now.Add(challengeLifetime)
-	pending, err := service.repository.CreatePendingSession(ctx, domain.NewPendingSession{
+	pending, err := service.repository.CreatePendingSession(ctx, input.ApplicationID, domain.NewPendingSession{
+		ApplicationID:   input.ApplicationID,
 		UserID:          user.ID,
 		LicenseID:       license.ID,
 		ChallengeSHA256: digest[:],

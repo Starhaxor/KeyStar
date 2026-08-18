@@ -16,15 +16,16 @@ const maxSessionTokenBytes = 16 * 1024
 var ErrInvalidSessionToken = errors.New("invalid session token")
 
 type SessionClaims struct {
-	Subject   string
-	LicenseID string
-	DeviceID  string
-	Product   string
-	Features  []string
-	Issuer    string
-	Audience  string
-	IssuedAt  time.Time
-	ExpiresAt time.Time
+	Subject       string
+	ApplicationID string
+	LicenseID     string
+	DeviceID      string
+	Product       string
+	Features      []string
+	Issuer        string
+	Audience      string
+	IssuedAt      time.Time
+	ExpiresAt     time.Time
 }
 
 type TokenIssuer struct {
@@ -49,15 +50,16 @@ type tokenHeader struct {
 }
 
 type sessionClaimsWire struct {
-	Subject   string   `json:"sub"`
-	LicenseID string   `json:"license_id"`
-	DeviceID  string   `json:"device_id"`
-	Product   string   `json:"product"`
-	Features  []string `json:"features"`
-	Issuer    string   `json:"iss"`
-	Audience  string   `json:"aud"`
-	IssuedAt  int64    `json:"iat"`
-	ExpiresAt int64    `json:"exp"`
+	Subject       string   `json:"sub"`
+	ApplicationID string   `json:"app"`
+	LicenseID     string   `json:"license_id"`
+	DeviceID      string   `json:"device_id"`
+	Product       string   `json:"product"`
+	Features      []string `json:"features"`
+	Issuer        string   `json:"iss"`
+	Audience      string   `json:"aud"`
+	IssuedAt      int64    `json:"iat"`
+	ExpiresAt     int64    `json:"exp"`
 }
 
 func NewTokenIssuer(privateKey ed25519.PrivateKey, issuer, audience, product string) (*TokenIssuer, error) {
@@ -178,7 +180,7 @@ func validEd25519PrivateKey(privateKey ed25519.PrivateKey) bool {
 }
 
 func validateClaims(claims SessionClaims, issuer, audience, product string, now time.Time) error {
-	if claims.Subject == "" || claims.LicenseID == "" || claims.DeviceID == "" ||
+	if claims.Subject == "" || claims.ApplicationID == "" || claims.LicenseID == "" || claims.DeviceID == "" ||
 		claims.Issuer != issuer || claims.Audience != audience || claims.Product != product ||
 		claims.IssuedAt.IsZero() || claims.ExpiresAt.IsZero() || claims.IssuedAt.After(now) ||
 		!claims.ExpiresAt.After(now) || !claims.ExpiresAt.After(claims.IssuedAt) ||
@@ -190,7 +192,7 @@ func validateClaims(claims SessionClaims, issuer, audience, product string, now 
 
 func claimsToWire(claims SessionClaims) sessionClaimsWire {
 	return sessionClaimsWire{
-		Subject: claims.Subject, LicenseID: claims.LicenseID, DeviceID: claims.DeviceID,
+		Subject: claims.Subject, ApplicationID: claims.ApplicationID, LicenseID: claims.LicenseID, DeviceID: claims.DeviceID,
 		Product: claims.Product, Features: claims.Features, Issuer: claims.Issuer,
 		Audience: claims.Audience, IssuedAt: claims.IssuedAt.Unix(), ExpiresAt: claims.ExpiresAt.Unix(),
 	}
@@ -198,7 +200,7 @@ func claimsToWire(claims SessionClaims) sessionClaimsWire {
 
 func wireToClaims(wire sessionClaimsWire) SessionClaims {
 	return SessionClaims{
-		Subject: wire.Subject, LicenseID: wire.LicenseID, DeviceID: wire.DeviceID,
+		Subject: wire.Subject, ApplicationID: wire.ApplicationID, LicenseID: wire.LicenseID, DeviceID: wire.DeviceID,
 		Product: wire.Product, Features: wire.Features, Issuer: wire.Issuer,
 		Audience: wire.Audience, IssuedAt: time.Unix(wire.IssuedAt, 0).UTC(), ExpiresAt: time.Unix(wire.ExpiresAt, 0).UTC(),
 	}

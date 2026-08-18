@@ -51,7 +51,7 @@ func TestDeviceVerifyFirstActivationHashesHardwareAndIssuesBoundToken(t *testing
 	if err != nil {
 		t.Fatalf("issued token failed verification: %v", err)
 	}
-	if claims.Subject != "user-1" || claims.LicenseID != "license-1" || claims.DeviceID != device.ID ||
+	if claims.Subject != "user-1" || claims.ApplicationID != "app-1" || claims.LicenseID != "license-1" || claims.DeviceID != device.ID ||
 		claims.Product != "StarLoader" || claims.Issuer != "starloader" || claims.Audience != "starloader-client" ||
 		!claims.ExpiresAt.Equal(now.Add(time.Hour)) {
 		t.Fatalf("token claims = %#v", claims)
@@ -237,7 +237,7 @@ type fakeDeviceRepository struct {
 	calls       int
 }
 
-func (repository *fakeDeviceRepository) WithLockedChallenge(_ context.Context, _ string, callback func(DeviceTransaction) error) error {
+func (repository *fakeDeviceRepository) WithLockedChallenge(_ context.Context, _ string, _ string, callback func(DeviceTransaction) error) error {
 	repository.calls++
 	if repository.consumed {
 		return domain.ErrChallengeConsumed
@@ -314,12 +314,12 @@ func newVerificationFixture(t *testing.T, now time.Time, maxDevices int) (*fakeD
 	publicBlob, signature := cngProof(t, privateKey, challenge)
 	digest := sha256.Sum256(challenge)
 	transaction := &fakeDeviceTransaction{
-		session:   domain.AuthSession{ID: "session-1", UserID: "user-1", LicenseID: "license-1", Status: domain.SessionStatusPending, ExpiresAt: now.Add(time.Minute)},
+		session:   domain.AuthSession{ID: "session-1", ApplicationID: "app-1", UserID: "user-1", LicenseID: "license-1", Status: domain.SessionStatusPending, ExpiresAt: now.Add(time.Minute)},
 		challenge: domain.DeviceChallenge{ID: "challenge-1", SessionID: "session-1", ChallengeSHA256: digest[:], ExpiresAt: now.Add(time.Minute)},
-		license:   domain.License{ID: "license-1", UserID: "user-1", Product: "StarLoader", Status: domain.LicenseStatusActive, MaxDevices: maxDevices, ExpiresAt: now.Add(24 * time.Hour)},
+		license:   domain.License{ID: "license-1", ApplicationID: "app-1", UserID: "user-1", Product: "StarLoader", Status: domain.LicenseStatusActive, MaxDevices: maxDevices, ExpiresAt: now.Add(24 * time.Hour)},
 	}
 	return &fakeDeviceRepository{transaction: transaction, signingKey: privateKey}, VerifyInput{
-		SessionID: "session-1", Challenge: base64.StdEncoding.EncodeToString(challenge),
+		ApplicationID: "app-1", SessionID: "session-1", Challenge: base64.StdEncoding.EncodeToString(challenge),
 		ChallengeSignature: base64.StdEncoding.EncodeToString(signature), TPMPublicKey: base64.StdEncoding.EncodeToString(publicBlob),
 		Hardware: HardwareSignals{SMBIOSUUID: " {smbios-1} ", MotherboardSerial: "board-1", BIOSSerial: "bios-1", SystemDiskSerial: "disk-1", MachineGuid: "guid-1", Fingerprint: "fingerprint-1"},
 	}

@@ -19,6 +19,7 @@ func TestLoginCreatesShortLivedHashedChallenge(t *testing.T) {
 	service := newTestLoginService(repository, bytes.NewReader(randomChallenge), now)
 
 	pending, err := service.Login(context.Background(), LoginInput{
+		ApplicationID:     "app-1",
 		Email:             "  PERSON@Example.COM ",
 		Password:          "correct horse battery staple",
 		DeviceFingerprint: "fingerprint",
@@ -27,6 +28,9 @@ func TestLoginCreatesShortLivedHashedChallenge(t *testing.T) {
 		t.Fatalf("Login() error = %v", err)
 	}
 
+	if repository.foundApplicationID != "app-1" {
+		t.Fatalf("repository application ID = %q, want app-1", repository.foundApplicationID)
+	}
 	if repository.foundEmail != "person@example.com" {
 		t.Fatalf("FindUserByEmail() email = %q", repository.foundEmail)
 	}
@@ -186,6 +190,7 @@ func TestLoginUnknownUserStillPerformsPasswordWork(t *testing.T) {
 
 func validLoginInput() LoginInput {
 	return LoginInput{
+		ApplicationID:     "app-1",
 		Email:             "person@example.com",
 		Password:          "correct horse battery staple",
 		DeviceFingerprint: "fingerprint",
@@ -228,6 +233,7 @@ type fakeLoginRepository struct {
 	licenseErr          error
 	pending             *domain.PendingSession
 	pendingErr          error
+	foundApplicationID  string
 	foundEmail          string
 	foundLicenseUserID  string
 	foundLicenseProduct string
@@ -236,25 +242,29 @@ type fakeLoginRepository struct {
 	autoUnbanCalls      int
 }
 
-func (repository *fakeLoginRepository) FindUserByEmail(_ context.Context, email string) (*domain.User, error) {
+func (repository *fakeLoginRepository) FindUserByEmail(_ context.Context, applicationID, email string) (*domain.User, error) {
+	repository.foundApplicationID = applicationID
 	repository.foundEmail = email
 	return repository.user, repository.userErr
 }
 
-func (repository *fakeLoginRepository) FindLicenseByUserAndProduct(_ context.Context, userID, product string) (*domain.License, error) {
+func (repository *fakeLoginRepository) FindLicenseByUserAndProduct(_ context.Context, applicationID, userID, product string) (*domain.License, error) {
+	repository.foundApplicationID = applicationID
 	repository.foundLicenseUserID = userID
 	repository.foundLicenseProduct = product
 	return repository.license, repository.licenseErr
 }
 
-func (repository *fakeLoginRepository) CreatePendingSession(_ context.Context, input domain.NewPendingSession) (*domain.PendingSession, error) {
+func (repository *fakeLoginRepository) CreatePendingSession(_ context.Context, applicationID string, input domain.NewPendingSession) (*domain.PendingSession, error) {
 	repository.createPendingCalls++
+	repository.foundApplicationID = applicationID
 	repository.pendingInput = input
 	return repository.pending, repository.pendingErr
 }
 
-func (repository *fakeLoginRepository) AutoUnbanExpired(_ context.Context, _ string) error {
+func (repository *fakeLoginRepository) AutoUnbanExpired(_ context.Context, applicationID, _ string) error {
 	repository.autoUnbanCalls++
+	repository.foundApplicationID = applicationID
 	return nil
 }
 

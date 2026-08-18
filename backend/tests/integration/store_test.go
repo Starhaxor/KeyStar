@@ -46,15 +46,16 @@ func TestDeviceVerificationAcceptanceMatrix(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Verify(token) error = %v", err)
 		}
-		if claims.Subject != fixture.user.ID || claims.LicenseID != fixture.license.ID || claims.DeviceID != first.DeviceID || claims.Product != "StarLoader" || claims.Issuer != "starloader" || claims.Audience != "starloader-client" || !claims.ExpiresAt.Equal(fixture.now.Add(time.Hour)) {
+		if claims.Subject != fixture.user.ID || claims.ApplicationID != fixture.applicationID || claims.LicenseID != fixture.license.ID || claims.DeviceID != first.DeviceID || claims.Product != "StarLoader" || claims.Issuer != "starloader" || claims.Audience != "starloader-client" || !claims.ExpiresAt.Equal(fixture.now.Add(time.Hour)) {
 			t.Fatalf("token claims = %#v", claims)
 		}
 
 		repeatInput := fixture.newInput(t, key, hardware, fixture.now.Add(time.Minute))
 		var capturedLogs strings.Builder
 		router := httpapi.NewRouter(httpapi.RouterConfig{
-			DeviceVerification: fixture.deviceService,
-			Logger:             log.New(&capturedLogs, "", 0),
+			DeviceVerification:   fixture.deviceService,
+			Logger:               log.New(&capturedLogs, "", 0),
+			DefaultApplicationID: fixture.applicationID,
 		})
 		request := httptest.NewRequest(http.MethodPost, "/v1/device/verify", strings.NewReader(deviceVerificationJSON(t, repeatInput)))
 		request.Header.Set("Content-Type", "application/json")
@@ -283,7 +284,7 @@ func TestVerificationLocksDeviceRowsAgainstConcurrentRevocation(t *testing.T) {
 	decisionErr := errors.New("decision complete without commit")
 	decisionResult := make(chan error, 1)
 	go func() {
-		decisionResult <- decisionRepository.WithLockedChallenge(fixture.ctx, pending.SessionID, func(locked *store.LockedChallenge) error {
+		decisionResult <- decisionRepository.WithLockedChallenge(fixture.ctx, fixture.applicationID, pending.SessionID, func(locked *store.LockedChallenge) error {
 			if _, err := locked.LockLicense(fixture.ctx); err != nil {
 				return err
 			}
@@ -339,8 +340,9 @@ func TestUserAndLicenseRoundTrip(t *testing.T) {
 	pool := openTestPool(t, ctx)
 	resetAndMigrate(t, ctx, pool)
 	repository := store.New(pool)
+	applicationID := defaultApplicationIDForTest(t, repository)
 
-	createdUser, err := repository.CreateUser(ctx, domain.NewUser{
+	createdUser, err := repository.CreateUser(ctx, applicationID, domain.NewUser{
 		Email:        "person@example.com",
 		PasswordHash: "$argon2id$v=19$test-hash",
 	})
@@ -350,8 +352,11 @@ func TestUserAndLicenseRoundTrip(t *testing.T) {
 	if createdUser.ID == "" {
 		t.Fatal("CreateUser() returned an empty ID")
 	}
+	if createdUser.ApplicationID != applicationID {
+		t.Fatalf("CreateUser() application ID = %q, want %q", createdUser.ApplicationID, applicationID)
+	}
 
-	foundUser, err := repository.FindUserByEmail(ctx, "person@example.com")
+	foundUser, err := repository.FindUserByEmail(ctx, applicationID, "person@example.com")
 	if err != nil {
 		t.Fatalf("FindUserByEmail() error = %v", err)
 	}
@@ -361,7 +366,7 @@ func TestUserAndLicenseRoundTrip(t *testing.T) {
 
 	expiresAt := base.Add(30 * 24 * time.Hour)
 	licenseHMAC := "5c89e0aeacdc0f1e84682f1d9f4b7bc81c279466603fefb87941b21df91f5fd2"
-	createdLicense, err := repository.CreateLicense(ctx, domain.NewLicense{
+	createdLicense, err := repository.CreateLicense(ctx, applicationID, domain.NewLicense{
 		LicenseHMAC: licenseHMAC,
 		UserID:      createdUser.ID,
 		Product:     "StarLoader",
@@ -372,7 +377,7 @@ func TestUserAndLicenseRoundTrip(t *testing.T) {
 		t.Fatalf("CreateLicense() error = %v", err)
 	}
 
-	foundLicense, err := repository.FindLicenseByUserAndProduct(ctx, createdUser.ID, "StarLoader")
+	foundLicense, err := repository.FindLicenseByUserAndProduct(ctx, applicationID, createdUser.ID, "StarLoader")
 	if err != nil {
 		t.Fatalf("FindLicenseByUserAndProduct() error = %v", err)
 	}
@@ -392,7 +397,7 @@ func TestLoadProfileBindsUserLicenseAndDevice(t *testing.T) {
 		t.Fatalf("Verify() error = %v", err)
 	}
 
-	profile, err := fixture.repository.LoadProfile(fixture.ctx, fixture.user.ID, fixture.license.ID, activated.DeviceID)
+	profile, err := fixture.repository.LoadProfile(fixture.ctx, fixture.applicationID, fixture.user.ID, fixture.license.ID, activated.DeviceID)
 	if err != nil {
 		t.Fatalf("LoadProfile() error = %v", err)
 	}
@@ -403,13 +408,13 @@ func TestLoadProfileBindsUserLicenseAndDevice(t *testing.T) {
 		t.Fatalf("LoadProfile() = %#v", profile)
 	}
 
-	otherUser, err := fixture.repository.CreateUser(fixture.ctx, domain.NewUser{
+	otherUser, err := fixture.repository.CreateUser(fixture.ctx, fixture.applicationID, domain.NewUser{
 		Email: "other-profile@example.com", PasswordHash: "$argon2id$v=19$integration-hash",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser() error = %v", err)
 	}
-	otherLicense, err := fixture.repository.CreateLicense(fixture.ctx, domain.NewLicense{
+	otherLicense, err := fixture.repository.CreateLicense(fixture.ctx, fixture.applicationID, domain.NewLicense{
 		LicenseHMAC: strings.Repeat("b", 64), UserID: otherUser.ID, Product: "StarLoader", MaxDevices: 1, ExpiresAt: fixture.now.Add(24 * time.Hour),
 	})
 	if err != nil {
@@ -418,15 +423,15 @@ func TestLoadProfileBindsUserLicenseAndDevice(t *testing.T) {
 	var otherDeviceID string
 	err = fixture.pool.QueryRow(fixture.ctx, `
 		insert into devices (
-			user_id, license_id, tpm_public_key, tpm_public_key_sha256, fingerprint_hmac, last_seen_at
-		) values ($1, $2, $3, $4, $5, $6)
+			application_id, user_id, license_id, tpm_public_key, tpm_public_key_sha256, fingerprint_hmac, last_seen_at
+		) values ($1, $2, $3, $4, $5, $6, $7)
 		returning id::text`,
-		otherUser.ID, otherLicense.ID, []byte("other-tpm-public-key"), bytes.Repeat([]byte{0x2a}, 32), strings.Repeat("c", 64), fixture.now,
+		fixture.applicationID, otherUser.ID, otherLicense.ID, []byte("other-tpm-public-key"), bytes.Repeat([]byte{0x2a}, 32), strings.Repeat("c", 64), fixture.now,
 	).Scan(&otherDeviceID)
 	if err != nil {
 		t.Fatalf("create other device: %v", err)
 	}
-	sameUserLicense, err := fixture.repository.CreateLicense(fixture.ctx, domain.NewLicense{
+	sameUserLicense, err := fixture.repository.CreateLicense(fixture.ctx, fixture.applicationID, domain.NewLicense{
 		LicenseHMAC: strings.Repeat("d", 64), UserID: fixture.user.ID, Product: "StarLoader Plus", MaxDevices: 2, ExpiresAt: fixture.now.Add(48 * time.Hour),
 	})
 	if err != nil {
@@ -435,15 +440,15 @@ func TestLoadProfileBindsUserLicenseAndDevice(t *testing.T) {
 	var sameUserDeviceID string
 	err = fixture.pool.QueryRow(fixture.ctx, `
 		insert into devices (
-			user_id, license_id, tpm_public_key, tpm_public_key_sha256, fingerprint_hmac, last_seen_at
-		) values ($1, $2, $3, $4, $5, $6)
+			application_id, user_id, license_id, tpm_public_key, tpm_public_key_sha256, fingerprint_hmac, last_seen_at
+		) values ($1, $2, $3, $4, $5, $6, $7)
 		returning id::text`,
-		fixture.user.ID, sameUserLicense.ID, []byte("same-user-tpm-public-key"), bytes.Repeat([]byte{0x3a}, 32), strings.Repeat("e", 64), fixture.now,
+		fixture.applicationID, fixture.user.ID, sameUserLicense.ID, []byte("same-user-tpm-public-key"), bytes.Repeat([]byte{0x3a}, 32), strings.Repeat("e", 64), fixture.now,
 	).Scan(&sameUserDeviceID)
 	if err != nil {
 		t.Fatalf("create same-user device: %v", err)
 	}
-	if _, err := fixture.repository.LoadProfile(fixture.ctx, fixture.user.ID, sameUserLicense.ID, sameUserDeviceID); err != nil {
+	if _, err := fixture.repository.LoadProfile(fixture.ctx, fixture.applicationID, fixture.user.ID, sameUserLicense.ID, sameUserDeviceID); err != nil {
 		t.Fatalf("LoadProfile() for same-user alternate license error = %v", err)
 	}
 
@@ -459,7 +464,7 @@ func TestLoadProfileBindsUserLicenseAndDevice(t *testing.T) {
 		{name: "same user alternate device with original license", userID: fixture.user.ID, licenseID: fixture.license.ID, deviceID: sameUserDeviceID},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := fixture.repository.LoadProfile(fixture.ctx, tt.userID, tt.licenseID, tt.deviceID)
+			_, err := fixture.repository.LoadProfile(fixture.ctx, fixture.applicationID, tt.userID, tt.licenseID, tt.deviceID)
 			if !errors.Is(err, domain.ErrProfileNotFound) {
 				t.Fatalf("LoadProfile() error = %v, want %v", err, domain.ErrProfileNotFound)
 			}
@@ -475,7 +480,7 @@ func TestSingleLicensePerUserProduct(t *testing.T) {
 	repository := store.New(pool)
 	user, _ := createUserAndLicense(t, ctx, repository, "single-license@example.com", base)
 
-	_, err := repository.CreateLicense(ctx, domain.NewLicense{
+	_, err := repository.CreateLicense(ctx, defaultApplicationIDForTest(t, repository), domain.NewLicense{
 		LicenseHMAC: "cf038a1bf56e961e35dc7252eb82f800553db70ab311e7f88d85afc739128e7e",
 		UserID:      user.ID,
 		Product:     "StarLoader",
@@ -492,8 +497,9 @@ func TestUserRepositoryNormalizesEmail(t *testing.T) {
 	pool := openTestPool(t, ctx)
 	resetAndMigrate(t, ctx, pool)
 	repository := store.New(pool)
+	applicationID := defaultApplicationIDForTest(t, repository)
 
-	created, err := repository.CreateUser(ctx, domain.NewUser{
+	created, err := repository.CreateUser(ctx, applicationID, domain.NewUser{
 		Email:        "  Person@Example.COM ",
 		PasswordHash: "$argon2id$v=19$normalized-email",
 	})
@@ -504,7 +510,7 @@ func TestUserRepositoryNormalizesEmail(t *testing.T) {
 		t.Fatalf("CreateUser() email = %q", created.Email)
 	}
 
-	found, err := repository.FindUserByEmail(ctx, " PERSON@EXAMPLE.COM ")
+	found, err := repository.FindUserByEmail(ctx, applicationID, " PERSON@EXAMPLE.COM ")
 	if err != nil {
 		t.Fatalf("FindUserByEmail() error = %v", err)
 	}
@@ -518,6 +524,7 @@ func TestRepositoryNotFoundErrorsAreTyped(t *testing.T) {
 	pool := openTestPool(t, ctx)
 	resetAndMigrate(t, ctx, pool)
 	repository := store.New(pool)
+	applicationID := defaultApplicationIDForTest(t, repository)
 
 	tests := []struct {
 		name   string
@@ -528,7 +535,7 @@ func TestRepositoryNotFoundErrorsAreTyped(t *testing.T) {
 			name:   "user",
 			entity: "user",
 			find: func() error {
-				_, err := repository.FindUserByEmail(ctx, "missing@example.com")
+				_, err := repository.FindUserByEmail(ctx, applicationID, "missing@example.com")
 				return err
 			},
 		},
@@ -536,7 +543,7 @@ func TestRepositoryNotFoundErrorsAreTyped(t *testing.T) {
 			name:   "license",
 			entity: "license",
 			find: func() error {
-				_, err := repository.FindLicenseByHMAC(ctx, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+				_, err := repository.FindLicenseByHMAC(ctx, applicationID, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 				return err
 			},
 		},
@@ -544,7 +551,7 @@ func TestRepositoryNotFoundErrorsAreTyped(t *testing.T) {
 			name:   "challenge",
 			entity: "challenge",
 			find: func() error {
-				return repository.WithLockedChallenge(ctx, "00000000-0000-0000-0000-000000000000", func(*store.LockedChallenge) error {
+				return repository.WithLockedChallenge(ctx, applicationID, "00000000-0000-0000-0000-000000000000", func(*store.LockedChallenge) error {
 					return nil
 				})
 			},
@@ -559,6 +566,103 @@ func TestRepositoryNotFoundErrorsAreTyped(t *testing.T) {
 				t.Fatalf("error = %v, want typed %s not-found error", err, tt.entity)
 			}
 		})
+	}
+}
+
+func TestCrossTenantIsolation(t *testing.T) {
+	// The most critical tenant guarantee: an object created in application A
+	// must be invisible to every repository query resolved for application B,
+	// even when the email or identifiers are identical.
+	ctx := context.Background()
+	base := time.Now().UTC().Truncate(time.Microsecond)
+	pool := openTestPool(t, ctx)
+	resetAndMigrate(t, ctx, pool)
+	repository := store.New(pool)
+	appA := defaultApplicationIDForTest(t, repository)
+
+	organization, err := repository.CreateOrganization(ctx, "tenant-b")
+	if err != nil {
+		t.Fatalf("CreateOrganization() error = %v", err)
+	}
+	appB, err := repository.CreateApplication(ctx, domain.NewApplication{
+		OrganizationID: organization.ID, Name: "Tenant B App", Slug: "tenant-b-app",
+	})
+	if err != nil {
+		t.Fatalf("CreateApplication() error = %v", err)
+	}
+
+	// The same email may exist in both applications and resolves to the row
+	// of the queried application only.
+	userA, err := repository.CreateUser(ctx, appA, domain.NewUser{
+		Email: "mustafa@example.com", PasswordHash: "$argon2id$v=19$app-a-hash",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser(app A) error = %v", err)
+	}
+	userB, err := repository.CreateUser(ctx, appB.ID, domain.NewUser{
+		Email: "mustafa@example.com", PasswordHash: "$argon2id$v=19$app-b-hash",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser(app B) error = %v", err)
+	}
+	if userA.ID == userB.ID || userA.ApplicationID == userB.ApplicationID {
+		t.Fatalf("same email in different applications collapsed into one row: A=%#v B=%#v", userA, userB)
+	}
+	foundB, err := repository.FindUserByEmail(ctx, appB.ID, "mustafa@example.com")
+	if err != nil {
+		t.Fatalf("FindUserByEmail(app B) error = %v", err)
+	}
+	if foundB.ID != userB.ID || foundB.PasswordHash != "$argon2id$v=19$app-b-hash" {
+		t.Fatalf("FindUserByEmail(app B) = %#v, want user B", foundB)
+	}
+
+	// Cross-application identifier lookups must fail as if the row never
+	// existed (404 semantics, not 403).
+	if _, err := repository.FindUserByID(ctx, appB.ID, userA.ID); !errors.Is(err, domain.ErrUserNotFound) {
+		t.Fatalf("FindUserByID(app B, user A) error = %v, want %v", err, domain.ErrUserNotFound)
+	}
+
+	licenseA, err := repository.CreateLicense(ctx, appA, domain.NewLicense{
+		LicenseHMAC: strings.Repeat("a", 64), UserID: userA.ID, Product: "StarLoader", MaxDevices: 1, ExpiresAt: base.Add(24 * time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("CreateLicense(app A) error = %v", err)
+	}
+	if _, err := repository.FindLicenseByHMAC(ctx, appB.ID, licenseA.LicenseHMAC); !errors.Is(err, domain.ErrLicenseNotFound) {
+		t.Fatalf("FindLicenseByHMAC(app B, license A) error = %v, want %v", err, domain.ErrLicenseNotFound)
+	}
+	if _, err := repository.FindLicenseByUserAndProduct(ctx, appB.ID, userA.ID, "StarLoader"); !errors.Is(err, domain.ErrLicenseNotFound) {
+		t.Fatalf("FindLicenseByUserAndProduct(app B, user A) error = %v, want %v", err, domain.ErrLicenseNotFound)
+	}
+
+	// Pending sessions and their challenges are app-bound as well.
+	pending, err := repository.CreatePendingSession(ctx, appA, domain.NewPendingSession{
+		ApplicationID: appA, UserID: userA.ID, LicenseID: licenseA.ID,
+		ChallengeSHA256: bytes.Repeat([]byte{0x7c}, 32), ExpiresAt: base.Add(2 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("CreatePendingSession(app A) error = %v", err)
+	}
+	if err := repository.WithLockedChallenge(ctx, appB.ID, pending.Session.ID, func(*store.LockedChallenge) error {
+		return nil
+	}); !errors.Is(err, domain.ErrChallengeNotFound) {
+		t.Fatalf("WithLockedChallenge(app B, session A) error = %v, want %v", err, domain.ErrChallengeNotFound)
+	}
+
+	// A verified device from app A must never resolve through an app B profile
+	// query, and a profile built with the wrong application must fail.
+	var deviceID string
+	if err := pool.QueryRow(ctx, `
+		insert into devices (
+			application_id, user_id, license_id, tpm_public_key, tpm_public_key_sha256, fingerprint_hmac, last_seen_at
+		) values ($1, $2, $3, $4, $5, $6, $7)
+		returning id::text`,
+		appA, userA.ID, licenseA.ID, []byte("tpm-key"), bytes.Repeat([]byte{0x4d}, 32), strings.Repeat("e", 64), base,
+	).Scan(&deviceID); err != nil {
+		t.Fatalf("create device fixture: %v", err)
+	}
+	if _, err := repository.LoadProfile(ctx, appB.ID, userA.ID, licenseA.ID, deviceID); !errors.Is(err, domain.ErrProfileNotFound) {
+		t.Fatalf("LoadProfile(app B, user A) error = %v, want %v", err, domain.ErrProfileNotFound)
 	}
 }
 
@@ -577,11 +681,11 @@ func TestSchemaRejectsInvalidStatusesAndUnprotectedValues(t *testing.T) {
 	}{
 		{
 			name: "unnormalized email",
-			sql:  `insert into users (email, password_hash) values ('Mixed@Example.COM', 'hash')`,
+			sql:  `insert into users (application_id, email, password_hash) values ((select id from applications where slug = 'starloader'), 'Mixed@Example.COM', 'hash')`,
 		},
 		{
 			name: "UUIDv4 identifier",
-			sql:  `insert into users (id, email, password_hash) values ('550e8400-e29b-41d4-a716-446655440000', 'uuidv4@example.com', 'hash')`,
+			sql:  `insert into users (id, application_id, email, password_hash) values ('550e8400-e29b-41d4-a716-446655440000', (select id from applications where slug = 'starloader'), 'uuidv4@example.com', 'hash')`,
 		},
 		{
 			name: "invalid user status",
@@ -606,13 +710,13 @@ func TestSchemaRejectsInvalidStatusesAndUnprotectedValues(t *testing.T) {
 		{
 			name: "invalid device status",
 			sql: `insert into devices (
-				user_id, license_id, tpm_public_key, tpm_public_key_sha256, fingerprint_hmac, status
-			) values ($1, $2, $3, $4, $5, 'unknown')`,
+				application_id, user_id, license_id, tpm_public_key, tpm_public_key_sha256, fingerprint_hmac, status
+			) values ((select id from applications where slug = 'starloader'), $1, $2, $3, $4, $5, 'unknown')`,
 			args: []any{user.ID, license.ID, []byte{0x01}, bytes.Repeat([]byte{0x02}, 32), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
 		},
 		{
 			name: "invalid session status",
-			sql:  `insert into auth_sessions (user_id, license_id, status, expires_at) values ($1, $2, 'unknown', $3)`,
+			sql:  `insert into auth_sessions (application_id, user_id, license_id, status, expires_at) values ((select id from applications where slug = 'starloader'), $1, $2, 'unknown', $3)`,
 			args: []any{user.ID, license.ID, base.Add(2 * time.Minute)},
 		},
 	}
@@ -685,23 +789,31 @@ func TestMigrationVersionTwoRejectsExistingDuplicateLicenses(t *testing.T) {
 	ctx := context.Background()
 	pool := openTestPool(t, ctx)
 	resetToVersionOne(t, ctx, pool)
-	repository := store.New(pool)
-	user, _ := createUserAndLicense(t, ctx, repository, "duplicate-migration@example.com", time.Now().UTC())
-	if _, err := repository.CreateLicense(ctx, domain.NewLicense{
-		LicenseHMAC: "9a2d43a5aaafcab6f63b9ec10fbe45d47b628d39cf1fd4f00bf21a4e6123a941",
-		UserID:      user.ID,
-		Product:     "StarLoader",
-		MaxDevices:  1,
-		ExpiresAt:   time.Now().UTC().Add(24 * time.Hour),
-	}); err != nil {
-		t.Fatalf("create duplicate fixture: %v", err)
+	// Insert directly against the version-1 schema (no application_id column
+	// exists yet) to simulate pre-tenant data with a duplicate user/product.
+	var userID string
+	if err := pool.QueryRow(ctx, `
+		insert into users (email, password_hash)
+		values ('duplicate-migration@example.com', '$argon2id$v=19$integration-hash')
+		returning id::text`).Scan(&userID); err != nil {
+		t.Fatalf("create version-one user fixture: %v", err)
+	}
+	for _, hmac := range []string{
+		"8f46bf9ec2d930aaae995b45ad6f7867ad5c8c8ef9b4b1e9c4ab325ce36af7ac",
+		"9a2d43a5aaafcab6f63b9ec10fbe45d47b628d39cf1fd4f00bf21a4e6123a941",
+	} {
+		if _, err := pool.Exec(ctx, `
+			insert into licenses (license_hmac, user_id, product, status, max_devices, expires_at)
+			values ($1, $2, 'StarLoader', 'active', 1, now() + interval '1 day')`, hmac, userID); err != nil {
+			t.Fatalf("create duplicate license fixture: %v", err)
+		}
 	}
 
 	if err := store.MigrateUp(ctx, pool); err == nil {
 		t.Fatal("MigrateUp() unexpectedly accepted duplicate user/product licenses")
 	}
 	var licenseCount int
-	if err := pool.QueryRow(ctx, `select count(*) from licenses where user_id = $1 and product = 'StarLoader'`, user.ID).Scan(&licenseCount); err != nil {
+	if err := pool.QueryRow(ctx, `select count(*) from licenses where user_id = $1 and product = 'StarLoader'`, userID).Scan(&licenseCount); err != nil {
 		t.Fatalf("count duplicate licenses: %v", err)
 	}
 	if licenseCount != 2 {
@@ -753,7 +865,7 @@ func TestConcurrentChallengeConsumptionHasExactlyOneConsumer(t *testing.T) {
 	pool := openTestPool(t, ctx)
 	resetAndMigrate(t, ctx, pool)
 	repository := store.New(pool)
-	pending := createPendingSession(t, ctx, repository, base)
+	pending, applicationID := createPendingSession(t, ctx, repository, base)
 
 	firstConn, err := pool.Acquire(ctx)
 	if err != nil {
@@ -782,7 +894,7 @@ func TestConcurrentChallengeConsumptionHasExactlyOneConsumer(t *testing.T) {
 	secondCallbackRan := make(chan struct{}, 1)
 	results := make(chan error, 2)
 	go func() {
-		results <- firstRepository.WithLockedChallenge(ctx, pending.Session.ID, func(*store.LockedChallenge) error {
+		results <- firstRepository.WithLockedChallenge(ctx, applicationID, pending.Session.ID, func(*store.LockedChallenge) error {
 			close(firstLocked)
 			select {
 			case <-releaseFirst:
@@ -796,7 +908,7 @@ func TestConcurrentChallengeConsumptionHasExactlyOneConsumer(t *testing.T) {
 
 	go func() {
 		close(secondStarted)
-		results <- secondRepository.WithLockedChallenge(ctx, pending.Session.ID, func(*store.LockedChallenge) error {
+		results <- secondRepository.WithLockedChallenge(ctx, applicationID, pending.Session.ID, func(*store.LockedChallenge) error {
 			secondCallbackRan <- struct{}{}
 			return nil
 		})
@@ -835,10 +947,10 @@ func TestWithLockedChallengeRollsBackCallbackFailure(t *testing.T) {
 	pool := openTestPool(t, ctx)
 	resetAndMigrate(t, ctx, pool)
 	repository := store.New(pool)
-	pending := createPendingSession(t, ctx, repository, base)
+	pending, applicationID := createPendingSession(t, ctx, repository, base)
 	callbackErr := errors.New("verification failed")
 
-	err := repository.WithLockedChallenge(ctx, pending.Session.ID, func(*store.LockedChallenge) error {
+	err := repository.WithLockedChallenge(ctx, applicationID, pending.Session.ID, func(*store.LockedChallenge) error {
 		return callbackErr
 	})
 	if !errors.Is(err, callbackErr) {
@@ -853,7 +965,7 @@ func TestWithLockedChallengeRollsBackCallbackFailure(t *testing.T) {
 		t.Fatalf("failed callback persisted consumed_at %s", consumedAt)
 	}
 
-	err = repository.WithLockedChallenge(ctx, pending.Session.ID, func(locked *store.LockedChallenge) error {
+	err = repository.WithLockedChallenge(ctx, applicationID, pending.Session.ID, func(locked *store.LockedChallenge) error {
 		if locked.Challenge.ConsumedAt != nil {
 			return domain.ErrChallengeConsumed
 		}
@@ -871,16 +983,16 @@ func TestSuccessfulLockedChallengeCallbackAlwaysConsumes(t *testing.T) {
 	pool := openTestPool(t, ctx)
 	resetAndMigrate(t, ctx, pool)
 	repository := store.New(pool)
-	pending := createPendingSession(t, ctx, repository, base)
+	pending, applicationID := createPendingSession(t, ctx, repository, base)
 
-	if err := repository.WithLockedChallenge(ctx, pending.Session.ID, func(*store.LockedChallenge) error {
+	if err := repository.WithLockedChallenge(ctx, applicationID, pending.Session.ID, func(*store.LockedChallenge) error {
 		return nil
 	}); err != nil {
 		t.Fatalf("first WithLockedChallenge() error = %v", err)
 	}
 
 	callbackCalled := false
-	err := repository.WithLockedChallenge(ctx, pending.Session.ID, func(*store.LockedChallenge) error {
+	err := repository.WithLockedChallenge(ctx, applicationID, pending.Session.ID, func(*store.LockedChallenge) error {
 		callbackCalled = true
 		return nil
 	})
@@ -900,8 +1012,9 @@ func TestLockedChallengeIDMutationCannotRedirectConsumption(t *testing.T) {
 	pool := openTestPool(t, ctx)
 	resetAndMigrate(t, ctx, pool)
 	repository := store.New(pool)
-	original := createPendingSession(t, ctx, repository, base)
-	second, err := repository.CreatePendingSession(ctx, domain.NewPendingSession{
+	original, applicationID := createPendingSession(t, ctx, repository, base)
+	second, err := repository.CreatePendingSession(ctx, applicationID, domain.NewPendingSession{
+		ApplicationID:   applicationID,
 		UserID:          original.Session.UserID,
 		LicenseID:       original.Session.LicenseID,
 		ChallengeSHA256: bytes.Repeat([]byte{0x6b}, 32),
@@ -911,7 +1024,7 @@ func TestLockedChallengeIDMutationCannotRedirectConsumption(t *testing.T) {
 		t.Fatalf("CreatePendingSession() second error = %v", err)
 	}
 
-	err = repository.WithLockedChallenge(ctx, original.Session.ID, func(locked *store.LockedChallenge) error {
+	err = repository.WithLockedChallenge(ctx, applicationID, original.Session.ID, func(locked *store.LockedChallenge) error {
 		locked.Challenge.ID = second.Challenge.ID
 		return nil
 	})
@@ -929,7 +1042,7 @@ func TestLockedChallengeIDMutationCannotRedirectConsumption(t *testing.T) {
 	}
 
 	replayCallbackRan := false
-	err = repository.WithLockedChallenge(ctx, original.Session.ID, func(*store.LockedChallenge) error {
+	err = repository.WithLockedChallenge(ctx, applicationID, original.Session.ID, func(*store.LockedChallenge) error {
 		replayCallbackRan = true
 		return nil
 	})
@@ -1105,11 +1218,13 @@ func readChallengeConsumedAt(t *testing.T, ctx context.Context, pool *pgxpool.Po
 	return consumedAt
 }
 
-func createPendingSession(t *testing.T, ctx context.Context, repository *store.Store, base time.Time) *domain.PendingSession {
+func createPendingSession(t *testing.T, ctx context.Context, repository *store.Store, base time.Time) (*domain.PendingSession, string) {
 	t.Helper()
+	applicationID := defaultApplicationIDForTest(t, repository)
 	user, license := createUserAndLicense(t, ctx, repository, "challenge@example.com", base)
 	challengeSHA256 := bytes.Repeat([]byte{0x5a}, 32)
-	pending, err := repository.CreatePendingSession(ctx, domain.NewPendingSession{
+	pending, err := repository.CreatePendingSession(ctx, applicationID, domain.NewPendingSession{
+		ApplicationID:   applicationID,
 		UserID:          user.ID,
 		LicenseID:       license.ID,
 		ChallengeSHA256: challengeSHA256,
@@ -1121,19 +1236,20 @@ func createPendingSession(t *testing.T, ctx context.Context, repository *store.S
 	if !bytes.Equal(pending.Challenge.ChallengeSHA256, challengeSHA256) {
 		t.Fatalf("stored challenge SHA-256 = %x", pending.Challenge.ChallengeSHA256)
 	}
-	return pending
+	return pending, applicationID
 }
 
 func createUserAndLicense(t *testing.T, ctx context.Context, repository *store.Store, email string, base time.Time) (*domain.User, *domain.License) {
 	t.Helper()
-	user, err := repository.CreateUser(ctx, domain.NewUser{
+	applicationID := defaultApplicationIDForTest(t, repository)
+	user, err := repository.CreateUser(ctx, applicationID, domain.NewUser{
 		Email:        email,
 		PasswordHash: "$argon2id$v=19$integration-hash",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser() error = %v", err)
 	}
-	license, err := repository.CreateLicense(ctx, domain.NewLicense{
+	license, err := repository.CreateLicense(ctx, applicationID, domain.NewLicense{
 		LicenseHMAC: "8f46bf9ec2d930aaae995b45ad6f7867ad5c8c8ef9b4b1e9c4ab325ce36af7ac",
 		UserID:      user.ID,
 		Product:     "StarLoader",
@@ -1146,6 +1262,17 @@ func createUserAndLicense(t *testing.T, ctx context.Context, repository *store.S
 	return user, license
 }
 
+// defaultApplicationIDForTest resolves the default StarLoader application that
+// migration 000004 seeds; every end-user fixture is scoped to it.
+func defaultApplicationIDForTest(t *testing.T, repository *store.Store) string {
+	t.Helper()
+	application, err := repository.FindApplicationBySlug(context.Background(), "starloader")
+	if err != nil {
+		t.Fatalf("resolve default application: %v", err)
+	}
+	return application.ID
+}
+
 type postgresVerificationFixture struct {
 	ctx           context.Context
 	pool          *pgxpool.Pool
@@ -1153,6 +1280,7 @@ type postgresVerificationFixture struct {
 	deviceService *service.DeviceService
 	tokenVerifier *security.TokenVerifier
 	now           time.Time
+	applicationID string
 	user          *domain.User
 	license       *domain.License
 }
@@ -1165,13 +1293,14 @@ func newPostgresVerificationFixture(t *testing.T, maxDevices int) *postgresVerif
 	pool := openTestPool(t, ctx)
 	resetAndMigrate(t, ctx, pool)
 	repository := store.New(pool)
-	user, err := repository.CreateUser(ctx, domain.NewUser{
+	applicationID := defaultApplicationIDForTest(t, repository)
+	user, err := repository.CreateUser(ctx, applicationID, domain.NewUser{
 		Email: "device-verification@example.com", PasswordHash: "$argon2id$v=19$integration-hash",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	license, err := repository.CreateLicense(ctx, domain.NewLicense{
+	license, err := repository.CreateLicense(ctx, applicationID, domain.NewLicense{
 		LicenseHMAC: "a7a5cc218577a36a399be56de9ba9901391f73cc7446c6ee74846825fcc94343",
 		UserID:      user.ID, Product: "StarLoader", MaxDevices: maxDevices, ExpiresAt: now.Add(24 * time.Hour),
 	})
@@ -1196,7 +1325,7 @@ func newPostgresVerificationFixture(t *testing.T, maxDevices int) *postgresVerif
 	})
 	return &postgresVerificationFixture{
 		ctx: ctx, pool: pool, repository: repository, deviceService: deviceService,
-		tokenVerifier: verifier, now: now, user: user, license: license,
+		tokenVerifier: verifier, now: now, applicationID: applicationID, user: user, license: license,
 	}
 }
 
@@ -1207,15 +1336,15 @@ func (fixture *postgresVerificationFixture) newInput(t *testing.T, key *ecdsa.Pr
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(challenge)
-	pending, err := fixture.repository.CreatePendingSession(fixture.ctx, domain.NewPendingSession{
-		UserID: fixture.user.ID, LicenseID: fixture.license.ID, ChallengeSHA256: digest[:], ExpiresAt: expiresAt,
+	pending, err := fixture.repository.CreatePendingSession(fixture.ctx, fixture.applicationID, domain.NewPendingSession{
+		ApplicationID: fixture.applicationID, UserID: fixture.user.ID, LicenseID: fixture.license.ID, ChallengeSHA256: digest[:], ExpiresAt: expiresAt,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	publicBlob, signature := postgresCNGProof(t, key, challenge)
 	return service.VerifyInput{
-		SessionID: pending.Session.ID, Challenge: base64.StdEncoding.EncodeToString(challenge),
+		ApplicationID: fixture.applicationID, SessionID: pending.Session.ID, Challenge: base64.StdEncoding.EncodeToString(challenge),
 		ChallengeSignature: base64.StdEncoding.EncodeToString(signature), TPMPublicKey: base64.StdEncoding.EncodeToString(publicBlob),
 		Hardware: hardware,
 	}

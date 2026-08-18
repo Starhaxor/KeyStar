@@ -25,6 +25,7 @@ var versionedMigrations = []migration{
 	{version: 5, up: "000005_keyauth_features.up.sql", down: "000005_keyauth_features.down.sql"},
 	{version: 6, up: "000006_ban_duration.up.sql", down: "000006_ban_duration.down.sql"},
 	{version: 7, up: "000007_bans.up.sql", down: "000007_bans.down.sql"},
+	{version: 8, up: "000008_tenant_hardening.up.sql", down: "000008_tenant_hardening.down.sql"},
 }
 
 func MigrateUp(ctx context.Context, pool *pgxpool.Pool) error {

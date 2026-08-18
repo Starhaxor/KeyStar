@@ -145,6 +145,10 @@ func runServer() error {
 	}
 
 	repository := store.New(pool)
+	defaultApplication, err := repository.FindDefaultApplication(startupCtx)
+	if err != nil {
+		return fmt.Errorf("resolve default application: %w", err)
+	}
 	loginService := service.NewLoginService(repository, configuration.Product)
 	privateKey, err := security.ParseEd25519PrivateKey(configuration.Ed25519PrivateKey)
 	if err != nil {
@@ -194,15 +198,16 @@ func runServer() error {
 		log.Printf("admin console disabled: /v1/admin endpoints will return 503")
 	}
 	router := httpapi.NewRouter(httpapi.RouterConfig{
-		Login:              loginService,
-		DeviceVerification: deviceService,
-		SessionVerifier:    tokenVerifier,
-		Profile:            repository,
-		LoginTimeout:       configuration.LoginTimeout,
-		TrustedProxies:     trustedProxies,
-		Logger:             log.Default(),
-		HealthCheck:        pool.Ping,
-		Admin:              adminConfig,
+		Login:                loginService,
+		DeviceVerification:   deviceService,
+		SessionVerifier:      tokenVerifier,
+		Profile:              repository,
+		LoginTimeout:         configuration.LoginTimeout,
+		TrustedProxies:       trustedProxies,
+		Logger:               log.Default(),
+		HealthCheck:          pool.Ping,
+		Admin:                adminConfig,
+		DefaultApplicationID: defaultApplication.ID,
 	})
 	address := strings.TrimSpace(os.Getenv("SERVER_ADDR"))
 	if address == "" {
@@ -306,7 +311,11 @@ type adminUserRepository struct {
 }
 
 func (repository adminUserRepository) CreateUser(ctx context.Context, email, passwordHash string) error {
-	_, err := repository.store.CreateUser(ctx, domain.NewUser{Email: email, PasswordHash: passwordHash})
+	applicationID, err := defaultApplicationID(ctx, repository.store)
+	if err != nil {
+		return err
+	}
+	_, err = repository.store.CreateUser(ctx, applicationID, domain.NewUser{Email: email, PasswordHash: passwordHash})
 	return err
 }
 
@@ -316,11 +325,15 @@ type adminLicenseRepository struct {
 }
 
 func (repository adminLicenseRepository) CreateLicense(ctx context.Context, normalized, userEmail, product string, expiresAt time.Time, maxDevices int) error {
-	user, err := repository.store.FindUserByEmail(ctx, userEmail)
+	applicationID, err := defaultApplicationID(ctx, repository.store)
 	if err != nil {
 		return err
 	}
-	_, err = repository.store.CreateLicense(ctx, domain.NewLicense{
+	user, err := repository.store.FindUserByEmail(ctx, applicationID, userEmail)
+	if err != nil {
+		return err
+	}
+	_, err = repository.store.CreateLicense(ctx, applicationID, domain.NewLicense{
 		LicenseHMAC: security.HMACHex(repository.hmacKey, normalized),
 		UserID:      user.ID,
 		Product:     product,
@@ -328,6 +341,16 @@ func (repository adminLicenseRepository) CreateLicense(ctx context.Context, norm
 		ExpiresAt:   expiresAt,
 	})
 	return err
+}
+
+// defaultApplicationID resolves the default StarLoader application for legacy
+// flows that have no explicit application context yet (CLI commands, console).
+func defaultApplicationID(ctx context.Context, repository *store.Store) (string, error) {
+	application, err := repository.FindDefaultApplication(ctx)
+	if err != nil {
+		return "", err
+	}
+	return application.ID, nil
 }
 
 type adminAccountRepository struct {

@@ -34,6 +34,11 @@ type RouterConfig struct {
 	RateLimitMaxKeys    int
 	Now                 func() time.Time
 	Admin               AdminConfig
+	// DefaultApplicationID is the tenant boundary applied to client requests
+	// that do not carry an explicit application context. It is resolved once
+	// at startup from the default StarLoader application; credential-based
+	// resolution replaces it once the platform middleware is active.
+	DefaultApplicationID string
 }
 
 type Router struct {
@@ -50,8 +55,9 @@ type Router struct {
 	admin               AdminConfig
 	adminLimiter        *ipRateLimiter
 	now                 func() time.Time
-	meHandler           http.Handler
-	handler             http.Handler
+	defaultApplicationID string
+	meHandler            http.Handler
+	handler              http.Handler
 }
 
 func NewRouter(config RouterConfig) *Router {
@@ -86,9 +92,10 @@ func NewRouter(config RouterConfig) *Router {
 		trustedProxies:      append([]netip.Prefix(nil), config.TrustedProxies...),
 		loginLimiter:        newIPRateLimiter(5, time.Minute, config.RateLimitMaxKeys, config.Now),
 		sessionLimiter:      newIPRateLimiter(10, time.Minute, config.RateLimitMaxKeys, config.Now),
-		admin:               config.Admin,
-		adminLimiter:        newIPRateLimiter(10, time.Minute, config.RateLimitMaxKeys, config.Now),
-		now:                 now,
+		admin:                config.Admin,
+		adminLimiter:         newIPRateLimiter(10, time.Minute, config.RateLimitMaxKeys, config.Now),
+		now:                  now,
+		defaultApplicationID: config.DefaultApplicationID,
 	}
 	router.meHandler = RequireSession(config.SessionVerifier, http.HandlerFunc(router.handleMe))
 	router.handler = requestIDMiddleware(recoveryMiddleware(logger, http.HandlerFunc(router.route)))

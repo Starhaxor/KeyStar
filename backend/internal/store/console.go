@@ -214,12 +214,12 @@ func (s *Store) ConsoleUserDetail(ctx context.Context, userID string) (*domain.C
 	return detail, nil
 }
 
-func (s *Store) SetUserStatus(ctx context.Context, userID string, status domain.UserStatus) error {
+func (s *Store) SetUserStatus(ctx context.Context, applicationID, userID string, status domain.UserStatus) error {
 	err := s.db.QueryRow(ctx, `
 		update users
 		set status = $2, updated_at = now()
-		where id = $1::uuid
-		returning id`, userID, string(status)).Scan(new(string))
+		where id = $1::uuid and application_id = $3::uuid
+		returning id`, userID, string(status), applicationID).Scan(new(string))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ErrUserNotFound
@@ -231,12 +231,12 @@ func (s *Store) SetUserStatus(ctx context.Context, userID string, status domain.
 
 // SetUserNotes stores free-form admin notes about a user (KeyAuth-style
 // "note" field).
-func (s *Store) SetUserNotes(ctx context.Context, userID, notes string) error {
+func (s *Store) SetUserNotes(ctx context.Context, applicationID, userID, notes string) error {
 	err := s.db.QueryRow(ctx, `
 		update users
 		set notes = $2, updated_at = now()
-		where id = $1::uuid
-		returning id`, userID, notes).Scan(new(string))
+		where id = $1::uuid and application_id = $3::uuid
+		returning id`, userID, notes, applicationID).Scan(new(string))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ErrUserNotFound
@@ -250,7 +250,7 @@ func (s *Store) SetUserNotes(ctx context.Context, userID, notes string) error {
 // When expiresAt is non-nil the ban is temporary and the account reopens
 // automatically once the timestamp passes (see AutoUnbanExpired). The client
 // login path rejects any non-active user, so the ban takes effect immediately.
-func (s *Store) BanUser(ctx context.Context, userID, reason string, expiresAt *time.Time) error {
+func (s *Store) BanUser(ctx context.Context, applicationID, userID, reason string, expiresAt *time.Time) error {
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin ban user: %w", err)
@@ -260,8 +260,8 @@ func (s *Store) BanUser(ctx context.Context, userID, reason string, expiresAt *t
 		update users
 		set status = 'banned', ban_reason = $2, banned_at = now(),
 		    ban_expires_at = $3, updated_at = now()
-		where id = $1::uuid
-		returning id`, userID, reason, expiresAt).Scan(new(string))
+		where id = $1::uuid and application_id = $4::uuid
+		returning id`, userID, reason, expiresAt, applicationID).Scan(new(string))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ErrUserNotFound
@@ -288,7 +288,7 @@ func (s *Store) BanUser(ctx context.Context, userID, reason string, expiresAt *t
 // AutoUnbanExpired reopens a user whose temporary ban has expired and marks
 // the active ban record as expired. It is a no-op unless the user is banned
 // and the ban deadline has passed.
-func (s *Store) AutoUnbanExpired(ctx context.Context, userID string) error {
+func (s *Store) AutoUnbanExpired(ctx context.Context, applicationID, userID string) error {
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin auto unban: %w", err)
@@ -298,9 +298,9 @@ func (s *Store) AutoUnbanExpired(ctx context.Context, userID string) error {
 		update users
 		set status = 'active', ban_reason = '', banned_at = null, ban_expires_at = null,
 		    updated_at = now()
-		where id = $1::uuid and status = 'banned'
+		where id = $1::uuid and application_id = $2::uuid and status = 'banned'
 		  and ban_expires_at is not null and ban_expires_at <= now()
-		returning id`, userID).Scan(new(string))
+		returning id`, userID, applicationID).Scan(new(string))
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("auto unban expired user: %w", err)
@@ -322,7 +322,7 @@ func (s *Store) AutoUnbanExpired(ctx context.Context, userID string) error {
 
 // UnbanUser clears a ban, restores the user to active, and lifts the active
 // ban record.
-func (s *Store) UnbanUser(ctx context.Context, userID string) error {
+func (s *Store) UnbanUser(ctx context.Context, applicationID, userID string) error {
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin unban user: %w", err)
@@ -332,8 +332,8 @@ func (s *Store) UnbanUser(ctx context.Context, userID string) error {
 		update users
 		set status = 'active', ban_reason = '', banned_at = null, ban_expires_at = null,
 		    updated_at = now()
-		where id = $1::uuid
-		returning id`, userID).Scan(new(string))
+		where id = $1::uuid and application_id = $2::uuid
+		returning id`, userID, applicationID).Scan(new(string))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ErrUserNotFound
@@ -405,15 +405,16 @@ func (s *Store) ListConsoleBans(ctx context.Context, offset, limit int, search, 
 	return bans, total, nil
 }
 
-// ResetUserDevices deletes every device record of a user, forcing the client
-// to re-register its hardware (KeyAuth-style HWID reset).
-func (s *Store) ResetUserDevices(ctx context.Context, userID string) (int64, error) {
+// ResetUserDevices revokes every device record of a user within one
+// application, forcing the client to re-register its hardware
+// (KeyAuth-style HWID reset).
+func (s *Store) ResetUserDevices(ctx context.Context, applicationID, userID string) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return 0, fmt.Errorf("begin user device reset: %w", err)
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
-	tag, err := tx.Exec(ctx, `delete from devices where user_id = $1::uuid`, userID)
+	tag, err := tx.Exec(ctx, `delete from devices where user_id = $1::uuid and application_id = $2::uuid`, userID, applicationID)
 	if err != nil {
 		return 0, fmt.Errorf("reset user devices: %w", err)
 	}
@@ -460,9 +461,9 @@ func (s *Store) listConsoleLicenses(ctx context.Context, tail string, args ...an
 	return licenses, nil
 }
 
-func (s *Store) FindLicenseByID(ctx context.Context, licenseID string) (*domain.License, error) {
+func (s *Store) FindLicenseByID(ctx context.Context, applicationID, licenseID string) (*domain.License, error) {
 	license, err := scanLicense(s.db.QueryRow(ctx,
-		`select `+licenseColumns+` from licenses where id = $1::uuid`, licenseID))
+		`select `+licenseColumns+` from licenses where id = $1::uuid and application_id = $2::uuid`, licenseID, applicationID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, domain.ErrLicenseNotFound
 	}
@@ -475,12 +476,12 @@ func (s *Store) FindLicenseByID(ctx context.Context, licenseID string) (*domain.
 // AdminUpdateLicense extends expiry, adjusts the device limit and updates the
 // KeyAuth-style level and notes. Revoked licenses cannot be modified; a
 // renewed license returns to active status.
-func (s *Store) AdminUpdateLicense(ctx context.Context, licenseID string, expiresAt time.Time, maxDevices, level int, notes string) error {
+func (s *Store) AdminUpdateLicense(ctx context.Context, applicationID, licenseID string, expiresAt time.Time, maxDevices, level int, notes string) error {
 	err := s.db.QueryRow(ctx, `
 		update licenses
 		set expires_at = $2, max_devices = $3, level = $4, notes = $5, status = 'active', updated_at = now()
-		where id = $1::uuid and status <> 'revoked'
-		returning id`, licenseID, expiresAt, maxDevices, level, notes).Scan(new(string))
+		where id = $1::uuid and application_id = $6::uuid and status <> 'revoked'
+		returning id`, licenseID, expiresAt, maxDevices, level, notes, applicationID).Scan(new(string))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ErrLicenseNotFound
@@ -492,11 +493,12 @@ func (s *Store) AdminUpdateLicense(ctx context.Context, licenseID string, expire
 
 // --- Variables (KeyAuth-style key-value store) ---
 
-func (s *Store) ListVariables(ctx context.Context) ([]domain.Variable, error) {
+func (s *Store) ListVariables(ctx context.Context, applicationID string) ([]domain.Variable, error) {
 	rows, err := s.db.Query(ctx, `
 		select id::text, key, value, description, created_at, updated_at
 		from variables
-		order by key asc`)
+		where application_id = $1::uuid
+		order by key asc`, applicationID)
 	if err != nil {
 		return nil, fmt.Errorf("list variables: %w", err)
 	}
@@ -515,12 +517,12 @@ func (s *Store) ListVariables(ctx context.Context) ([]domain.Variable, error) {
 	return variables, nil
 }
 
-func (s *Store) CreateVariable(ctx context.Context, key, value, description string) (*domain.Variable, error) {
+func (s *Store) CreateVariable(ctx context.Context, applicationID, key, value, description string) (*domain.Variable, error) {
 	row := s.db.QueryRow(ctx, `
-		insert into variables (key, value, description)
-		values ($1, $2, $3)
+		insert into variables (application_id, key, value, description)
+		values ($1, $2, $3, $4)
 		returning id::text, key, value, description, created_at, updated_at`,
-		key, value, description)
+		applicationID, key, value, description)
 	var variable domain.Variable
 	if err := row.Scan(&variable.ID, &variable.Key, &variable.Value, &variable.Description, &variable.CreatedAt, &variable.UpdatedAt); err != nil {
 		var pgErr *pgconn.PgError
@@ -532,12 +534,12 @@ func (s *Store) CreateVariable(ctx context.Context, key, value, description stri
 	return &variable, nil
 }
 
-func (s *Store) UpdateVariable(ctx context.Context, variableID, value, description string) error {
+func (s *Store) UpdateVariable(ctx context.Context, applicationID, variableID, value, description string) error {
 	err := s.db.QueryRow(ctx, `
 		update variables
 		set value = $2, description = $3, updated_at = now()
-		where id = $1::uuid
-		returning id`, variableID, value, description).Scan(new(string))
+		where id = $1::uuid and application_id = $4::uuid
+		returning id`, variableID, value, description, applicationID).Scan(new(string))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ErrVariableNotFound
@@ -547,11 +549,11 @@ func (s *Store) UpdateVariable(ctx context.Context, variableID, value, descripti
 	return nil
 }
 
-func (s *Store) DeleteVariable(ctx context.Context, variableID string) error {
+func (s *Store) DeleteVariable(ctx context.Context, applicationID, variableID string) error {
 	err := s.db.QueryRow(ctx, `
 		delete from variables
-		where id = $1::uuid
-		returning id`, variableID).Scan(new(string))
+		where id = $1::uuid and application_id = $2::uuid
+		returning id`, variableID, applicationID).Scan(new(string))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ErrVariableNotFound
@@ -561,7 +563,7 @@ func (s *Store) DeleteVariable(ctx context.Context, variableID string) error {
 	return nil
 }
 
-func (s *Store) AdminRevokeLicense(ctx context.Context, licenseID string) error {
+func (s *Store) AdminRevokeLicense(ctx context.Context, applicationID, licenseID string) error {
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin license revocation: %w", err)
@@ -570,7 +572,7 @@ func (s *Store) AdminRevokeLicense(ctx context.Context, licenseID string) error 
 	tag, err := tx.Exec(ctx, `
 		update licenses
 		set status = 'revoked', updated_at = now()
-		where id = $1::uuid and status <> 'revoked'`, licenseID)
+		where id = $1::uuid and application_id = $2::uuid and status <> 'revoked'`, licenseID, applicationID)
 	if err != nil {
 		return fmt.Errorf("revoke license: %w", err)
 	}
@@ -580,7 +582,7 @@ func (s *Store) AdminRevokeLicense(ctx context.Context, licenseID string) error 
 	if _, err := tx.Exec(ctx, `
 		update auth_sessions
 		set status = 'expired', updated_at = now()
-		where license_id = $1::uuid and status in ('pending', 'verified')`, licenseID); err != nil {
+		where license_id = $1::uuid and application_id = $2::uuid and status in ('pending', 'verified')`, licenseID, applicationID); err != nil {
 		return fmt.Errorf("expire revoked license sessions: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -670,11 +672,11 @@ func (s *Store) FindConsoleDeviceByID(ctx context.Context, deviceID string) (*do
 
 // AdminResetDevice removes the hardware registration entirely so the user can
 // register a fresh device; pending sessions bound to the license stay intact.
-func (s *Store) AdminResetDevice(ctx context.Context, deviceID string) error {
+func (s *Store) AdminResetDevice(ctx context.Context, applicationID, deviceID string) error {
 	err := s.db.QueryRow(ctx, `
 		delete from devices
-		where id = $1::uuid
-		returning id`, deviceID).Scan(new(string))
+		where id = $1::uuid and application_id = $2::uuid
+		returning id`, deviceID, applicationID).Scan(new(string))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ErrDeviceNotFound
@@ -688,7 +690,7 @@ func (s *Store) AdminResetDevice(ctx context.Context, deviceID string) error {
 // user and reports how many were revoked.
 // BulkSetUserStatus enables or disables several end-user accounts in one
 // statement and returns how many rows changed.
-func (s *Store) BulkSetUserStatus(ctx context.Context, userIDs []string, status domain.UserStatus) (int64, error) {
+func (s *Store) BulkSetUserStatus(ctx context.Context, applicationID string, userIDs []string, status domain.UserStatus) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return 0, fmt.Errorf("begin bulk user status: %w", err)
@@ -697,7 +699,7 @@ func (s *Store) BulkSetUserStatus(ctx context.Context, userIDs []string, status 
 	tag, err := tx.Exec(ctx, `
 		update users
 		set status = $2, updated_at = now()
-		where id = any($1::uuid[])`, userIDs, string(status))
+		where id = any($1::uuid[]) and application_id = $3::uuid`, userIDs, string(status), applicationID)
 	if err != nil {
 		return 0, fmt.Errorf("bulk set user status: %w", err)
 	}
@@ -709,7 +711,7 @@ func (s *Store) BulkSetUserStatus(ctx context.Context, userIDs []string, status 
 
 // BulkRevokeUserSessions expires every pending or verified auth session of
 // several users in one statement.
-func (s *Store) BulkRevokeUserSessions(ctx context.Context, userIDs []string) (int64, error) {
+func (s *Store) BulkRevokeUserSessions(ctx context.Context, applicationID string, userIDs []string) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return 0, fmt.Errorf("begin bulk user session revocation: %w", err)
@@ -718,7 +720,7 @@ func (s *Store) BulkRevokeUserSessions(ctx context.Context, userIDs []string) (i
 	tag, err := tx.Exec(ctx, `
 		update auth_sessions
 		set status = 'expired', updated_at = now()
-		where user_id = any($1::uuid[]) and status in ('pending', 'verified')`, userIDs)
+		where user_id = any($1::uuid[]) and application_id = $2::uuid and status in ('pending', 'verified')`, userIDs, applicationID)
 	if err != nil {
 		return 0, fmt.Errorf("bulk revoke user sessions: %w", err)
 	}
@@ -728,9 +730,9 @@ func (s *Store) BulkRevokeUserSessions(ctx context.Context, userIDs []string) (i
 	return tag.RowsAffected(), nil
 }
 
-func (s *Store) RevokeUserSessions(ctx context.Context, userID string) (int64, error) {
+func (s *Store) RevokeUserSessions(ctx context.Context, applicationID, userID string) (int64, error) {
 	var exists bool
-	if err := s.db.QueryRow(ctx, `select exists(select 1 from users where id = $1::uuid)`, userID).Scan(&exists); err != nil {
+	if err := s.db.QueryRow(ctx, `select exists(select 1 from users where id = $1::uuid and application_id = $2::uuid)`, userID, applicationID).Scan(&exists); err != nil {
 		return 0, fmt.Errorf("check user for session revocation: %w", err)
 	}
 	if !exists {
@@ -744,7 +746,7 @@ func (s *Store) RevokeUserSessions(ctx context.Context, userID string) (int64, e
 	tag, err := tx.Exec(ctx, `
 		update auth_sessions
 		set status = 'expired', updated_at = now()
-		where user_id = $1::uuid and status in ('pending', 'verified')`, userID)
+		where user_id = $1::uuid and application_id = $2::uuid and status in ('pending', 'verified')`, userID, applicationID)
 	if err != nil {
 		return 0, fmt.Errorf("revoke user sessions: %w", err)
 	}
@@ -754,12 +756,12 @@ func (s *Store) RevokeUserSessions(ctx context.Context, userID string) (int64, e
 	return tag.RowsAffected(), nil
 }
 
-func (s *Store) AdminRevokeDevice(ctx context.Context, deviceID string) error {
+func (s *Store) AdminRevokeDevice(ctx context.Context, applicationID, deviceID string) error {
 	err := s.db.QueryRow(ctx, `
 		update devices
 		set status = 'revoked', updated_at = now()
-		where id = $1::uuid and status = 'active'
-		returning id`, deviceID).Scan(new(string))
+		where id = $1::uuid and application_id = $2::uuid and status = 'active'
+		returning id`, deviceID, applicationID).Scan(new(string))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ErrDeviceNotFound
@@ -806,12 +808,12 @@ func (s *Store) listConsoleSessions(ctx context.Context, tail string, args ...an
 	return sessions, nil
 }
 
-func (s *Store) AdminRevokeAuthSession(ctx context.Context, sessionID string) error {
+func (s *Store) AdminRevokeAuthSession(ctx context.Context, applicationID, sessionID string) error {
 	err := s.db.QueryRow(ctx, `
 		update auth_sessions
 		set status = 'expired', updated_at = now()
-		where id = $1::uuid and status in ('pending', 'verified')
-		returning id`, sessionID).Scan(new(string))
+		where id = $1::uuid and application_id = $2::uuid and status in ('pending', 'verified')
+		returning id`, sessionID, applicationID).Scan(new(string))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ErrAuthSessionNotFound

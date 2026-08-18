@@ -57,8 +57,8 @@ func TestMeReturnsLiteralSafeProfileSelectedByVerifiedClaims(t *testing.T) {
 	if verifier.token != "memory-only-session-token" {
 		t.Fatalf("Verify() token = %q", verifier.token)
 	}
-	if repository.calls != 1 || repository.userID != claims.Subject || repository.licenseID != claims.LicenseID || repository.deviceID != claims.DeviceID {
-		t.Fatalf("LoadProfile() calls = %d, IDs = (%q, %q, %q)", repository.calls, repository.userID, repository.licenseID, repository.deviceID)
+	if repository.calls != 1 || repository.applicationID != claims.ApplicationID || repository.userID != claims.Subject || repository.licenseID != claims.LicenseID || repository.deviceID != claims.DeviceID {
+		t.Fatalf("LoadProfile() calls = %d, IDs = (%q, %q, %q, %q)", repository.calls, repository.applicationID, repository.userID, repository.licenseID, repository.deviceID)
 	}
 	if strings.Contains(recorder.Body.String(), "memory-only-session-token") {
 		t.Fatal("response leaked the session token")
@@ -82,6 +82,7 @@ func TestMeMapsInactiveMismatchedAndRepositoryFailuresToSafeErrors(t *testing.T)
 		{name: "revoked device", profile: mutateMeProfile(func(profile *domain.UserProfile) { profile.DeviceStatus = domain.DeviceStatusRevoked }), status: http.StatusForbidden, code: "DEVICE_REVOKED"},
 		{name: "mismatched device", profile: mutateMeProfile(func(profile *domain.UserProfile) { profile.DeviceID = "019ffc3f-0396-7266-b82c-35371486ffff" }), status: http.StatusUnauthorized, code: "INVALID_SESSION_TOKEN"},
 		{name: "mismatched product", profile: mutateMeProfile(func(profile *domain.UserProfile) { profile.Product = "OtherProduct" }), status: http.StatusUnauthorized, code: "INVALID_SESSION_TOKEN"},
+		{name: "mismatched application", profile: mutateMeProfile(func(profile *domain.UserProfile) { profile.ApplicationID = "other-app" }), status: http.StatusUnauthorized, code: "INVALID_SESSION_TOKEN"},
 		{name: "mismatched records", err: domain.ErrProfileNotFound, status: http.StatusUnauthorized, code: "INVALID_SESSION_TOKEN"},
 		{name: "repository error", err: errors.New("database password=secret license=plaintext hmac=tpm raw-serial"), status: http.StatusInternalServerError, code: "SERVER_ERROR"},
 		{name: "nil repository record", status: http.StatusInternalServerError, code: "SERVER_ERROR"},
@@ -140,16 +141,18 @@ func TestRouterMeRequiresBearerOnlyForGETAndRejectsOtherMethods(t *testing.T) {
 }
 
 type fakeProfileRepository struct {
-	profile   *domain.UserProfile
-	err       error
-	userID    string
-	licenseID string
-	deviceID  string
-	calls     int
+	profile       *domain.UserProfile
+	err           error
+	applicationID string
+	userID        string
+	licenseID     string
+	deviceID      string
+	calls         int
 }
 
-func (fake *fakeProfileRepository) LoadProfile(_ context.Context, userID, licenseID, deviceID string) (*domain.UserProfile, error) {
+func (fake *fakeProfileRepository) LoadProfile(_ context.Context, applicationID, userID, licenseID, deviceID string) (*domain.UserProfile, error) {
 	fake.calls++
+	fake.applicationID = applicationID
 	fake.userID = userID
 	fake.licenseID = licenseID
 	fake.deviceID = deviceID
@@ -158,7 +161,7 @@ func (fake *fakeProfileRepository) LoadProfile(_ context.Context, userID, licens
 
 func validMeClaims() security.SessionClaims {
 	return security.SessionClaims{
-		Subject: "user-from-verified-claims", LicenseID: "license-from-verified-claims",
+		Subject: "user-from-verified-claims", ApplicationID: "app-from-verified-claims", LicenseID: "license-from-verified-claims",
 		DeviceID: "019ffc3f-0396-7266-b82c-35371486cc4e", Product: "StarLoader",
 		Issuer: "starloader", Audience: "starloader-client",
 		IssuedAt:  time.Date(2026, 8, 13, 17, 50, 15, 0, time.UTC),
@@ -168,7 +171,7 @@ func validMeClaims() security.SessionClaims {
 
 func validMeProfile() *domain.UserProfile {
 	return &domain.UserProfile{
-		Email: "test2@test.com", AccountStatus: domain.UserStatusActive,
+		ApplicationID: "app-from-verified-claims", Email: "test2@test.com", AccountStatus: domain.UserStatusActive,
 		Product: "StarLoader", LicenseStatus: domain.LicenseStatusActive,
 		LicenseExpiresAt: time.Date(2026, 9, 12, 17, 42, 56, 0, time.UTC), MaxDevices: 1,
 		DeviceID: "019ffc3f-0396-7266-b82c-35371486cc4e", DeviceStatus: domain.DeviceStatusActive,

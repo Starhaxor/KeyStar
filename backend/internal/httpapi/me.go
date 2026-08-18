@@ -11,7 +11,7 @@ import (
 
 // ProfileRepository loads the safe profile tuple selected by verified session claims.
 type ProfileRepository interface {
-	LoadProfile(context.Context, string, string, string) (*domain.UserProfile, error)
+	LoadProfile(context.Context, string, string, string, string) (*domain.UserProfile, error)
 }
 
 type meResponse struct {
@@ -38,7 +38,7 @@ func (router *Router) handleMe(writer http.ResponseWriter, request *http.Request
 		return
 	}
 
-	profile, err := router.profile.LoadProfile(request.Context(), claims.Subject, claims.LicenseID, claims.DeviceID)
+	profile, err := router.profile.LoadProfile(request.Context(), claims.ApplicationID, claims.Subject, claims.LicenseID, claims.DeviceID)
 	if errors.Is(err, domain.ErrProfileNotFound) {
 		writeInvalidSessionToken(writer, request)
 		return
@@ -47,7 +47,7 @@ func (router *Router) handleMe(writer http.ResponseWriter, request *http.Request
 		writeError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
 		return
 	}
-	if profile.DeviceID != claims.DeviceID || profile.Product != claims.Product || profile.AccountStatus != domain.UserStatusActive {
+	if profile.DeviceID != claims.DeviceID || profile.Product != claims.Product || profile.ApplicationID != claims.ApplicationID || profile.AccountStatus != domain.UserStatusActive {
 		writeInvalidSessionToken(writer, request)
 		return
 	}

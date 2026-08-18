@@ -63,6 +63,7 @@ func (router *Router) handleLogin(writer http.ResponseWriter, request *http.Requ
 	}
 
 	pending, err := router.login.Login(request.Context(), service.LoginInput{
+		ApplicationID:     router.defaultApplicationID,
 		Email:             body.Email,
 		Password:          body.Password,
 		DeviceFingerprint: body.DeviceFingerprint,

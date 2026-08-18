@@ -74,7 +74,8 @@ func (router *Router) handleDeviceVerify(writer http.ResponseWriter, request *ht
 		return
 	}
 	verified, err := router.deviceVerification.Verify(request.Context(), service.VerifyInput{
-		SessionID: body.SessionID, Challenge: body.Challenge,
+		ApplicationID: router.defaultApplicationID,
+		SessionID:     body.SessionID, Challenge: body.Challenge,
 		ChallengeSignature: body.ChallengeSignature, TPMPublicKey: body.TPMPublicKey,
 		Hardware: service.HardwareSignals{
 			SMBIOSUUID: body.Hardware.SMBIOSUUID, MotherboardSerial: body.Hardware.MotherboardSerial,
