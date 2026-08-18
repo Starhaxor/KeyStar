@@ -30,6 +30,8 @@ const (
 	PermSecurityRead  = "security.read"
 	PermAdminsRead    = "admins.read"
 	PermAdminsWrite   = "admins.write"
+	PermCredentialsRead  = "credentials.read"
+	PermCredentialsWrite = "credentials.write"
 	RoleOwner         = "owner"
 	RoleViewer        = "viewer"
 )
@@ -50,6 +52,8 @@ var AllPermissions = []string{
 	PermSecurityRead,
 	PermAdminsRead,
 	PermAdminsWrite,
+	PermCredentialsRead,
+	PermCredentialsWrite,
 }
 
 // Role is an RBAC role; permissions are stored as flat strings so checks stay

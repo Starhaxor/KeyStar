@@ -78,6 +78,9 @@ type AdminConsoleStore interface {
 	AdminResetDevice(ctx context.Context, applicationID, deviceID string) error
 	ListConsoleSessions(ctx context.Context, offset, limit int) ([]domain.ConsoleSession, int64, error)
 	AdminRevokeAuthSession(ctx context.Context, applicationID, sessionID string) error
+	CreateCredential(ctx context.Context, input domain.NewApplicationCredential) (*domain.ApplicationCredential, error)
+	ListCredentials(ctx context.Context, applicationID string) ([]domain.ApplicationCredential, error)
+	RevokeCredential(ctx context.Context, applicationID, credentialID string) error
 	ListAuditLogs(ctx context.Context, offset, limit int) ([]domain.AuditLog, int64, error)
 	AppendAuditLog(ctx context.Context, input domain.NewAuditLog) error
 	ListAdminAccounts(ctx context.Context) ([]domain.AdminAccount, error)
@@ -281,6 +284,21 @@ func (router *Router) routeAdmin(writer http.ResponseWriter, request *http.Reque
 		router.handleAdminRoleDelete(writer, request, account, segments[1])
 	case len(segments) >= 1 && segments[0] == "admins":
 		router.routeAdminAccounts(writer, request, account, segments)
+	case len(segments) == 1 && segments[0] == "credentials" && request.Method == http.MethodGet:
+		if !router.requirePermission(writer, request, account, domain.PermCredentialsRead) {
+			return
+		}
+		router.handleAdminCredentialList(writer, request)
+	case len(segments) == 1 && segments[0] == "credentials" && request.Method == http.MethodPost:
+		if !router.requirePermission(writer, request, account, domain.PermCredentialsWrite) {
+			return
+		}
+		router.handleAdminCredentialCreate(writer, request, account)
+	case len(segments) == 3 && segments[0] == "credentials" && segments[2] == "revoke" && request.Method == http.MethodPost:
+		if !router.requirePermission(writer, request, account, domain.PermCredentialsWrite) {
+			return
+		}
+		router.handleAdminCredentialRevoke(writer, request, account, segments[1])
 	default:
 		writeError(writer, request, http.StatusNotFound, "INVALID_REQUEST", "not found")
 	}

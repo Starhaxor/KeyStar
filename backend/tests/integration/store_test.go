@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/starloader/backend/internal/credential"
 	"github.com/starloader/backend/internal/domain"
 	"github.com/starloader/backend/internal/httpapi"
 	"github.com/starloader/backend/internal/security"
@@ -663,6 +664,111 @@ func TestCrossTenantIsolation(t *testing.T) {
 	}
 	if _, err := repository.LoadProfile(ctx, appB.ID, userA.ID, licenseA.ID, deviceID); !errors.Is(err, domain.ErrProfileNotFound) {
 		t.Fatalf("LoadProfile(app B, user A) error = %v, want %v", err, domain.ErrProfileNotFound)
+	}
+}
+
+func TestApplicationCredentialsLifecycleAndIsolation(t *testing.T) {
+	ctx := context.Background()
+	pool := openTestPool(t, ctx)
+	resetAndMigrate(t, ctx, pool)
+	repository := store.New(pool)
+	appA := defaultApplicationIDForTest(t, repository)
+
+	organization, err := repository.CreateOrganization(ctx, "credential-tenant")
+	if err != nil {
+		t.Fatalf("CreateOrganization() error = %v", err)
+	}
+	appB, err := repository.CreateApplication(ctx, domain.NewApplication{
+		OrganizationID: organization.ID, Name: "Credential Tenant App", Slug: "credential-tenant-app",
+	})
+	if err != nil {
+		t.Fatalf("CreateApplication() error = %v", err)
+	}
+
+	generated, err := credential.Generate("publishable", "live", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := repository.CreateCredential(ctx, domain.NewApplicationCredential{
+		ApplicationID: appA, Environment: domain.CredentialEnvironmentLive,
+		CredentialType: domain.CredentialPublishable, Name: "Desktop SDK",
+		KeyPrefix: generated.Prefix, KeyHash: generated.Hash,
+		Scopes: []string{"auth.login", "device.verify"},
+	})
+	if err != nil {
+		t.Fatalf("CreateCredential() error = %v", err)
+	}
+	if created.KeyPrefix != generated.Prefix || len(created.KeyHash) != 32 || created.Status != domain.CredentialStatusActive {
+		t.Fatalf("created credential = %#v", created)
+	}
+
+	listed, err := repository.ListCredentials(ctx, appA)
+	if err != nil {
+		t.Fatalf("ListCredentials() error = %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != created.ID || listed[0].KeyHash == nil {
+		t.Fatalf("ListCredentials() = %#v", listed)
+	}
+	if other, err := repository.ListCredentials(ctx, appB.ID); err != nil || len(other) != 0 {
+		t.Fatalf("ListCredentials(app B) = %#v, err = %v", other, err)
+	}
+
+	verifier := credential.NewVerifier(repository)
+	verified, err := verifier.Verify(ctx, appA, generated.Key)
+	if err != nil {
+		t.Fatalf("Verify() error = %v", err)
+	}
+	if verified.ID != created.ID {
+		t.Fatalf("Verify() = %#v", verified)
+	}
+	var lastUsedNotNull bool
+	if err := pool.QueryRow(ctx, `select last_used_at is not null from application_credentials where id = $1`, created.ID).Scan(&lastUsedNotNull); err != nil {
+		t.Fatal(err)
+	}
+	if !lastUsedNotNull {
+		t.Fatal("credential last_used_at was not touched after verification")
+	}
+
+	// Cross-tenant lookup and verification must fail as if the key never existed.
+	if _, err := repository.FindCredentialByPrefix(ctx, appB.ID, generated.Prefix); !errors.Is(err, domain.ErrCredentialNotFound) {
+		t.Fatalf("FindCredentialByPrefix(app B) error = %v, want %v", err, domain.ErrCredentialNotFound)
+	}
+	if _, err := verifier.Verify(ctx, appB.ID, generated.Key); !errors.Is(err, domain.ErrInvalidCredential) {
+		t.Fatalf("Verify(app B) error = %v, want %v", err, domain.ErrInvalidCredential)
+	}
+
+	// A wrong secret on a known prefix is rejected.
+	wrongSecret := generated.Prefix + "_" + strings.Repeat("Z", 43)
+	if _, err := verifier.Verify(ctx, appA, wrongSecret); !errors.Is(err, domain.ErrInvalidCredential) {
+		t.Fatalf("Verify(wrong secret) error = %v, want %v", err, domain.ErrInvalidCredential)
+	}
+
+	// Revoked credentials are rejected even with the correct secret.
+	if err := repository.RevokeCredential(ctx, appA, created.ID); err != nil {
+		t.Fatalf("RevokeCredential() error = %v", err)
+	}
+	if _, err := verifier.Verify(ctx, appA, generated.Key); !errors.Is(err, domain.ErrCredentialRevoked) {
+		t.Fatalf("Verify(revoked) error = %v, want %v", err, domain.ErrCredentialRevoked)
+	}
+	if err := repository.RevokeCredential(ctx, appA, created.ID); !errors.Is(err, domain.ErrCredentialNotFound) {
+		t.Fatalf("second RevokeCredential() error = %v, want %v", err, domain.ErrCredentialNotFound)
+	}
+
+	// Expired credentials are rejected.
+	expiring, err := credential.Generate("secret", "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	past := time.Now().UTC().Add(-time.Hour)
+	if _, err := repository.CreateCredential(ctx, domain.NewApplicationCredential{
+		ApplicationID: appA, Environment: domain.CredentialEnvironmentTest,
+		CredentialType: domain.CredentialSecret, Name: "Expired CI",
+		KeyPrefix: expiring.Prefix, KeyHash: expiring.Hash, Scopes: []string{"users.read"}, ExpiresAt: &past,
+	}); err != nil {
+		t.Fatalf("CreateCredential(expired) error = %v", err)
+	}
+	if _, err := verifier.Verify(ctx, appA, expiring.Key); !errors.Is(err, domain.ErrCredentialExpired) {
+		t.Fatalf("Verify(expired) error = %v, want %v", err, domain.ErrCredentialExpired)
 	}
 }
 

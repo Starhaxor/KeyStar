@@ -18,6 +18,7 @@ var testOwnerPermissions = []string{
 	domain.PermLicensesRead, domain.PermLicensesWrite, domain.PermDevicesRead,
 	domain.PermDevicesWrite, domain.PermSessionsRead, domain.PermSessionsWrite,
 	domain.PermAuditRead, domain.PermSecurityRead, domain.PermAdminsRead, domain.PermAdminsWrite,
+	domain.PermCredentialsRead, domain.PermCredentialsWrite,
 }
 
 func testOwnerAccount() *domain.AdminAccount {
