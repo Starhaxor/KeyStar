@@ -47,6 +47,11 @@ type RouterConfig struct {
 	// credential. Kept off during migration (phase A) so existing clients
 	// keep working with the default application context.
 	DisableLegacyApplication bool
+	// Server enables the /v1/server namespace. When empty, the namespace
+	// returns 503.
+	Server ServerConfig
+	// ServerStore backs the /v1/server namespace (application-scoped).
+	ServerStore ServerStore
 }
 
 type Router struct {
@@ -62,15 +67,17 @@ type Router struct {
 	sessionLimiter      *ipRateLimiter
 	admin               AdminConfig
 	adminLimiter        *ipRateLimiter
-	now                   func() time.Time
-	defaultApplicationID string
-	applications         ApplicationResolver
-	credentials          CredentialVerifier
+	now                     func() time.Time
+	defaultApplicationID   string
+	applications           ApplicationResolver
+	credentials            CredentialVerifier
 	disableLegacyApplication bool
-	loginHandler         http.Handler
-	deviceVerifyHandler  http.Handler
-	meHandler            http.Handler
-	handler              http.Handler
+	server                  ServerConfig
+	serverStore             ServerStore
+	loginHandler            http.Handler
+	deviceVerifyHandler     http.Handler
+	meHandler               http.Handler
+	handler                 http.Handler
 }
 
 func NewRouter(config RouterConfig) *Router {
@@ -112,6 +119,8 @@ func NewRouter(config RouterConfig) *Router {
 		applications:            config.Applications,
 		credentials:             config.Credentials,
 		disableLegacyApplication: config.DisableLegacyApplication,
+		server:                  config.Server,
+		serverStore:             config.ServerStore,
 	}
 	router.loginHandler = router.requireCredential(domain.CredentialPublishable, "auth.login")(http.HandlerFunc(router.handleLogin))
 	router.deviceVerifyHandler = router.requireCredential(domain.CredentialPublishable, "device.verify")(http.HandlerFunc(router.handleDeviceVerify))
@@ -136,6 +145,8 @@ func (router *Router) route(writer http.ResponseWriter, request *http.Request) {
 		router.meHandler.ServeHTTP(writer, request)
 	case strings.HasPrefix(request.URL.Path, adminPathPrefix):
 		router.serveAdmin(writer, request)
+	case strings.HasPrefix(request.URL.Path, serverPathPrefix):
+		router.serveServer(writer, request)
 	case request.URL.Path == "/v1/auth/login" || request.URL.Path == "/v1/device/verify" || request.URL.Path == "/healthz" || request.URL.Path == "/v1/me":
 		writeError(writer, request, http.StatusMethodNotAllowed, "INVALID_REQUEST", "method not allowed")
 	default:

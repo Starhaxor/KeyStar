@@ -1,0 +1,339 @@
+package httpapi
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/starloader/backend/internal/domain"
+)
+
+// fakeServerStore embeds the interface so only the exercised methods need to
+// be implemented.
+type fakeServerStore struct {
+	ServerStore
+	users       []domain.ServerUser
+	user        *domain.ServerUser
+	userErr     error
+	createdUser *domain.User
+	licenses    []domain.ServerLicense
+	license     *domain.ServerLicense
+	licenseErr  error
+	created     *domain.License
+	variables   []domain.Variable
+	variable    *domain.Variable
+	notes       string
+	status      domain.UserStatus
+	banReason   string
+	banExpires  *time.Time
+	unbanned    string
+	resetUser   string
+	resetCount  int64
+	revoked     string
+	updated     string
+	deleted     string
+	createCalls int
+}
+
+func (fake *fakeServerStore) ListServerUsers(_ context.Context, _, _ string, _ int) ([]domain.ServerUser, string, bool, error) {
+	return fake.users, "", len(fake.users) > 1, nil
+}
+
+func (fake *fakeServerStore) FindServerUserByID(context.Context, string, string) (*domain.ServerUser, error) {
+	return fake.user, fake.userErr
+}
+
+func (fake *fakeServerStore) FindUserByID(_ context.Context, _ string, userID string) (*domain.User, error) {
+	if fake.user == nil {
+		return nil, domain.ErrUserNotFound
+	}
+	return &domain.User{ID: userID, Email: fake.user.Email, Status: domain.UserStatusActive}, nil
+}
+
+func (fake *fakeServerStore) FindUserByEmail(_ context.Context, _ string, email string) (*domain.User, error) {
+	if fake.user == nil {
+		return nil, domain.ErrUserNotFound
+	}
+	return &domain.User{ID: fake.user.ID, Email: email, Status: domain.UserStatusActive}, nil
+}
+
+func (fake *fakeServerStore) CreateUser(_ context.Context, applicationID string, input domain.NewUser) (*domain.User, error) {
+	if fake.createdUser != nil {
+		return fake.createdUser, nil
+	}
+	fake.createCalls++
+	return &domain.User{ID: "user-new", ApplicationID: applicationID, Email: input.Email, Status: domain.UserStatusActive, CreatedAt: time.Now()}, nil
+}
+
+func (fake *fakeServerStore) SetUserStatus(_ context.Context, _, _ string, status domain.UserStatus) error {
+	fake.status = status
+	return nil
+}
+
+func (fake *fakeServerStore) SetUserNotes(_ context.Context, _, _, notes string) error {
+	fake.notes = notes
+	return nil
+}
+
+func (fake *fakeServerStore) BanUser(_ context.Context, _, _, reason string, expiresAt *time.Time) error {
+	fake.banReason = reason
+	fake.banExpires = expiresAt
+	return nil
+}
+
+func (fake *fakeServerStore) UnbanUser(_ context.Context, _, userID string) error {
+	fake.unbanned = userID
+	return nil
+}
+
+func (fake *fakeServerStore) ResetUserDevices(_ context.Context, _, userID string) (int64, error) {
+	fake.resetUser = userID
+	return fake.resetCount, nil
+}
+
+func (fake *fakeServerStore) ListServerLicenses(_ context.Context, _, _ string, _ int) ([]domain.ServerLicense, string, bool, error) {
+	return fake.licenses, "", false, nil
+}
+
+func (fake *fakeServerStore) FindServerLicenseByID(context.Context, string, string) (*domain.ServerLicense, error) {
+	return fake.license, fake.licenseErr
+}
+
+func (fake *fakeServerStore) CreateLicense(_ context.Context, applicationID string, _ domain.NewLicense) (*domain.License, error) {
+	if fake.created != nil {
+		return fake.created, nil
+	}
+	return &domain.License{ID: "license-new", ApplicationID: applicationID, Product: "StarLoader", ExpiresAt: time.Now().Add(24 * time.Hour)}, nil
+}
+
+func (fake *fakeServerStore) AdminUpdateLicense(_ context.Context, _, licenseID string, expiresAt time.Time, _, _ int, _ string) error {
+	fake.updated = licenseID
+	return nil
+}
+
+func (fake *fakeServerStore) AdminRevokeLicense(_ context.Context, _, licenseID string) error {
+	fake.revoked = licenseID
+	return nil
+}
+
+func (fake *fakeServerStore) ListVariables(_ context.Context, _ string) ([]domain.Variable, error) {
+	return fake.variables, nil
+}
+
+func (fake *fakeServerStore) CreateVariable(_ context.Context, _, key, value, description string) (*domain.Variable, error) {
+	if fake.variable != nil {
+		return fake.variable, nil
+	}
+	return &domain.Variable{ID: "variable-new", Key: key, Value: value, Description: description, CreatedAt: time.Now()}, nil
+}
+
+func (fake *fakeServerStore) UpdateVariable(_ context.Context, _, variableID, _, _ string) error {
+	fake.updated = variableID
+	return nil
+}
+
+func (fake *fakeServerStore) DeleteVariable(_ context.Context, _, variableID string) error {
+	fake.deleted = variableID
+	return nil
+}
+
+func newServerTestRouter(store *fakeServerStore, credential *domain.ApplicationCredential) *Router {
+	verifier := &middlewareTestCredentialVerifier{credential: credential}
+	return NewRouter(RouterConfig{
+		Login:                &fakeLoginService{},
+		DefaultApplicationID: middlewareTestApplicationID,
+		Applications:         &middlewareTestApplicationResolver{},
+		Credentials:          verifier,
+		Server:               ServerConfig{LicenseHMACKey: []byte("license-hmac-key"), Product: "StarLoader"},
+		ServerStore:          store,
+	})
+}
+
+func serverSecretKey() *domain.ApplicationCredential {
+	return &domain.ApplicationCredential{
+		ID: "cred-secret", ApplicationID: middlewareTestApplicationID,
+		Environment: domain.CredentialEnvironmentLive, CredentialType: domain.CredentialSecret,
+		Scopes: []string{"users.read", "users.write", "licenses.read", "licenses.write", "devices.write", "variables.read", "variables.write"},
+		Status: domain.CredentialStatusActive,
+	}
+}
+
+func serverRequest(t *testing.T, router *Router, method, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(method, path, strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer ks_sk_live_0123456789_secretvaluewithcorrectlengthplus1")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	return recorder
+}
+
+func TestServerAPIRequiresSecretKeyAndScopes(t *testing.T) {
+	store := &fakeServerStore{}
+	router := newServerTestRouter(store, serverSecretKey())
+
+	// No credential.
+	request := httptest.NewRequest(http.MethodGet, "/v1/server/users", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	assertErrorResponse(t, recorder, http.StatusUnauthorized, "INVALID_CREDENTIAL")
+
+	// Publishable key is rejected on server endpoints.
+	request = httptest.NewRequest(http.MethodGet, "/v1/server/users", nil)
+	request.Header.Set("Authorization", "Bearer ks_pk_live_0123456789_secretvaluewithcorrectlengthplus1")
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	assertErrorResponse(t, recorder, http.StatusUnauthorized, "INVALID_CREDENTIAL")
+
+	// Missing required scope.
+	verifier := &middlewareTestCredentialVerifier{credential: &domain.ApplicationCredential{
+		ID: "cred-limited", CredentialType: domain.CredentialSecret,
+		Scopes: []string{"users.read"}, Status: domain.CredentialStatusActive,
+	}}
+	limited := NewRouter(RouterConfig{
+		Login:                &fakeLoginService{},
+		DefaultApplicationID: middlewareTestApplicationID,
+		Applications:         &middlewareTestApplicationResolver{},
+		Credentials:          verifier,
+		Server:               ServerConfig{LicenseHMACKey: []byte("k"), Product: "StarLoader"},
+		ServerStore:          store,
+	})
+	recorder = serverRequest(t, limited, http.MethodGet, "/v1/server/licenses", "")
+	assertErrorResponse(t, recorder, http.StatusForbidden, "INSUFFICIENT_SCOPE")
+}
+
+func TestServerUsersCRUD(t *testing.T) {
+	store := &fakeServerStore{
+		user: &domain.ServerUser{ID: "user-1", Email: "a@b.c", Status: domain.UserStatusActive, CreatedAt: time.Now()},
+	}
+	router := newServerTestRouter(store, serverSecretKey())
+
+	recorder := serverRequest(t, router, http.MethodGet, "/v1/server/users", "")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("list status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+
+	recorder = serverRequest(t, router, http.MethodGet, "/v1/server/users/user-1", "")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("detail status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+
+	recorder = serverRequest(t, router, http.MethodPost, "/v1/server/users", `{"email":"new@example.com","password":"longenoughpass","notes":"ops"}`)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if store.notes != "ops" {
+		t.Fatalf("create notes = %q", store.notes)
+	}
+
+	recorder = serverRequest(t, router, http.MethodPatch, "/v1/server/users/user-1", `{"status":"disabled","notes":"updated"}`)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("patch status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if store.status != domain.UserStatusDisabled || store.notes != "updated" {
+		t.Fatalf("patch store = (%q, %q)", store.status, store.notes)
+	}
+
+	recorder = serverRequest(t, router, http.MethodDelete, "/v1/server/users/user-1", "")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if store.status != domain.UserStatusDisabled {
+		t.Fatalf("delete did not soft-disable the user: status = %q", store.status)
+	}
+
+	recorder = serverRequest(t, router, http.MethodPost, "/v1/server/users/user-1/ban", `{"reason":"abuse","expires_in":"720h"}`)
+	if recorder.Code != http.StatusOK || store.banReason != "abuse" || store.banExpires == nil {
+		t.Fatalf("ban status = %d, store = %#v", recorder.Code, store)
+	}
+
+	recorder = serverRequest(t, router, http.MethodPost, "/v1/server/users/user-1/unban", "")
+	if recorder.Code != http.StatusOK || store.unbanned != "user-1" {
+		t.Fatalf("unban status = %d, store = %#v", recorder.Code, store)
+	}
+
+	store.resetCount = 2
+	recorder = serverRequest(t, router, http.MethodPost, "/v1/server/users/user-1/reset-devices", "")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("reset-devices status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var resetResponse struct {
+		Revoked int64 `json:"revoked"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &resetResponse); err != nil || resetResponse.Revoked != 2 {
+		t.Fatalf("reset response = %s", recorder.Body.String())
+	}
+}
+
+func TestServerLicensesCreateShowsKeyOnceAndExtend(t *testing.T) {
+	store := &fakeServerStore{
+		user:    &domain.ServerUser{ID: "user-1"},
+		license: &domain.ServerLicense{ID: "license-1", UserID: "user-1", Product: "StarLoader", MaxDevices: 1, Level: 1, ExpiresAt: time.Now().Add(time.Hour)},
+	}
+	router := newServerTestRouter(store, serverSecretKey())
+
+	recorder := serverRequest(t, router, http.MethodPost, "/v1/server/licenses", `{"user_id":"user-1","product":"StarLoader","duration_days":30,"max_devices":2,"level":3}`)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var createResponse struct {
+		License string `json:"license"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &createResponse); err != nil || createResponse.License == "" {
+		t.Fatalf("create response = %s", recorder.Body.String())
+	}
+
+	recorder = serverRequest(t, router, http.MethodGet, "/v1/server/licenses/license-1", "")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("detail status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+
+	recorder = serverRequest(t, router, http.MethodPost, "/v1/server/licenses/license-1/extend", `{"duration_days":7}`)
+	if recorder.Code != http.StatusOK || store.updated != "license-1" {
+		t.Fatalf("extend status = %d, store = %#v", recorder.Code, store)
+	}
+
+	recorder = serverRequest(t, router, http.MethodPost, "/v1/server/licenses/license-1/revoke", "")
+	if recorder.Code != http.StatusOK || store.revoked != "license-1" {
+		t.Fatalf("revoke status = %d, store = %#v", recorder.Code, store)
+	}
+}
+
+func TestServerVariablesCRUD(t *testing.T) {
+	store := &fakeServerStore{variables: []domain.Variable{
+		{ID: "v1", Key: "minimum_version", Value: "1.4.0"},
+	}}
+	router := newServerTestRouter(store, serverSecretKey())
+
+	recorder := serverRequest(t, router, http.MethodGet, "/v1/server/variables", "")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("list status = %d", recorder.Code)
+	}
+
+	recorder = serverRequest(t, router, http.MethodPost, "/v1/server/variables", `{"key":"maintenance","value":"false"}`)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+
+	recorder = serverRequest(t, router, http.MethodPatch, "/v1/server/variables/v1", `{"value":"1.5.0"}`)
+	if recorder.Code != http.StatusOK || store.updated != "v1" {
+		t.Fatalf("patch status = %d, store = %#v", recorder.Code, store)
+	}
+
+	recorder = serverRequest(t, router, http.MethodDelete, "/v1/server/variables/v1", "")
+	if recorder.Code != http.StatusOK || store.deleted != "v1" {
+		t.Fatalf("delete status = %d, store = %#v", recorder.Code, store)
+	}
+}
+
+func TestServerAPIDisabledWithoutConfig(t *testing.T) {
+	router := NewRouter(RouterConfig{Login: &fakeLoginService{}})
+	request := httptest.NewRequest(http.MethodGet, "/v1/server/users", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	assertErrorResponse(t, recorder, http.StatusServiceUnavailable, "SERVER_ERROR")
+}

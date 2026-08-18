@@ -212,6 +212,11 @@ func runServer() error {
 		DefaultApplicationID: defaultApplication.ID,
 		Applications:         repository,
 		Credentials:          credentialVerifier,
+		Server: httpapi.ServerConfig{
+			LicenseHMACKey: []byte(configuration.LicenseHMACKey),
+			Product:        configuration.Product,
+		},
+		ServerStore: repository,
 	})
 	address := strings.TrimSpace(os.Getenv("SERVER_ADDR"))
 	if address == "" {

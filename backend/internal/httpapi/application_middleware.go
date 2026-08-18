@@ -60,6 +60,17 @@ func credentialScopes(scopes []string) map[string]struct{} {
 // credential validation. Endpoint scopes must be granted on the credential;
 // publishable endpoints reject secret keys and vice versa.
 func (router *Router) requireCredential(requiredType domain.CredentialType, requiredScopes ...string) func(http.Handler) http.Handler {
+	return router.requireCredentialMode(requiredType, false, requiredScopes...)
+}
+
+// requireServerCredential is like requireCredential but never falls back to
+// the legacy default application: the server API is machine-to-machine only
+// and always demands a valid secret key.
+func (router *Router) requireServerCredential(requiredType domain.CredentialType, requiredScopes ...string) func(http.Handler) http.Handler {
+	return router.requireCredentialMode(requiredType, true, requiredScopes...)
+}
+
+func (router *Router) requireCredentialMode(requiredType domain.CredentialType, strict bool, requiredScopes ...string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			principal, ok := router.resolveApplicationPrincipal(writer, request)
@@ -70,8 +81,9 @@ func (router *Router) requireCredential(requiredType domain.CredentialType, requ
 			if authorization == "" {
 				// Legacy compatibility (phase A): requests without a
 				// credential fall back to the default application principal.
-				// Removed when the legacy mode is disabled.
-				if router.disableLegacyApplication {
+				// Removed when the legacy mode is disabled. Strict mode (the
+				// server API) never falls back.
+				if strict || router.disableLegacyApplication {
 					writeError(writer, request, http.StatusUnauthorized, "INVALID_CREDENTIAL", "application credential required")
 					return
 				}
