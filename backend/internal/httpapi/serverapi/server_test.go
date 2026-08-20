@@ -176,6 +176,18 @@ func (fake *fakeServerStore) DeleteVariable(_ context.Context, _, variableID str
 	return nil
 }
 
+func (fake *fakeServerStore) ListRefreshSessions(_ context.Context, _, _ string, _ string, _ int) ([]domain.RefreshSession, string, bool, error) {
+	return nil, "", false, nil
+}
+
+func (fake *fakeServerStore) RevokeRefreshSession(_ context.Context, _ string) error {
+	return nil
+}
+
+func (fake *fakeServerStore) RevokeAllUserRefreshSessions(_ context.Context, _ string) (int64, error) {
+	return 0, nil
+}
+
 func (fake *fakeServerStore) GetDevicePolicy(_ context.Context, applicationID string) (*domain.DevicePolicy, error) {
 	if fake.domainPolicy != nil {
 		return fake.domainPolicy, nil

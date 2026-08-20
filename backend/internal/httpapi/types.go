@@ -185,6 +185,9 @@ type ServerStore interface {
 	DeleteVariable(ctx context.Context, applicationID, variableID string) error
 	GetDevicePolicy(ctx context.Context, applicationID string) (*domain.DevicePolicy, error)
 	UpsertDevicePolicy(ctx context.Context, applicationID string, input domain.NewDevicePolicy) (*domain.DevicePolicy, error)
+	ListRefreshSessions(ctx context.Context, applicationID, userID, after string, limit int) ([]domain.RefreshSession, string, bool, error)
+	RevokeRefreshSession(ctx context.Context, sessionID string) error
+	RevokeAllUserRefreshSessions(ctx context.Context, userID string) (int64, error)
 }
 
 // ServerConfig carries the dependencies of the server API namespace.

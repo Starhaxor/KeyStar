@@ -233,6 +233,27 @@ func runServer() error {
 	}
 	server := newHTTPServer(address, router, applicationCtx)
 
+	// Start periodic cleanup of expired refresh sessions.
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-applicationCtx.Done():
+				return
+			case <-ticker.C:
+				cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				deleted, err := repository.DeleteExpiredRefreshSessions(cleanupCtx)
+				cancel()
+				if err != nil {
+					log.Printf("refresh session cleanup error: %v", err)
+				} else if deleted > 0 {
+					log.Printf("refresh session cleanup: deleted %d expired sessions", deleted)
+				}
+			}
+		}
+	}()
+
 	log.Printf("license service listening on %s", address)
 	if err := serveUntilStopped(applicationCtx, cancelApplication, server, 10*time.Second); err != nil {
 		return fmt.Errorf("server stopped: %w", err)

@@ -126,6 +126,44 @@ func (s *Store) RevokeAllUserRefreshSessions(ctx context.Context, userID string)
 	return tag.RowsAffected(), nil
 }
 
+// ListRefreshSessions pages the refresh sessions for a user within an
+// application. Supports cursor-based pagination.
+func (s *Store) ListRefreshSessions(ctx context.Context, applicationID, userID, after string, limit int) ([]domain.RefreshSession, string, bool, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.Query(ctx, `
+		select `+refreshSessionColumns+`
+		from refresh_sessions
+		where application_id = $1::uuid and user_id = $2::uuid and ($3 = '' or id < $3::uuid)
+		order by id desc
+		limit $4`, applicationID, userID, after, limit+1)
+	if err != nil {
+		return nil, "", false, fmt.Errorf("list refresh sessions: %w", err)
+	}
+	defer rows.Close()
+	sessions := make([]domain.RefreshSession, 0, limit+1)
+	for rows.Next() {
+		session, err := scanRefreshSession(rows)
+		if err != nil {
+			return nil, "", false, fmt.Errorf("scan refresh session: %w", err)
+		}
+		sessions = append(sessions, *session)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, "", false, fmt.Errorf("list refresh sessions: %w", err)
+	}
+	hasMore := len(sessions) > limit
+	if hasMore {
+		sessions = sessions[:limit]
+	}
+	nextCursor := ""
+	if hasMore {
+		nextCursor = sessions[len(sessions)-1].ID
+	}
+	return sessions, nextCursor, hasMore, nil
+}
+
 // DeleteExpiredRefreshSessions removes refresh sessions past their expiry.
 // Intended for periodic cleanup.
 func (s *Store) DeleteExpiredRefreshSessions(ctx context.Context) (int64, error) {
