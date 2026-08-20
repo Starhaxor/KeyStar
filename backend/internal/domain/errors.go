@@ -32,6 +32,12 @@ var (
 	ErrDevicePolicyStepUpTooHigh    = errors.New("step_up_score must be less than min_match_score")
 	ErrDevicePolicyInvalidCooldown  = errors.New("rebind_cooldown_seconds must be non-negative")
 	ErrDevicePolicyInvalidChangeLimit = errors.New("max_device_changes_per_30d must be non-negative")
+
+	ErrRefreshSessionNotFound = &NotFoundError{Entity: "refresh session"}
+	ErrRefreshTokenRevoked    = errors.New("refresh token has been revoked")
+	ErrRefreshTokenRotated    = errors.New("refresh token has been rotated")
+	ErrRefreshTokenExpired    = errors.New("refresh token has expired")
+	ErrRefreshTokenReuse      = errors.New("refresh token reuse detected: family revoked")
 )
 
 // ChallengeConsumedError marks the single-use challenge conflict while

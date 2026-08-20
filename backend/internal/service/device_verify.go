@@ -34,6 +34,7 @@ var (
 	ErrDeviceLimitReached     = errors.New("device limit reached")
 	ErrDeviceRevoked          = errors.New("device revoked")
 	ErrTPMRequired            = errors.New("tpm is required by application device policy")
+	ErrInvalidRefreshToken    = errors.New("invalid refresh token")
 )
 
 type HardwareSignals struct {
@@ -55,10 +56,11 @@ type VerifyInput struct {
 }
 
 type VerifiedSession struct {
-	Token     string
-	ExpiresAt time.Time
-	LicenseID string
-	DeviceID  string
+	Token         string
+	RefreshToken  string
+	ExpiresAt     time.Time
+	LicenseID     string
+	DeviceID      string
 }
 
 type DeviceTransaction interface {
@@ -86,6 +88,7 @@ type DeviceServiceConfig struct {
 	Issuer          string
 	Audience        string
 	Product         string
+	RefreshService  *RefreshService
 	Now             func() time.Time
 }
 
@@ -96,6 +99,7 @@ type DeviceService struct {
 	issuer          string
 	audience        string
 	product         string
+	refreshService  *RefreshService
 	now             func() time.Time
 }
 
@@ -131,7 +135,7 @@ func NewDeviceService(repository DeviceRepository, config DeviceServiceConfig) *
 	return &DeviceService{
 		repository: repository, hardwareHMACKey: append([]byte(nil), config.HardwareHMACKey...),
 		tokenIssuer: config.TokenIssuer, issuer: config.Issuer, audience: config.Audience,
-		product: config.Product, now: now,
+		product: config.Product, refreshService: config.RefreshService, now: now,
 	}
 }
 
@@ -277,7 +281,16 @@ func (service *DeviceService) Verify(ctx context.Context, input VerifyInput) (Ve
 	if err != nil {
 		return VerifiedSession{}, fmt.Errorf("issue verified session token: %w", err)
 	}
-	return VerifiedSession{Token: token, ExpiresAt: expiresAt, LicenseID: licenseID, DeviceID: deviceID}, nil
+	result := VerifiedSession{Token: token, ExpiresAt: expiresAt, LicenseID: licenseID, DeviceID: deviceID}
+	// Issue a refresh token when the refresh service is configured.
+	if service.refreshService != nil {
+		refreshToken, _, refreshErr := service.refreshService.IssueRefreshToken(
+			ctx, input.ApplicationID, userID, deviceID)
+		if refreshErr == nil {
+			result.RefreshToken = refreshToken
+		}
+	}
+	return result, nil
 }
 
 type protectedDevice struct {

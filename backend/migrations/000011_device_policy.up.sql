@@ -3,7 +3,8 @@
 -- rebind rules and device-change rate limiting.
 
 create table application_device_policies (
-    id uuid primary key default gen_random_uuid(),
+    id uuid primary key default starloader_uuid_v7()
+        constraint application_device_policies_id_uuid_v7_check check ((get_byte(uuid_send(id), 6) >> 4) = 7),
     application_id uuid unique not null references applications(id) on delete cascade,
     -- TPM enforcement: "required" | "preferred" | "optional"
     tpm_policy text not null default 'optional',

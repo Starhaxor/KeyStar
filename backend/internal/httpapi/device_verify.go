@@ -37,6 +37,7 @@ type deviceVerifyHardwareBody struct {
 type deviceVerifyResponse struct {
 	OK             bool   `json:"ok"`
 	Token          string `json:"token"`
+	RefreshToken   string `json:"refresh_token,omitempty"`
 	TokenExpiresAt string `json:"token_expires_at"`
 	LicenseID      string `json:"license_id"`
 	DeviceID       string `json:"device_id"`
@@ -92,8 +93,9 @@ func (router *Router) handleDeviceVerify(writer http.ResponseWriter, request *ht
 		return
 	}
 	WriteJSON(writer, http.StatusOK, deviceVerifyResponse{
-		OK: true, Token: verified.Token, TokenExpiresAt: verified.ExpiresAt.UTC().Format(time.RFC3339),
-		LicenseID: verified.LicenseID, DeviceID: verified.DeviceID,
+		OK: true, Token: verified.Token, RefreshToken: verified.RefreshToken,
+		TokenExpiresAt: verified.ExpiresAt.UTC().Format(time.RFC3339),
+		LicenseID:      verified.LicenseID, DeviceID: verified.DeviceID,
 	})
 }
 

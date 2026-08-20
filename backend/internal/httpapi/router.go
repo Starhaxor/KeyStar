@@ -43,6 +43,8 @@ type RouterConfig struct {
 	Server ServerConfig
 	// ServerStore backs the /v1/server namespace (application-scoped).
 	ServerStore ServerStore
+	// RefreshService manages refresh token issuance, rotation and reuse detection.
+	RefreshService RefreshService
 }
 
 // Router is the root HTTP handler. It serves the public client API directly
@@ -69,6 +71,7 @@ type Router struct {
 	disableLegacyApplication bool
 	Server                   ServerConfig
 	ServerStore              ServerStore
+	refreshService           *refreshServiceAdapter
 	adminHandler             http.Handler
 	serverHandler            http.Handler
 	loginHandler             http.Handler
@@ -155,6 +158,7 @@ func NewRouter(config RouterConfig) *Router {
 		disableLegacyApplication: config.DisableLegacyApplication,
 		Server:                   config.Server,
 		ServerStore:              config.ServerStore,
+		refreshService:           wrapRefreshService(config.RefreshService),
 	}
 	router.loginHandler = router.RequireCredential(domain.CredentialPublishable, "auth.login")(http.HandlerFunc(router.handleLogin))
 	router.deviceVerifyHandler = router.RequireCredential(domain.CredentialPublishable, "device.verify")(http.HandlerFunc(router.handleDeviceVerify))
@@ -173,6 +177,8 @@ func (router *Router) route(writer http.ResponseWriter, request *http.Request) {
 		router.loginHandler.ServeHTTP(writer, request)
 	case request.Method == http.MethodPost && request.URL.Path == "/v1/device/verify":
 		router.deviceVerifyHandler.ServeHTTP(writer, request)
+	case request.Method == http.MethodPost && request.URL.Path == "/v1/auth/refresh":
+		router.handleRefresh(writer, request)
 	case request.Method == http.MethodGet && request.URL.Path == "/healthz":
 		router.handleHealth(writer, request)
 	case request.Method == http.MethodGet && request.URL.Path == "/v1/me":

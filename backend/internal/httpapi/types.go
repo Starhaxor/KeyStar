@@ -248,3 +248,28 @@ func MapVariable(variable domain.Variable) VariableJSON {
 		CreatedAt:   FormatTime(variable.CreatedAt), UpdatedAt: FormatTime(variable.UpdatedAt),
 	}
 }
+
+// RefreshService abstracts the refresh token management boundary used by the
+// HTTP layer. It is satisfied by service.RefreshService.
+type RefreshService interface {
+	Refresh(ctx context.Context, input service.RefreshInput) (service.RefreshResult, error)
+}
+
+// refreshServiceAdapter wraps an optional RefreshService for the router.
+type refreshServiceAdapter struct {
+	service RefreshService
+}
+
+func wrapRefreshService(s RefreshService) *refreshServiceAdapter {
+	if s == nil {
+		return nil
+	}
+	return &refreshServiceAdapter{service: s}
+}
+
+func (a *refreshServiceAdapter) Refresh(ctx context.Context, input service.RefreshInput) (service.RefreshResult, error) {
+	if a == nil || a.service == nil {
+		return service.RefreshResult{}, errors.New("refresh service is not configured")
+	}
+	return a.service.Refresh(ctx, input)
+}

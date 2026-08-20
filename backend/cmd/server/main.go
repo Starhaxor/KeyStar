@@ -169,12 +169,14 @@ func runServer() error {
 	if err != nil {
 		return errors.New("configuration error: invalid token verifier configuration")
 	}
+	refreshService := service.NewRefreshService(repository, []byte(configuration.LicenseHMACKey), tokenIssuer)
 	deviceService := service.NewDeviceService(service.NewStoreDeviceRepository(repository), service.DeviceServiceConfig{
 		HardwareHMACKey: []byte(configuration.HardwareHMACKey),
 		TokenIssuer:     tokenIssuer,
 		Issuer:          configuration.LicenseIssuer,
 		Audience:        configuration.LicenseAudience,
 		Product:         configuration.Product,
+		RefreshService:  refreshService,
 	})
 	adminConfig := httpapi.AdminConfig{}
 	if configuration.AdminConsoleEnabled {
@@ -218,7 +220,8 @@ func runServer() error {
 			LicenseHMACKey: []byte(configuration.LicenseHMACKey),
 			Product:        configuration.Product,
 		},
-		ServerStore: repository,
+		ServerStore:    repository,
+		RefreshService: refreshService,
 	})
 	// The admin and server namespaces are mounted as separate handlers so each
 	// package owns its routes while sharing the core router middleware.
