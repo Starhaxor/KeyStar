@@ -188,6 +188,11 @@ type ServerStore interface {
 	ListRefreshSessions(ctx context.Context, applicationID, userID, after string, limit int) ([]domain.RefreshSession, string, bool, error)
 	RevokeRefreshSession(ctx context.Context, sessionID string) error
 	RevokeAllUserRefreshSessions(ctx context.Context, userID string) (int64, error)
+	CreateWebhook(ctx context.Context, applicationID string, input domain.NewWebhook, secretHash []byte) (*domain.Webhook, error)
+	ListWebhooks(ctx context.Context, applicationID string) ([]domain.Webhook, error)
+	FindWebhookByID(ctx context.Context, applicationID, webhookID string) (*domain.Webhook, error)
+	UpdateWebhook(ctx context.Context, applicationID, webhookID string, url *string, status *domain.WebhookStatus, events *[]string) error
+	DeleteWebhook(ctx context.Context, applicationID, webhookID string) error
 }
 
 // ServerConfig carries the dependencies of the server API namespace.

@@ -159,6 +159,14 @@ func (router *Router) serveServer(writer http.ResponseWriter, request *http.Requ
 		router.RequireServerCredential(domain.CredentialSecret, "sessions.read")(http.HandlerFunc(router.handleServerSessionList)).ServeHTTP(writer, request)
 	case len(segments) == 3 && segments[0] == "users" && segments[2] == "sessions" && request.Method == http.MethodPost:
 		router.RequireServerCredential(domain.CredentialSecret, "sessions.revoke")(http.HandlerFunc(router.handleServerSessionRevokeAll)).ServeHTTP(writer, request)
+	case len(segments) == 1 && segments[0] == "webhooks" && request.Method == http.MethodGet:
+		router.RequireServerCredential(domain.CredentialSecret, "webhooks.read")(http.HandlerFunc(router.handleServerWebhookList)).ServeHTTP(writer, request)
+	case len(segments) == 1 && segments[0] == "webhooks" && request.Method == http.MethodPost:
+		router.RequireServerCredential(domain.CredentialSecret, "webhooks.write")(http.HandlerFunc(router.handleServerWebhookCreate)).ServeHTTP(writer, request)
+	case len(segments) == 2 && segments[0] == "webhooks" && request.Method == http.MethodPatch:
+		router.RequireServerCredential(domain.CredentialSecret, "webhooks.write")(http.HandlerFunc(router.handleServerWebhookUpdate)).ServeHTTP(writer, request)
+	case len(segments) == 2 && segments[0] == "webhooks" && request.Method == http.MethodDelete:
+		router.RequireServerCredential(domain.CredentialSecret, "webhooks.write")(http.HandlerFunc(router.handleServerWebhookDelete)).ServeHTTP(writer, request)
 	default:
 		httpapi.WriteError(writer, request, http.StatusNotFound, "INVALID_REQUEST", "not found")
 	}

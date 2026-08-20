@@ -188,6 +188,26 @@ func (fake *fakeServerStore) RevokeAllUserRefreshSessions(_ context.Context, _ s
 	return 0, nil
 }
 
+func (fake *fakeServerStore) CreateWebhook(_ context.Context, _ string, _ domain.NewWebhook, _ []byte) (*domain.Webhook, error) {
+	return &domain.Webhook{ID: "wh-1", Status: domain.WebhookStatusActive, Events: []string{"*"}}, nil
+}
+
+func (fake *fakeServerStore) ListWebhooks(_ context.Context, _ string) ([]domain.Webhook, error) {
+	return nil, nil
+}
+
+func (fake *fakeServerStore) FindWebhookByID(_ context.Context, _, _ string) (*domain.Webhook, error) {
+	return &domain.Webhook{ID: "wh-1", Status: domain.WebhookStatusActive, Events: []string{"*"}}, nil
+}
+
+func (fake *fakeServerStore) UpdateWebhook(_ context.Context, _, _ string, _ *string, _ *domain.WebhookStatus, _ *[]string) error {
+	return nil
+}
+
+func (fake *fakeServerStore) DeleteWebhook(_ context.Context, _, _ string) error {
+	return nil
+}
+
 func (fake *fakeServerStore) GetDevicePolicy(_ context.Context, applicationID string) (*domain.DevicePolicy, error) {
 	if fake.domainPolicy != nil {
 		return fake.domainPolicy, nil
