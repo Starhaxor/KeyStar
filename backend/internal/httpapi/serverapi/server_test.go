@@ -46,27 +46,28 @@ func (verifier *serverTestCredentialVerifier) Verify(_ context.Context, applicat
 // be implemented.
 type fakeServerStore struct {
 	httpapi.ServerStore
-	users       []domain.ServerUser
-	user        *domain.ServerUser
-	userErr     error
-	createdUser *domain.User
-	licenses    []domain.ServerLicense
-	license     *domain.ServerLicense
-	licenseErr  error
-	created     *domain.License
-	variables   []domain.Variable
-	variable    *domain.Variable
-	notes       string
-	status      domain.UserStatus
-	banReason   string
-	banExpires  *time.Time
-	unbanned    string
-	resetUser   string
-	resetCount  int64
-	revoked     string
-	updated     string
-	deleted     string
-	createCalls int
+	users        []domain.ServerUser
+	user         *domain.ServerUser
+	userErr      error
+	createdUser  *domain.User
+	licenses     []domain.ServerLicense
+	license      *domain.ServerLicense
+	licenseErr   error
+	created      *domain.License
+	variables    []domain.Variable
+	variable     *domain.Variable
+	domainPolicy *domain.DevicePolicy
+	notes        string
+	status       domain.UserStatus
+	banReason    string
+	banExpires   *time.Time
+	unbanned     string
+	resetUser    string
+	resetCount   int64
+	revoked      string
+	updated      string
+	deleted      string
+	createCalls  int
 }
 
 func (fake *fakeServerStore) ListServerUsers(_ context.Context, _, _ string, _ int) ([]domain.ServerUser, string, bool, error) {
@@ -175,6 +176,28 @@ func (fake *fakeServerStore) DeleteVariable(_ context.Context, _, variableID str
 	return nil
 }
 
+func (fake *fakeServerStore) GetDevicePolicy(_ context.Context, applicationID string) (*domain.DevicePolicy, error) {
+	if fake.domainPolicy != nil {
+		return fake.domainPolicy, nil
+	}
+	return domain.DefaultDevicePolicy(applicationID), nil
+}
+
+func (fake *fakeServerStore) UpsertDevicePolicy(_ context.Context, applicationID string, input domain.NewDevicePolicy) (*domain.DevicePolicy, error) {
+	return &domain.DevicePolicy{
+		ID:                     "policy-1",
+		ApplicationID:          applicationID,
+		TPMPolicy:              input.TPMPolicy,
+		MinMatchScore:          input.MinMatchScore,
+		StepUpScore:            input.StepUpScore,
+		AllowAutoRebind:        input.AllowAutoRebind,
+		RebindCooldownSeconds:  input.RebindCooldownSeconds,
+		MaxDeviceChangesPer30d: input.MaxDeviceChangesPer30d,
+		CreatedAt:              time.Now(),
+		UpdatedAt:              time.Now(),
+	}, nil
+}
+
 func newServerTestRouter(store *fakeServerStore, credential *domain.ApplicationCredential) *Router {
 	verifier := &serverTestCredentialVerifier{credential: credential}
 	core := httpapi.NewRouter(httpapi.RouterConfig{
@@ -192,7 +215,7 @@ func serverSecretKey() *domain.ApplicationCredential {
 	return &domain.ApplicationCredential{
 		ID: "cred-secret", ApplicationID: serverTestApplicationID,
 		Environment: domain.CredentialEnvironmentLive, CredentialType: domain.CredentialSecret,
-		Scopes: []string{"users.read", "users.write", "licenses.read", "licenses.write", "devices.write", "variables.read", "variables.write"},
+		Scopes: []string{"users.read", "users.write", "licenses.read", "licenses.write", "devices.read", "devices.write", "variables.read", "variables.write"},
 		Status: domain.CredentialStatusActive,
 	}
 }
@@ -380,6 +403,51 @@ func TestServerVariablesCRUD(t *testing.T) {
 	recorder = serverRequest(t, router, http.MethodDelete, "/v1/server/variables/v1", "")
 	if recorder.Code != http.StatusOK || store.deleted != "v1" {
 		t.Fatalf("delete status = %d, store = %#v", recorder.Code, store)
+	}
+}
+
+func TestServerDevicePolicy(t *testing.T) {
+	store := &fakeServerStore{}
+	router := newServerTestRouter(store, serverSecretKey())
+
+	// GET returns defaults when no row exists.
+	recorder := serverRequest(t, router, http.MethodGet, "/v1/server/device-policy", "")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("get status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var getResponse struct {
+		OK     bool `json:"ok"`
+		Policy struct {
+			TPMPolicy     string `json:"tpm_policy"`
+			MinMatchScore int    `json:"min_match_score"`
+		} `json:"policy"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &getResponse); err != nil || !getResponse.OK {
+		t.Fatalf("get response = %s", recorder.Body.String())
+	}
+	if getResponse.Policy.TPMPolicy != "optional" || getResponse.Policy.MinMatchScore != 70 {
+		t.Fatalf("get defaults = %v", getResponse.Policy)
+	}
+
+	// PUT creates/updates the policy.
+	recorder = serverRequest(t, router, http.MethodPut, "/v1/server/device-policy",
+		`{"tpm_policy":"required","min_match_score":80,"step_up_score":50,"allow_auto_rebind":false,"rebind_cooldown_seconds":172800,"max_device_changes_per_30d":3}`)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("put status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var putResponse struct {
+		OK     bool `json:"ok"`
+		Policy struct {
+			ID            string `json:"id"`
+			TPMPolicy     string `json:"tpm_policy"`
+			MinMatchScore int    `json:"min_match_score"`
+		} `json:"policy"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &putResponse); err != nil || !putResponse.OK {
+		t.Fatalf("put response = %s", recorder.Body.String())
+	}
+	if putResponse.Policy.ID != "policy-1" {
+		t.Fatalf("put ID = %q", putResponse.Policy.ID)
 	}
 }
 

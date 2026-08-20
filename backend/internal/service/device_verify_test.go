@@ -253,6 +253,10 @@ func (repository *fakeDeviceRepository) WithLockedChallenge(_ context.Context, _
 	return nil
 }
 
+func (repository *fakeDeviceRepository) GetDevicePolicy(_ context.Context, applicationID string) (*domain.DevicePolicy, error) {
+	return domain.DefaultDevicePolicy(applicationID), nil
+}
+
 type fakeDeviceTransaction struct {
 	session   domain.AuthSession
 	challenge domain.DeviceChallenge

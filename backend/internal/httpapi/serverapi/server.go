@@ -147,6 +147,10 @@ func (router *Router) serveServer(writer http.ResponseWriter, request *http.Requ
 		router.RequireServerCredential(domain.CredentialSecret, "variables.write")(http.HandlerFunc(router.handleServerVariableUpdate)).ServeHTTP(writer, request)
 	case len(segments) == 2 && segments[0] == "variables" && request.Method == http.MethodDelete:
 		router.RequireServerCredential(domain.CredentialSecret, "variables.write")(http.HandlerFunc(router.handleServerVariableDelete)).ServeHTTP(writer, request)
+	case len(segments) == 1 && segments[0] == "device-policy" && request.Method == http.MethodGet:
+		router.RequireServerCredential(domain.CredentialSecret, "devices.read")(http.HandlerFunc(router.handleServerDevicePolicyGet)).ServeHTTP(writer, request)
+	case len(segments) == 1 && segments[0] == "device-policy" && (request.Method == http.MethodPut || request.Method == http.MethodPatch):
+		router.RequireServerCredential(domain.CredentialSecret, "devices.write")(http.HandlerFunc(router.handleServerDevicePolicyUpdate)).ServeHTTP(writer, request)
 	default:
 		httpapi.WriteError(writer, request, http.StatusNotFound, "INVALID_REQUEST", "not found")
 	}

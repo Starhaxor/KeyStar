@@ -250,3 +250,112 @@ func TestServerAPIEndToEnd(t *testing.T) {
 	tenantBDetail := serverAPIRequest(t, router, http.MethodGet, "/v1/server/users/"+createdUser.Data.ID, "Bearer "+tenantBKey.Key, appB.ID, "")
 	assertIntegrationError(t, tenantBDetail, http.StatusNotFound, "USER_NOT_FOUND")
 }
+
+func TestServerDevicePolicyEndToEnd(t *testing.T) {
+	// Device policy lifecycle: GET defaults → PUT custom → verify stored →
+	// cross-tenant isolation.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	t.Cleanup(cancel)
+	pool := openTestPool(t, ctx)
+	resetAndMigrate(t, ctx, pool)
+	repository := store.New(pool)
+	applicationID := defaultApplicationIDForTest(t, repository)
+
+	secret, err := credential.Generate("secret", "live", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.CreateCredential(ctx, domain.NewApplicationCredential{
+		ApplicationID: applicationID, Environment: domain.CredentialEnvironmentLive,
+		CredentialType: domain.CredentialSecret, Name: "Policy Ops",
+		KeyPrefix: secret.Prefix, KeyHash: secret.Hash,
+		Scopes: []string{"devices.read", "devices.write"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	router := httpapi.NewRouter(httpapi.RouterConfig{
+		Login:                service.NewLoginService(repository, "StarLoader"),
+		DeviceVerification:   newIntegrationDeviceService(t, repository, time.Now().UTC().Truncate(time.Second)),
+		DefaultApplicationID: applicationID,
+		Applications:         repository,
+		Credentials:          credential.NewVerifier(repository),
+		Server:               httpapi.ServerConfig{LicenseHMACKey: []byte("integration-license-hmac"), Product: "StarLoader"},
+		ServerStore:          repository,
+	})
+	router.MountServer(serverapi.New(router))
+	authorization := "Bearer " + secret.Key
+
+	// GET returns defaults when no row exists.
+	getResp := serverAPIRequest(t, router, http.MethodGet, "/v1/server/device-policy", authorization, "", "")
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("get status = %d, body = %s", getResp.Code, getResp.Body.String())
+	}
+	var getPolicy struct {
+		OK     bool `json:"ok"`
+		Policy struct {
+			TPMPolicy     string `json:"tpm_policy"`
+			MinMatchScore int    `json:"min_match_score"`
+		} `json:"policy"`
+	}
+	if err := json.Unmarshal(getResp.Body.Bytes(), &getPolicy); err != nil || !getPolicy.OK {
+		t.Fatalf("get response = %s", getResp.Body.String())
+	}
+	if getPolicy.Policy.TPMPolicy != "optional" || getPolicy.Policy.MinMatchScore != 70 {
+		t.Fatalf("defaults = %v", getPolicy.Policy)
+	}
+
+	// PUT creates/updates the policy.
+	putResp := serverAPIRequest(t, router, http.MethodPut, "/v1/server/device-policy", authorization, "",
+		`{"tpm_policy":"required","min_match_score":80,"step_up_score":50,"allow_auto_rebind":false,"rebind_cooldown_seconds":172800,"max_device_changes_per_30d":3}`)
+	if putResp.Code != http.StatusOK {
+		t.Fatalf("put status = %d, body = %s", putResp.Code, putResp.Body.String())
+	}
+
+	// Verify stored in DB.
+	var storedPolicy struct {
+		TPMPolicy     string
+		MinMatchScore int
+		StepUpScore   int
+	}
+	if err := pool.QueryRow(ctx,
+		`select tpm_policy, min_match_score, step_up_score from application_device_policies where application_id = $1::uuid`,
+		applicationID).Scan(&storedPolicy.TPMPolicy, &storedPolicy.MinMatchScore, &storedPolicy.StepUpScore); err != nil {
+		t.Fatalf("read stored policy: %v", err)
+	}
+	if storedPolicy.TPMPolicy != "required" || storedPolicy.MinMatchScore != 80 || storedPolicy.StepUpScore != 50 {
+		t.Fatalf("stored policy = %v", storedPolicy)
+	}
+
+	// GET now returns the stored policy.
+	getAfterPut := serverAPIRequest(t, router, http.MethodGet, "/v1/server/device-policy", authorization, "", "")
+	if getAfterPut.Code != http.StatusOK || !strings.Contains(getAfterPut.Body.String(), "required") {
+		t.Fatalf("get after put = %s", getAfterPut.Body.String())
+	}
+
+	// Cross-tenant: another app gets its own defaults.
+	organization, err := repository.CreateOrganization(ctx, "policy-tenant-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	appB, err := repository.CreateApplication(ctx, domain.NewApplication{
+		OrganizationID: organization.ID, Name: "Policy Tenant B", Slug: "policy-tenant-b-app",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenantBKey, err := credential.Generate("secret", "live", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.CreateCredential(ctx, domain.NewApplicationCredential{
+		ApplicationID: appB.ID, Environment: domain.CredentialEnvironmentLive,
+		CredentialType: domain.CredentialSecret, Name: "Tenant B Policy",
+		KeyPrefix: tenantBKey.Prefix, KeyHash: tenantBKey.Hash, Scopes: []string{"devices.read"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tenantBGet := serverAPIRequest(t, router, http.MethodGet, "/v1/server/device-policy", "Bearer "+tenantBKey.Key, appB.ID, "")
+	if tenantBGet.Code != http.StatusOK || !strings.Contains(tenantBGet.Body.String(), "optional") {
+		t.Fatalf("tenant B policy = %s", tenantBGet.Body.String())
+	}
+}

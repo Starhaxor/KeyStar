@@ -1201,6 +1201,12 @@ func mapConsoleDevices(devices []domain.ConsoleDevice) []consoleDeviceJSON {
 
 func (router *Router) routeAdminDevices(writer http.ResponseWriter, request *http.Request, account *domain.AdminAccount, segments []string) {
 	switch {
+	case len(segments) == 1 && segments[0] == "policy" && request.Method == http.MethodGet:
+		router.handleAdminDevicePolicyGet(writer, request, account)
+	case len(segments) == 1 && segments[0] == "policy" && (request.Method == http.MethodPut || request.Method == http.MethodPatch):
+		router.handleAdminDevicePolicyUpdate(writer, request, account)
+	case len(segments) == 1 && segments[0] == "policy" && request.Method == http.MethodDelete:
+		router.handleAdminDevicePolicyDelete(writer, request, account)
 	case len(segments) == 1 && request.Method == http.MethodGet:
 		if !router.RequirePermission(writer, request, account, domain.PermDevicesRead) {
 			return

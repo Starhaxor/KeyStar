@@ -18,10 +18,13 @@ import (
 )
 
 const (
-	deviceMatchThreshold  = 70
-	sessionTokenLifetime  = time.Hour
-	maxSessionIDBytes     = 128
-	maxHardwareValueBytes = 4096
+	// deviceMatchThresholdLegacy is the original hard-coded threshold kept
+	// as a fallback only when no device policy row exists and the default
+	// policy cannot be loaded. In practice DefaultDevicePolicy mirrors this.
+	deviceMatchThresholdLegacy = 70
+	sessionTokenLifetime       = time.Hour
+	maxSessionIDBytes          = 128
+	maxHardwareValueBytes      = 4096
 )
 
 var (
@@ -30,6 +33,7 @@ var (
 	ErrInvalidDeviceSignature = errors.New("invalid device signature")
 	ErrDeviceLimitReached     = errors.New("device limit reached")
 	ErrDeviceRevoked          = errors.New("device revoked")
+	ErrTPMRequired            = errors.New("tpm is required by application device policy")
 )
 
 type HardwareSignals struct {
@@ -69,6 +73,7 @@ type DeviceTransaction interface {
 
 type DeviceRepository interface {
 	WithLockedChallenge(context.Context, string, string, func(DeviceTransaction) error) error
+	GetDevicePolicy(ctx context.Context, applicationID string) (*domain.DevicePolicy, error)
 }
 
 type SessionTokenIssuer interface {
@@ -111,6 +116,13 @@ func (repository *storeDeviceRepository) WithLockedChallenge(ctx context.Context
 	})
 }
 
+func (repository *storeDeviceRepository) GetDevicePolicy(ctx context.Context, applicationID string) (*domain.DevicePolicy, error) {
+	if repository == nil || repository.store == nil {
+		return domain.DefaultDevicePolicy(applicationID), nil
+	}
+	return repository.store.GetDevicePolicy(ctx, applicationID)
+}
+
 func NewDeviceService(repository DeviceRepository, config DeviceServiceConfig) *DeviceService {
 	now := config.Now
 	if now == nil {
@@ -151,6 +163,14 @@ func (service *DeviceService) Verify(ctx context.Context, input VerifyInput) (Ve
 	if presented.FingerprintHMAC == "" {
 		return VerifiedSession{}, ErrInvalidVerifyRequest
 	}
+
+	// Load per-application device policy. When no row exists the defaults
+	// mirror the original hard-coded behaviour (min_match_score=70, TPM
+	// optional).
+	devicePolicy, err := service.repository.GetDevicePolicy(ctx, input.ApplicationID)
+	if err != nil {
+		return VerifiedSession{}, fmt.Errorf("load device policy: %w", err)
+	}
 	policyNow := service.now().UTC()
 	var deviceID, licenseID, userID string
 	err = service.repository.WithLockedChallenge(ctx, input.ApplicationID, sessionID, func(transaction DeviceTransaction) error {
@@ -176,6 +196,12 @@ func (service *DeviceService) Verify(ctx context.Context, input VerifyInput) (Ve
 			return ErrInvalidDeviceSignature
 		}
 
+		// Enforce TPM policy. When required and no TPM key was presented,
+		// reject immediately.
+		if devicePolicy.TPMPolicy == domain.TPMRequired && len(publicKey) == 0 {
+			return ErrTPMRequired
+		}
+
 		license, err := transaction.LockLicense(ctx)
 		if err != nil {
 			return fmt.Errorf("lock verification license: %w", err)
@@ -197,7 +223,7 @@ func (service *DeviceService) Verify(ctx context.Context, input VerifyInput) (Ve
 		if err != nil {
 			return fmt.Errorf("list verification devices: %w", err)
 		}
-		matched, activeCount, err := matchDevice(devices, presented)
+		matched, activeCount, err := matchDevice(devices, presented, devicePolicy)
 		if err != nil {
 			return err
 		}
@@ -277,11 +303,15 @@ func protectedDeviceInput(key, publicKey []byte, hardware HardwareSignals) prote
 	}
 }
 
-func matchDevice(devices []domain.Device, presented protectedDevice) (*domain.Device, int, error) {
+func matchDevice(devices []domain.Device, presented protectedDevice, policy *domain.DevicePolicy) (*domain.Device, int, error) {
 	presentedSignals := domain.DeviceSignals{
 		TPM: hex.EncodeToString(presented.TPMPublicKeySHA256), SMBIOS: presented.SMBIOSUUIDHMAC,
 		Motherboard: presented.MotherboardSerialHMAC, BIOS: presented.BIOSSerialHMAC,
 		SystemDisk: presented.SystemDiskSerialHMAC, MachineGuid: presented.MachineGuidHMAC,
+	}
+	minScore := deviceMatchThresholdLegacy
+	if policy != nil && policy.MinMatchScore > 0 {
+		minScore = policy.MinMatchScore
 	}
 	activeCount := 0
 	var matched *domain.Device
@@ -300,7 +330,7 @@ func matchDevice(devices []domain.Device, presented protectedDevice) (*domain.De
 			Motherboard: device.MotherboardSerialHMAC, BIOS: device.BIOSSerialHMAC,
 			SystemDisk: device.SystemDiskSerialHMAC, MachineGuid: device.MachineGuidHMAC,
 		}, presentedSignals)
-		if score < deviceMatchThreshold {
+		if score < minScore {
 			continue
 		}
 		if device.Status == domain.DeviceStatusRevoked {

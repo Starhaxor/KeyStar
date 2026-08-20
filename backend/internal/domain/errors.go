@@ -25,6 +25,13 @@ var (
 	ErrVariableAlreadyExists = errors.New("a variable with this key already exists")
 	ErrProductNotFound       = &NotFoundError{Entity: "product"}
 	ErrPlanNotFound          = &NotFoundError{Entity: "plan"}
+	ErrDevicePolicyNotFound  = &NotFoundError{Entity: "device policy"}
+
+	ErrDevicePolicyInvalidTPMPolicy = errors.New("invalid TPM policy: must be required, preferred or optional")
+	ErrDevicePolicyInvalidScore     = errors.New("invalid score: must be between 0 and 100")
+	ErrDevicePolicyStepUpTooHigh    = errors.New("step_up_score must be less than min_match_score")
+	ErrDevicePolicyInvalidCooldown  = errors.New("rebind_cooldown_seconds must be non-negative")
+	ErrDevicePolicyInvalidChangeLimit = errors.New("max_device_changes_per_30d must be non-negative")
 )
 
 // ChallengeConsumedError marks the single-use challenge conflict while

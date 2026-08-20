@@ -129,6 +129,9 @@ type AdminConsoleStore interface {
 	ListAuditLogs(ctx context.Context, offset, limit int) ([]domain.AuditLog, int64, error)
 	AppendAuditLog(ctx context.Context, input domain.NewAuditLog) error
 	ListAdminAccounts(ctx context.Context) ([]domain.AdminAccount, error)
+	GetDevicePolicy(ctx context.Context, applicationID string) (*domain.DevicePolicy, error)
+	UpsertDevicePolicy(ctx context.Context, applicationID string, input domain.NewDevicePolicy) (*domain.DevicePolicy, error)
+	DeleteDevicePolicy(ctx context.Context, applicationID string) error
 	FindAdminAccountByID(ctx context.Context, adminID string) (*domain.AdminAccount, error)
 	CreateAdminAccount(ctx context.Context, input domain.NewAdminAccount) (*domain.AdminAccount, error)
 	UpdateAdminAccountStatusAndRole(ctx context.Context, adminID string, status domain.AdminAccountStatus, roleName string) error
@@ -180,6 +183,8 @@ type ServerStore interface {
 	CreateVariable(ctx context.Context, applicationID, key, value, description string) (*domain.Variable, error)
 	UpdateVariable(ctx context.Context, applicationID, variableID, value, description string) error
 	DeleteVariable(ctx context.Context, applicationID, variableID string) error
+	GetDevicePolicy(ctx context.Context, applicationID string) (*domain.DevicePolicy, error)
+	UpsertDevicePolicy(ctx context.Context, applicationID string, input domain.NewDevicePolicy) (*domain.DevicePolicy, error)
 }
 
 // ServerConfig carries the dependencies of the server API namespace.
