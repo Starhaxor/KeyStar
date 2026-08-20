@@ -181,13 +181,17 @@ func (router *Router) route(writer http.ResponseWriter, request *http.Request) {
 		router.handleRefresh(writer, request)
 	case request.Method == http.MethodGet && request.URL.Path == "/healthz":
 		router.handleHealth(writer, request)
+	case request.Method == http.MethodGet && request.URL.Path == "/readyz":
+		router.handleReadyz(writer, request)
+	case request.Method == http.MethodGet && request.URL.Path == "/status":
+		router.handleStatus(writer, request)
 	case request.Method == http.MethodGet && request.URL.Path == "/v1/me":
 		router.meHandler.ServeHTTP(writer, request)
 	case strings.HasPrefix(request.URL.Path, AdminPathPrefix):
 		router.serveMounted(writer, request, router.adminHandler, "admin console unavailable")
 	case strings.HasPrefix(request.URL.Path, ServerPathPrefix):
 		router.serveMounted(writer, request, router.serverHandler, "server api unavailable")
-	case request.URL.Path == "/v1/auth/login" || request.URL.Path == "/v1/device/verify" || request.URL.Path == "/healthz" || request.URL.Path == "/v1/me":
+	case request.URL.Path == "/v1/auth/login" || request.URL.Path == "/v1/device/verify" || request.URL.Path == "/healthz" || request.URL.Path == "/readyz" || request.URL.Path == "/status" || request.URL.Path == "/v1/me":
 		WriteError(writer, request, http.StatusMethodNotAllowed, "INVALID_REQUEST", "method not allowed")
 	default:
 		WriteError(writer, request, http.StatusNotFound, "INVALID_REQUEST", "not found")
@@ -216,4 +220,36 @@ func (router *Router) handleHealth(writer http.ResponseWriter, request *http.Req
 	WriteJSON(writer, http.StatusOK, struct {
 		OK bool `json:"ok"`
 	}{OK: true})
+}
+
+// handleReadyz reports whether the service is ready to accept traffic.
+// Returns 203 when the database is reachable, 503 otherwise.
+func (router *Router) handleReadyz(writer http.ResponseWriter, request *http.Request) {
+	if router.healthCheck != nil {
+		ctx, cancel := context.WithTimeout(request.Context(), router.healthCheckTimeout)
+		defer cancel()
+		if err := router.healthCheck(ctx); err != nil {
+			WriteJSON(writer, http.StatusServiceUnavailable, struct {
+				OK      bool   `json:"ok"`
+				Status  string `json:"status"`
+				Message string `json:"message"`
+			}{OK: false, Status: "not_ready", Message: "database unreachable"})
+			return
+		}
+	}
+	WriteJSON(writer, http.StatusOK, struct {
+		OK     bool   `json:"ok"`
+		Status string `json:"status"`
+	}{OK: true, Status: "ready"})
+}
+
+// handleStatus returns a lightweight service status overview without
+// requiring database connectivity. Useful for load balancer probes.
+func (router *Router) handleStatus(writer http.ResponseWriter, request *http.Request) {
+	WriteJSON(writer, http.StatusOK, struct {
+		OK      bool   `json:"ok"`
+		Service string `json:"service"`
+		Version string `json:"version"`
+		Status  string `json:"status"`
+	}{OK: true, Service: "keystar", Version: "0.1.0", Status: "running"})
 }
