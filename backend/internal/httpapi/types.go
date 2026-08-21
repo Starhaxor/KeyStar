@@ -147,6 +147,8 @@ type AdminConsoleStore interface {
 	ListProducts(ctx context.Context, applicationID string) ([]domain.Product, error)
 	FindProductByID(ctx context.Context, applicationID, productID string) (*domain.Product, error)
 	ListPlans(ctx context.Context, productID string) ([]domain.Plan, error)
+	CreateProduct(ctx context.Context, applicationID string, input domain.NewProduct) (*domain.Product, error)
+	CreatePlan(ctx context.Context, input domain.NewPlan) (*domain.Plan, error)
 }
 
 // AdminConfig bundles the dependencies of the /v1/admin namespace. The
