@@ -200,3 +200,58 @@ export interface CreatedLicense {
   license: ConsoleLicense;
   key: string;
 }
+
+export interface ApplicationCredential {
+  id: string;
+  name: string;
+  environment: "test" | "live";
+  type: "publishable" | "secret";
+  scopes: string[];
+  key_prefix: string;
+  status: string;
+  last_used_at: string | null;
+  expires_at: string | null;
+  created_at: string;
+}
+
+export interface DevicePolicy {
+  id: string;
+  application_id: string;
+  tpm_policy: "optional" | "required" | "disabled";
+  min_match_score: number;
+  step_up_score: number;
+  allow_auto_rebind: boolean;
+  rebind_cooldown_seconds: number;
+  max_device_changes_per_30d: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Product {
+  id: string; application_id: string; name: string; slug: string; status: string;
+  created_at: string; updated_at: string;
+}
+
+export interface Plan {
+  id: string; product_id: string; name: string; code: string; level: number;
+  max_devices: number; default_duration_seconds: number | null; status: string;
+  created_at: string; updated_at: string;
+}
+
+export interface Webhook {
+  id: string;
+  url: string;
+  status: "active" | "disabled";
+  events: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Application {
+  id: string;
+  organization_id: string;
+  name: string;
+  slug: string;
+  status: "active" | "maintenance" | "suspended" | "disabled";
+  environment_mode: string;
+}

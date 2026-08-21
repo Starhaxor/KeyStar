@@ -42,7 +42,7 @@ func (router *Router) handleAdminDevicePolicyGet(writer http.ResponseWriter, req
 	if !router.RequirePermission(writer, request, account, domain.PermDevicesRead) {
 		return
 	}
-	policy, err := router.Admin.Console.GetDevicePolicy(request.Context(), router.DefaultApplicationID())
+	policy, err := router.Admin.Console.GetDevicePolicy(request.Context(), router.AdminApplicationID(request))
 	if err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
@@ -74,7 +74,7 @@ func (router *Router) handleAdminDevicePolicyUpdate(writer http.ResponseWriter, 
 	if body.TPMPolicy == "" {
 		body.TPMPolicy = string(domain.TPMOptional)
 	}
-	policy, err := router.Admin.Console.UpsertDevicePolicy(request.Context(), router.DefaultApplicationID(), domain.NewDevicePolicy{
+	policy, err := router.Admin.Console.UpsertDevicePolicy(request.Context(), router.AdminApplicationID(request), domain.NewDevicePolicy{
 		TPMPolicy:              domain.TPMPolicy(body.TPMPolicy),
 		MinMatchScore:          body.MinMatchScore,
 		StepUpScore:            body.StepUpScore,
@@ -99,11 +99,11 @@ func (router *Router) handleAdminDevicePolicyDelete(writer http.ResponseWriter, 
 	if !router.RequirePermission(writer, request, account, domain.PermDevicesWrite) {
 		return
 	}
-	if err := router.Admin.Console.DeleteDevicePolicy(request.Context(), router.DefaultApplicationID()); err != nil {
+	if err := router.Admin.Console.DeleteDevicePolicy(request.Context(), router.AdminApplicationID(request)); err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
 	}
-	router.AuditAdmin(request, account, "DEVICE_POLICY_DELETED", "device_policy", router.DefaultApplicationID(), nil)
+	router.AuditAdmin(request, account, "DEVICE_POLICY_DELETED", "device_policy", router.AdminApplicationID(request), nil)
 	httpapi.WriteJSON(writer, http.StatusOK, struct {
 		OK bool `json:"ok"`
 	}{OK: true})

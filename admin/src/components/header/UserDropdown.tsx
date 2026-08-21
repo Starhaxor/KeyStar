@@ -4,7 +4,6 @@ import { Dropdown } from "@/components/ui/dropdown/Dropdown";
 import { DropdownItem } from "@/components/ui/dropdown/DropdownItem";
 import { Modal } from "@/components/ui/modal";
 import { ChevronDownIcon, LockIcon, UserCircleIcon } from "@/icons";
-import Link from "next/link";
 import React, { useEffect, useState } from "react";
 
 function initialsFor(email: string): string {

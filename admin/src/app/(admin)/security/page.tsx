@@ -1,6 +1,5 @@
 "use client";
 import ConsoleSection, {
-  ErrorNote,
   LoadingNote,
   PageTitle,
 } from "@/components/console/ConsoleSection";

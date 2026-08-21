@@ -144,6 +144,17 @@ type AdminConsoleStore interface {
 	DeleteRole(ctx context.Context, roleID string) error
 	ListSecurityEvents(ctx context.Context, offset, limit int) ([]domain.SecurityEvent, int64, error)
 	AppendSecurityEvent(ctx context.Context, input domain.NewSecurityEvent) error
+	ListProducts(ctx context.Context, applicationID string) ([]domain.Product, error)
+	FindProductByID(ctx context.Context, applicationID, productID string) (*domain.Product, error)
+	ListPlans(ctx context.Context, productID string) ([]domain.Plan, error)
+	CreateProduct(ctx context.Context, applicationID string, input domain.NewProduct) (*domain.Product, error)
+	CreatePlan(ctx context.Context, input domain.NewPlan) (*domain.Plan, error)
+	CreateWebhook(ctx context.Context, applicationID string, input domain.NewWebhook, secretHash []byte) (*domain.Webhook, error)
+	ListWebhooks(ctx context.Context, applicationID string) ([]domain.Webhook, error)
+	FindWebhookByID(ctx context.Context, applicationID, webhookID string) (*domain.Webhook, error)
+	UpdateWebhook(ctx context.Context, applicationID, webhookID string, url *string, status *domain.WebhookStatus, events *[]string) error
+	DeleteWebhook(ctx context.Context, applicationID, webhookID string) error
+	ListApplications(ctx context.Context) ([]domain.Application, error)
 }
 
 // AdminConfig bundles the dependencies of the /v1/admin namespace. The
@@ -193,6 +204,9 @@ type ServerStore interface {
 	FindWebhookByID(ctx context.Context, applicationID, webhookID string) (*domain.Webhook, error)
 	UpdateWebhook(ctx context.Context, applicationID, webhookID string, url *string, status *domain.WebhookStatus, events *[]string) error
 	DeleteWebhook(ctx context.Context, applicationID, webhookID string) error
+	ListProducts(ctx context.Context, applicationID string) ([]domain.Product, error)
+	FindProductByID(ctx context.Context, applicationID, productID string) (*domain.Product, error)
+	ListPlans(ctx context.Context, productID string) ([]domain.Plan, error)
 }
 
 // ServerConfig carries the dependencies of the server API namespace.

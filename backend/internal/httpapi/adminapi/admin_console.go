@@ -279,7 +279,7 @@ func (router *Router) handleAdminUserCreate(writer http.ResponseWriter, request 
 		httpapi.WriteError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
 		return
 	}
-	user, err := router.Admin.Console.CreateUser(request.Context(), router.DefaultApplicationID(), domain.NewUser{Email: email, PasswordHash: hash})
+	user, err := router.Admin.Console.CreateUser(request.Context(), router.AdminApplicationID(request), domain.NewUser{Email: email, PasswordHash: hash})
 	if err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
@@ -394,7 +394,7 @@ func (router *Router) handleAdminUserStatus(writer http.ResponseWriter, request 
 		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "status must be active or disabled")
 		return
 	}
-	if err := router.Admin.Console.SetUserStatus(request.Context(), router.DefaultApplicationID(), userID, domain.UserStatus(body.Status)); err != nil {
+	if err := router.Admin.Console.SetUserStatus(request.Context(), router.AdminApplicationID(request), userID, domain.UserStatus(body.Status)); err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
 	}
@@ -422,7 +422,7 @@ func (router *Router) handleAdminUserPromote(writer http.ResponseWriter, request
 		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
 		return
 	}
-	user, err := router.Admin.Console.FindUserByID(request.Context(), router.DefaultApplicationID(), userID)
+	user, err := router.Admin.Console.FindUserByID(request.Context(), router.AdminApplicationID(request), userID)
 	if err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
@@ -488,7 +488,7 @@ func (router *Router) handleAdminUserBulkStatus(writer http.ResponseWriter, requ
 		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "status must be active or disabled")
 		return
 	}
-	updated, err := router.Admin.Console.BulkSetUserStatus(request.Context(), router.DefaultApplicationID(), body.IDs, domain.UserStatus(body.Status))
+	updated, err := router.Admin.Console.BulkSetUserStatus(request.Context(), router.AdminApplicationID(request), body.IDs, domain.UserStatus(body.Status))
 	if err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
@@ -516,7 +516,7 @@ func (router *Router) handleAdminUserBulkRevoke(writer http.ResponseWriter, requ
 		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "ids must contain between 1 and 500 users")
 		return
 	}
-	revoked, err := router.Admin.Console.BulkRevokeUserSessions(request.Context(), router.DefaultApplicationID(), body.IDs)
+	revoked, err := router.Admin.Console.BulkRevokeUserSessions(request.Context(), router.AdminApplicationID(request), body.IDs)
 	if err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
@@ -562,7 +562,7 @@ func (router *Router) handleAdminUserPasswordReset(writer http.ResponseWriter, r
 		httpapi.WriteError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
 		return
 	}
-	if err := router.Admin.Console.SetUserPassword(request.Context(), router.DefaultApplicationID(), userID, hash); err != nil {
+	if err := router.Admin.Console.SetUserPassword(request.Context(), router.AdminApplicationID(request), userID, hash); err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
 	}
@@ -676,7 +676,7 @@ func (router *Router) handleAdminUserBan(writer http.ResponseWriter, request *ht
 		}
 		expiresAt = &deadline
 	}
-	if err := router.Admin.Console.BanUser(request.Context(), router.DefaultApplicationID(), userID, reason, expiresAt); err != nil {
+	if err := router.Admin.Console.BanUser(request.Context(), router.AdminApplicationID(request), userID, reason, expiresAt); err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
 	}
@@ -705,7 +705,7 @@ func (router *Router) handleAdminUserUnban(writer http.ResponseWriter, request *
 		httpapi.WriteError(writer, request, http.StatusNotFound, "USER_NOT_FOUND", "user not found")
 		return
 	}
-	if err := router.Admin.Console.UnbanUser(request.Context(), router.DefaultApplicationID(), userID); err != nil {
+	if err := router.Admin.Console.UnbanUser(request.Context(), router.AdminApplicationID(request), userID); err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
 	}
@@ -733,7 +733,7 @@ func (router *Router) handleAdminUserNotes(writer http.ResponseWriter, request *
 		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "notes must be at most 4000 characters")
 		return
 	}
-	if err := router.Admin.Console.SetUserNotes(request.Context(), router.DefaultApplicationID(), userID, notes); err != nil {
+	if err := router.Admin.Console.SetUserNotes(request.Context(), router.AdminApplicationID(request), userID, notes); err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
 	}
@@ -750,7 +750,7 @@ func (router *Router) handleAdminUserResetDevices(writer http.ResponseWriter, re
 		httpapi.WriteError(writer, request, http.StatusNotFound, "USER_NOT_FOUND", "user not found")
 		return
 	}
-	reset, err := router.Admin.Console.ResetUserDevices(request.Context(), router.DefaultApplicationID(), userID)
+	reset, err := router.Admin.Console.ResetUserDevices(request.Context(), router.AdminApplicationID(request), userID)
 	if err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
@@ -769,7 +769,7 @@ func (router *Router) handleAdminUserSessionsRevoke(writer http.ResponseWriter, 
 		httpapi.WriteError(writer, request, http.StatusNotFound, "USER_NOT_FOUND", "user not found")
 		return
 	}
-	revoked, err := router.Admin.Console.RevokeUserSessions(request.Context(), router.DefaultApplicationID(), userID)
+	revoked, err := router.Admin.Console.RevokeUserSessions(request.Context(), router.AdminApplicationID(request), userID)
 	if err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
@@ -859,6 +859,8 @@ func (router *Router) handleAdminLicenseCreate(writer http.ResponseWriter, reque
 		Value      int    `json:"value"`
 		Unit       string `json:"unit"`
 		MaxDevices int    `json:"max_devices"`
+		ProductID  string `json:"product_id"`
+		PlanID     string `json:"plan_id"`
 	}
 	if err := httpapi.DecodeJSONBody(writer, request, &body); err != nil {
 		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
@@ -881,24 +883,48 @@ func (router *Router) handleAdminLicenseCreate(writer http.ResponseWriter, reque
 		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
 		return
 	}
-	user, err := router.Admin.Console.FindUserByEmail(request.Context(), router.DefaultApplicationID(), body.UserEmail)
+	user, err := router.Admin.Console.FindUserByEmail(request.Context(), router.AdminApplicationID(request), body.UserEmail)
 	if err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
 	}
-	// The console product name is resolved into the application's product
-	// catalog and its default plan; the license is bound to both.
-	productID, planID, err := router.Admin.Console.ResolveProductPlan(request.Context(), router.DefaultApplicationID(), router.Admin.Product)
-	if err != nil {
-		router.WriteConsoleError(writer, request, err)
-		return
+	productID, planID := body.ProductID, body.PlanID
+	if productID == "" || planID == "" {
+		// Legacy callers use the configured product and its default plan.
+		productID, planID, err = router.Admin.Console.ResolveProductPlan(request.Context(), router.AdminApplicationID(request), router.Admin.Product)
+		if err != nil {
+			router.WriteConsoleError(writer, request, err)
+			return
+		}
+	} else {
+		product, findErr := router.Admin.Console.FindProductByID(request.Context(), router.AdminApplicationID(request), productID)
+		if findErr != nil || product == nil {
+			router.WriteConsoleError(writer, request, findErr)
+			return
+		}
+		plans, listErr := router.Admin.Console.ListPlans(request.Context(), productID)
+		if listErr != nil {
+			router.WriteConsoleError(writer, request, listErr)
+			return
+		}
+		found := false
+		for _, plan := range plans {
+			if plan.ID == planID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "plan does not belong to product")
+			return
+		}
 	}
 	plain, normalized, err := security.GenerateLicense(cryptorand.Reader)
 	if err != nil {
 		httpapi.WriteError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
 		return
 	}
-	license, err := router.Admin.Console.CreateLicense(request.Context(), router.DefaultApplicationID(), domain.NewLicense{
+	license, err := router.Admin.Console.CreateLicense(request.Context(), router.AdminApplicationID(request), domain.NewLicense{
 		LicenseHMAC: security.HMACHex(router.Admin.LicenseHMACKey, normalized),
 		UserID:      user.ID,
 		ProductID:   productID,
@@ -955,7 +981,7 @@ func (router *Router) handleAdminLicenseUpdate(writer http.ResponseWriter, reque
 		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "notes must be at most 2000 characters")
 		return
 	}
-	license, err := router.Admin.Console.FindLicenseByID(request.Context(), router.DefaultApplicationID(), licenseID)
+	license, err := router.Admin.Console.FindLicenseByID(request.Context(), router.AdminApplicationID(request), licenseID)
 	if err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
@@ -1008,7 +1034,7 @@ func (router *Router) handleAdminLicenseUpdate(writer http.ResponseWriter, reque
 	if strings.TrimSpace(body.Notes) != "" || body.Level != nil {
 		notes = strings.TrimSpace(body.Notes)
 	}
-	if err := router.Admin.Console.AdminUpdateLicense(request.Context(), router.DefaultApplicationID(), licenseID, expiresAt, maxDevices, level, notes); err != nil {
+	if err := router.Admin.Console.AdminUpdateLicense(request.Context(), router.AdminApplicationID(request), licenseID, expiresAt, maxDevices, level, notes); err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
 	}
@@ -1025,7 +1051,7 @@ func (router *Router) handleAdminLicenseRevoke(writer http.ResponseWriter, reque
 		httpapi.WriteError(writer, request, http.StatusNotFound, "LICENSE_NOT_FOUND", "license not found")
 		return
 	}
-	if err := router.Admin.Console.AdminRevokeLicense(request.Context(), router.DefaultApplicationID(), licenseID); err != nil {
+	if err := router.Admin.Console.AdminRevokeLicense(request.Context(), router.AdminApplicationID(request), licenseID); err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
 	}
@@ -1064,7 +1090,7 @@ func (router *Router) routeAdminVariables(writer http.ResponseWriter, request *h
 }
 
 func (router *Router) handleAdminVariablesList(writer http.ResponseWriter, request *http.Request) {
-	variables, err := router.Admin.Console.ListVariables(request.Context(), router.DefaultApplicationID())
+	variables, err := router.Admin.Console.ListVariables(request.Context(), router.AdminApplicationID(request))
 	if err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
@@ -1101,7 +1127,7 @@ func (router *Router) handleAdminVariableCreate(writer http.ResponseWriter, requ
 		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "value or description too long")
 		return
 	}
-	created, err := router.Admin.Console.CreateVariable(request.Context(), router.DefaultApplicationID(), key, body.Value, strings.TrimSpace(body.Description))
+	created, err := router.Admin.Console.CreateVariable(request.Context(), router.AdminApplicationID(request), key, body.Value, strings.TrimSpace(body.Description))
 	if err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
@@ -1130,7 +1156,7 @@ func (router *Router) handleAdminVariableUpdate(writer http.ResponseWriter, requ
 		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "value or description too long")
 		return
 	}
-	if err := router.Admin.Console.UpdateVariable(request.Context(), router.DefaultApplicationID(), variableID, body.Value, strings.TrimSpace(body.Description)); err != nil {
+	if err := router.Admin.Console.UpdateVariable(request.Context(), router.AdminApplicationID(request), variableID, body.Value, strings.TrimSpace(body.Description)); err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
 	}
@@ -1145,7 +1171,7 @@ func (router *Router) handleAdminVariableDelete(writer http.ResponseWriter, requ
 		httpapi.WriteError(writer, request, http.StatusNotFound, "VARIABLE_NOT_FOUND", "variable not found")
 		return
 	}
-	if err := router.Admin.Console.DeleteVariable(request.Context(), router.DefaultApplicationID(), variableID); err != nil {
+	if err := router.Admin.Console.DeleteVariable(request.Context(), router.AdminApplicationID(request), variableID); err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
 	}
@@ -1247,7 +1273,7 @@ func (router *Router) handleAdminDeviceRevoke(writer http.ResponseWriter, reques
 		httpapi.WriteError(writer, request, http.StatusNotFound, "DEVICE_NOT_FOUND", "device not found")
 		return
 	}
-	if err := router.Admin.Console.AdminRevokeDevice(request.Context(), router.DefaultApplicationID(), deviceID); err != nil {
+	if err := router.Admin.Console.AdminRevokeDevice(request.Context(), router.AdminApplicationID(request), deviceID); err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
 	}
@@ -1290,7 +1316,7 @@ func (router *Router) handleAdminDeviceReset(writer http.ResponseWriter, request
 		httpapi.WriteError(writer, request, http.StatusNotFound, "DEVICE_NOT_FOUND", "device not found")
 		return
 	}
-	if err := router.Admin.Console.AdminResetDevice(request.Context(), router.DefaultApplicationID(), deviceID); err != nil {
+	if err := router.Admin.Console.AdminResetDevice(request.Context(), router.AdminApplicationID(request), deviceID); err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
 	}
@@ -1360,7 +1386,7 @@ func (router *Router) handleAdminSessionRevoke(writer http.ResponseWriter, reque
 		httpapi.WriteError(writer, request, http.StatusNotFound, "SESSION_NOT_FOUND", "session not found")
 		return
 	}
-	if err := router.Admin.Console.AdminRevokeAuthSession(request.Context(), router.DefaultApplicationID(), sessionID); err != nil {
+	if err := router.Admin.Console.AdminRevokeAuthSession(request.Context(), router.AdminApplicationID(request), sessionID); err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
 	}

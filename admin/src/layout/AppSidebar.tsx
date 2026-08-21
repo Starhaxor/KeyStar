@@ -1,12 +1,11 @@
 "use client";
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useSidebar } from "../context/SidebarContext";
 import { useAdminIdentity } from "../context/AdminIdentityContext";
 import {
-  AlertIcon,
   BoxCubeIcon,
   ChevronLeftIcon,
   ChevronDownIcon,
@@ -50,6 +49,7 @@ const navItems: NavItem[] = [
     children: [{ label: "Directory", href: "/licenses" }],
   },
   { icon: <BoxCubeIcon />, name: "Devices", path: "/devices", permission: "devices.read" },
+  { icon: <BoxCubeIcon />, name: "Products & Plans", path: "/products", permission: "catalog.read" },
   { icon: <TimeIcon />, name: "Sessions", path: "/sessions", permission: "sessions.read" },
   {
     icon: <ListIcon />,
@@ -75,6 +75,18 @@ const navItems: NavItem[] = [
   },
   {
     icon: <LockIcon />,
+    name: "API Credentials",
+    path: "/credentials",
+    permission: "credentials.read",
+  },
+  {
+    icon: <ListIcon />,
+    name: "Webhooks",
+    path: "/webhooks",
+    permission: "webhooks.read",
+  },
+  {
+    icon: <LockIcon />,
     name: "Security",
     path: "/security",
     children: [
@@ -95,8 +107,8 @@ const AppSidebar: React.FC = () => {
   const pathname = usePathname();
   const { hasPermission, identity } = useAdminIdentity();
 
-  // Which sections have their submenu expanded. The section containing the
-  // current route is opened automatically.
+  // Sections explicitly expanded by the user. The active section is always
+  // open without a navigation-side effect.
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
 
   const isActive = (path: string) =>
@@ -111,19 +123,6 @@ const AppSidebar: React.FC = () => {
 
   const isSectionActive = (nav: NavItem) =>
     isActive(nav.path) || (nav.children ?? []).some(isChildActive);
-
-  // On navigation only the section containing the current route stays open;
-  // every other section collapses. This keeps the menu deterministic and
-  // prevents stale sections from lingering expanded.
-  useEffect(() => {
-    setOpenSections(() => {
-      const next: Record<string, boolean> = {};
-      for (const nav of navItems) {
-        if (nav.children && isSectionActive(nav)) next[nav.name] = true;
-      }
-      return next;
-    });
-  }, [pathname]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleSection = (name: string) =>
     setOpenSections((prev) => ({ ...prev, [name]: !prev[name] }));
@@ -182,7 +181,7 @@ const AppSidebar: React.FC = () => {
               <ul className="flex flex-col gap-4">
                 {visibleItems.map((nav) => {
                   const active = isSectionActive(nav);
-                  const sectionOpen = Boolean(openSections[nav.name]);
+                  const sectionOpen = active || Boolean(openSections[nav.name]);
                   return (
                     <li key={nav.name}>
                       <div className="relative flex items-center">

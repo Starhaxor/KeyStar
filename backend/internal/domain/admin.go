@@ -17,23 +17,29 @@ const (
 // Console permissions enforced by the RBAC middleware. Roles carry a set of
 // these strings; handlers never branch on role names.
 const (
-	PermOverviewRead  = "overview.read"
-	PermUsersRead     = "users.read"
-	PermUsersWrite    = "users.write"
-	PermLicensesRead  = "licenses.read"
-	PermLicensesWrite = "licenses.write"
-	PermDevicesRead   = "devices.read"
-	PermDevicesWrite  = "devices.write"
-	PermSessionsRead  = "sessions.read"
-	PermSessionsWrite = "sessions.write"
-	PermAuditRead     = "audit.read"
-	PermSecurityRead  = "security.read"
-	PermAdminsRead    = "admins.read"
-	PermAdminsWrite   = "admins.write"
-	PermCredentialsRead  = "credentials.read"
-	PermCredentialsWrite = "credentials.write"
-	RoleOwner         = "owner"
-	RoleViewer        = "viewer"
+	PermOverviewRead      = "overview.read"
+	PermUsersRead         = "users.read"
+	PermUsersWrite        = "users.write"
+	PermLicensesRead      = "licenses.read"
+	PermLicensesWrite     = "licenses.write"
+	PermDevicesRead       = "devices.read"
+	PermDevicesWrite      = "devices.write"
+	PermSessionsRead      = "sessions.read"
+	PermSessionsWrite     = "sessions.write"
+	PermAuditRead         = "audit.read"
+	PermSecurityRead      = "security.read"
+	PermAdminsRead        = "admins.read"
+	PermAdminsWrite       = "admins.write"
+	PermCredentialsRead   = "credentials.read"
+	PermCredentialsWrite  = "credentials.write"
+	PermApplicationsRead  = "applications.read"
+	PermApplicationsWrite = "applications.write"
+	PermCatalogRead       = "catalog.read"
+	PermCatalogWrite      = "catalog.write"
+	PermWebhooksRead      = "webhooks.read"
+	PermWebhooksWrite     = "webhooks.write"
+	RoleOwner             = "owner"
+	RoleViewer            = "viewer"
 )
 
 // AllPermissions enumerates every assignable permission, used to validate
@@ -54,6 +60,12 @@ var AllPermissions = []string{
 	PermAdminsWrite,
 	PermCredentialsRead,
 	PermCredentialsWrite,
+	PermApplicationsRead,
+	PermApplicationsWrite,
+	PermCatalogRead,
+	PermCatalogWrite,
+	PermWebhooksRead,
+	PermWebhooksWrite,
 }
 
 // Role is an RBAC role; permissions are stored as flat strings so checks stay

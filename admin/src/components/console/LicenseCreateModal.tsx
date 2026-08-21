@@ -5,7 +5,7 @@ import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/context/ToastContext";
 import { api } from "@/lib/api";
-import type { CreatedLicense } from "@/lib/types";
+import type { CreatedLicense, Plan, Product } from "@/lib/types";
 
 const fieldClasses =
   "h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90";
@@ -30,6 +30,10 @@ export default function LicenseCreateModal({
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<CreatedLicense | null>(null);
   const [copied, setCopied] = useState(false);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [productID, setProductID] = useState("");
+  const [planID, setPlanID] = useState("");
 
   useEffect(() => {
     if (open) {
@@ -40,6 +44,10 @@ export default function LicenseCreateModal({
       setError(null);
       setCreated(null);
       setCopied(false);
+      setProductID("");
+      setPlanID("");
+      setPlans([]);
+      void api.products().then((response) => setProducts(response.items)).catch(() => setProducts([]));
     }
   }, [open, defaultEmail]);
 
@@ -48,7 +56,7 @@ export default function LicenseCreateModal({
     setBusy(true);
     setError(null);
     try {
-      const response = await api.createLicense(email.trim(), { value, unit }, maxDevices);
+      const response = await api.createLicense(email.trim(), { value, unit }, maxDevices, productID && planID ? { productId: productID, planId: planID } : undefined);
       setCreated(response);
       setCopied(false);
       await onCreated?.();
@@ -77,6 +85,14 @@ export default function LicenseCreateModal({
     if (busy) return;
     setCreated(null);
     onClose();
+  }
+
+  async function selectProduct(nextProductID: string) {
+    setProductID(nextProductID);
+    setPlanID("");
+    if (!nextProductID) { setPlans([]); return; }
+    try { setPlans((await api.plans(nextProductID)).items); }
+    catch { setPlans([]); }
   }
 
   return (
@@ -202,6 +218,24 @@ export default function LicenseCreateModal({
               />
             </div>
           </div>
+          {products.length > 0 && (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Product</Label>
+                <select className={fieldClasses} value={productID} onChange={(event) => void selectProduct(event.target.value)}>
+                  <option value="">Default product</option>
+                  {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <Label>Plan</Label>
+                <select className={fieldClasses} value={planID} disabled={!productID} onChange={(event) => setPlanID(event.target.value)}>
+                  <option value="">Select plan</option>
+                  {plans.map((plan) => <option key={plan.id} value={plan.id}>{plan.name}</option>)}
+                </select>
+              </div>
+            </div>
+          )}
           {error && (
             <p className="text-sm text-error-500" role="alert">
               {error}
@@ -216,7 +250,7 @@ export default function LicenseCreateModal({
             >
               Cancel
             </button>
-            <Button size="sm" disabled={busy}>
+            <Button size="sm" disabled={busy || Boolean(productID) !== Boolean(planID)}>
               {busy ? "Creating..." : "Create"}
             </Button>
           </div>

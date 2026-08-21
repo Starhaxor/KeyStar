@@ -6,6 +6,7 @@ import {
   useAdminIdentity,
 } from "@/context/AdminIdentityContext";
 import AppHeader from "@/layout/AppHeader";
+import { ApplicationProvider } from "@/context/ApplicationContext";
 import AppSidebar from "@/layout/AppSidebar";
 import Backdrop from "@/layout/Backdrop";
 import Link from "next/link";
@@ -46,6 +47,7 @@ export default function AdminLayout({
 
   return (
     <AdminIdentityProvider>
+      <ApplicationProvider>
       <div className="min-h-screen xl:flex">
         {/* Sidebar and Backdrop */}
         <AppSidebar />
@@ -63,6 +65,7 @@ export default function AdminLayout({
           </div>
         </div>
       </div>
+      </ApplicationProvider>
     </AdminIdentityProvider>
   );
 }

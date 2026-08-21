@@ -39,7 +39,7 @@ The sidebar will contain these permission-gated sections:
 
 An application selector in the header is visible to authorized administrators.
 It persists the selection in a cookie and every selected-application request
-uses the `X-KeyStar-Application-ID` header. Without that header, the backend
+uses the existing `X-KeyStar-App` header. Without that header, the backend
 uses the established default application for backwards compatibility.
 
 ## Backend contract

@@ -45,6 +45,27 @@ export const PERMISSION_GROUPS: {
     permissions: [{ id: "security.read", label: "View security events" }],
   },
   {
+    resource: "API credentials",
+    permissions: [
+      { id: "credentials.read", label: "View API credentials" },
+      { id: "credentials.write", label: "Create and revoke API credentials" },
+    ],
+  },
+  {
+    resource: "Catalog",
+    permissions: [
+      { id: "catalog.read", label: "View products and plans" },
+      { id: "catalog.write", label: "Manage products and plans" },
+    ],
+  },
+  {
+    resource: "Webhooks",
+    permissions: [
+      { id: "webhooks.read", label: "View webhook endpoints" },
+      { id: "webhooks.write", label: "Manage webhook endpoints" },
+    ],
+  },
+  {
     resource: "Admins",
     permissions: [
       { id: "admins.read", label: "View admin accounts" },

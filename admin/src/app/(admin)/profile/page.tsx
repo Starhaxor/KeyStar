@@ -9,9 +9,9 @@ import StatusBadge from "@/components/console/StatusBadge";
 import { useAdminIdentity } from "@/context/AdminIdentityContext";
 import { api, formatDateTime } from "@/lib/api";
 import type { AuditEntry } from "@/lib/types";
-import { LockIcon, UserCircleIcon } from "@/icons";
+import { LockIcon } from "@/icons";
 import Link from "next/link";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 
 function initialsFor(email: string): string {
   const local = email.split("@")[0] ?? "";
@@ -19,23 +19,29 @@ function initialsFor(email: string): string {
 }
 
 export default function ProfilePage() {
-  const { identity, loading: identityLoading } = useAdminIdentity();
+  const { identity, loading: identityLoading, hasPermission } = useAdminIdentity();
   const [activity, setActivity] = useState<AuditEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const loadActivity = useCallback(async () => {
-    try {
-      setError(null);
-      const response = await api.auditLogs(1);
-      setActivity(response.items);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load activity");
-    }
-  }, []);
-
   useEffect(() => {
-    loadActivity();
-  }, [loadActivity]);
+    if (!hasPermission("audit.read")) {
+      return;
+    }
+    let active = true;
+    void api.auditLogs(1).then(
+      (response) => {
+        if (active) setActivity(response.items);
+      },
+      (err: unknown) => {
+        if (active) {
+          setError(err instanceof Error ? err.message : "Failed to load activity");
+        }
+      }
+    );
+    return () => {
+      active = false;
+    };
+  }, [hasPermission]);
 
   if (identityLoading || !identity) {
     return (

@@ -4,6 +4,7 @@
 package adminapi
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -16,6 +17,21 @@ import (
 	"github.com/starloader/backend/internal/domain"
 	"github.com/starloader/backend/internal/httpapi"
 )
+
+type adminApplicationContextKey struct{}
+
+func withAdminApplicationID(ctx context.Context, applicationID string) context.Context {
+	return context.WithValue(ctx, adminApplicationContextKey{}, applicationID)
+}
+
+// AdminApplicationID returns the validated application selected for this
+// dashboard request, falling back to the configured legacy application.
+func (router *Router) AdminApplicationID(request *http.Request) string {
+	if applicationID, ok := request.Context().Value(adminApplicationContextKey{}).(string); ok && applicationID != "" {
+		return applicationID
+	}
+	return router.DefaultApplicationID()
+}
 
 const defaultMFAIssuer = "KeyStar Admin"
 
@@ -103,6 +119,11 @@ func (router *Router) serveAdmin(writer http.ResponseWriter, request *http.Reque
 		httpapi.WriteError(writer, request, http.StatusForbidden, "MFA_ENROLLMENT_REQUIRED", "multi-factor authentication enrollment is required")
 		return
 	}
+	principal, applicationOK := router.ResolveApplication(writer, request)
+	if !applicationOK {
+		return
+	}
+	request = request.WithContext(withAdminApplicationID(request.Context(), principal.ApplicationID))
 	router.routeAdmin(writer, request, session, account, path)
 }
 
@@ -161,6 +182,15 @@ func (router *Router) routeAdmin(writer http.ResponseWriter, request *http.Reque
 		router.handleAdminBanList(writer, request)
 	case len(segments) >= 1 && segments[0] == "licenses":
 		router.routeAdminLicenses(writer, request, account, segments)
+	case len(segments) >= 1 && segments[0] == "products":
+		router.routeAdminProducts(writer, request, account, segments)
+	case len(segments) >= 1 && segments[0] == "webhooks":
+		router.routeAdminWebhooks(writer, request, account, segments)
+	case len(segments) == 1 && segments[0] == "applications" && request.Method == http.MethodGet:
+		if !router.RequirePermission(writer, request, account, domain.PermApplicationsRead) {
+			return
+		}
+		router.handleAdminApplicationList(writer, request)
 	case len(segments) >= 1 && segments[0] == "devices":
 		router.routeAdminDevices(writer, request, account, segments)
 	case len(segments) >= 1 && segments[0] == "sessions":

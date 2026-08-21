@@ -1,6 +1,5 @@
 "use client";
 import ConsoleSection, {
-  EmptyNote,
   ErrorNote,
   LoadingNote,
   PageTitle,
@@ -82,7 +81,7 @@ export default function AdminsPage() {
       window.history.replaceState({}, "", "/admins");
       openCreate();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   function openEdit(admin: AdminAccount) {
