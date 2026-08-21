@@ -246,3 +246,12 @@ export interface Webhook {
   created_at: string;
   updated_at: string;
 }
+
+export interface Application {
+  id: string;
+  organization_id: string;
+  name: string;
+  slug: string;
+  status: "active" | "maintenance" | "suspended" | "disabled";
+  environment_mode: string;
+}

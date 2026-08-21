@@ -2,10 +2,12 @@
 import { ThemeToggleButton } from "@/components/common/ThemeToggleButton";
 import UserDropdown from "@/components/header/UserDropdown";
 import { useSidebar } from "@/context/SidebarContext";
+import { useApplication } from "@/context/ApplicationContext";
 import React from "react";
 
 const AppHeader: React.FC = () => {
   const { isMobileOpen, toggleSidebar, toggleMobileSidebar } = useSidebar();
+  const { applications, selectedApplicationID, selectApplication, loading } = useApplication();
 
   const handleToggle = () => {
     if (window.innerWidth >= 1024) {
@@ -60,6 +62,12 @@ const AppHeader: React.FC = () => {
           <span className="hidden text-sm font-medium text-gray-500 dark:text-gray-400 lg:block">
             StarLoader Admin Console
           </span>
+          {!loading && applications.length > 1 && (
+            <select aria-label="Selected application" value={selectedApplicationID ?? ""} onChange={(event) => selectApplication(event.target.value)} className="ml-3 hidden h-9 max-w-52 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 lg:block">
+              <option value="" disabled>Select application</option>
+              {applications.map((application) => <option key={application.id} value={application.id}>{application.name}</option>)}
+            </select>
+          )}
         </div>
         <div className="flex items-center justify-end w-full gap-4 px-5 py-4 lg:px-0 lg:w-auto lg:py-4">
           <div className="flex items-center gap-2 2xsm:gap-3">

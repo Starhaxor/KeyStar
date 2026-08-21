@@ -154,6 +154,7 @@ type AdminConsoleStore interface {
 	FindWebhookByID(ctx context.Context, applicationID, webhookID string) (*domain.Webhook, error)
 	UpdateWebhook(ctx context.Context, applicationID, webhookID string, url *string, status *domain.WebhookStatus, events *[]string) error
 	DeleteWebhook(ctx context.Context, applicationID, webhookID string) error
+	ListApplications(ctx context.Context) ([]domain.Application, error)
 }
 
 // AdminConfig bundles the dependencies of the /v1/admin namespace. The

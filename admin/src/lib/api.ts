@@ -3,6 +3,7 @@
 
 import type {
   AdminAccount,
+  Application,
   ApplicationCredential,
   AdminIdentity,
   AdminRole,
@@ -40,6 +41,7 @@ const CSRF_COOKIE = "starloader_admin_csrf";
 const CSRF_HEADER = "X-CSRF-Token";
 const APPLICATION_COOKIE = "keystar_application_id";
 const APPLICATION_HEADER = "X-KeyStar-App";
+export const applicationCookieName = APPLICATION_COOKIE;
 
 export class ApiError extends Error {
   readonly status: number;
@@ -211,6 +213,9 @@ export const api = {
     return request<{ ok: boolean; items: AdminRole[]; total: number }>(
       "/v1/admin/roles"
     );
+  },
+  applications() {
+    return request<{ ok: boolean; items: Application[] }>("/v1/admin/applications");
   },
   products() {
     return request<{ ok: boolean; items: Product[] }>("/v1/admin/products");
