@@ -50,6 +50,7 @@ const navItems: NavItem[] = [
     children: [{ label: "Directory", href: "/licenses" }],
   },
   { icon: <BoxCubeIcon />, name: "Devices", path: "/devices", permission: "devices.read" },
+  { icon: <BoxCubeIcon />, name: "Products & Plans", path: "/products", permission: "catalog.read" },
   { icon: <TimeIcon />, name: "Sessions", path: "/sessions", permission: "sessions.read" },
   {
     icon: <ListIcon />,
