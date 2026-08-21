@@ -152,6 +152,8 @@ func (router *Router) routeAdmin(writer http.ResponseWriter, request *http.Reque
 		router.handleAdminLogout(writer, request, session, token(request))
 	case len(segments) == 1 && segments[0] == "me" && request.Method == http.MethodGet:
 		router.handleAdminMe(writer, request, account)
+	case len(segments) == 2 && segments[0] == "me" && segments[1] == "activity" && request.Method == http.MethodGet:
+		router.handleAdminActivity(writer, request, account)
 	case len(segments) == 3 && segments[0] == "mfa" && segments[1] == "enroll" && segments[2] == "start" && request.Method == http.MethodPost:
 		router.handleAdminMFAEnrollStart(writer, request, account)
 	case len(segments) == 3 && segments[0] == "mfa" && segments[1] == "enroll" && segments[2] == "confirm" && request.Method == http.MethodPost:

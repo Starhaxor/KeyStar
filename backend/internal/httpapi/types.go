@@ -127,6 +127,7 @@ type AdminConsoleStore interface {
 	ListCredentials(ctx context.Context, applicationID string) ([]domain.ApplicationCredential, error)
 	RevokeCredential(ctx context.Context, applicationID, credentialID string) error
 	ListAuditLogs(ctx context.Context, offset, limit int) ([]domain.AuditLog, int64, error)
+	ListAdminActivity(ctx context.Context, adminID string, limit int) ([]domain.AuditLog, error)
 	AppendAuditLog(ctx context.Context, input domain.NewAuditLog) error
 	ListAdminAccounts(ctx context.Context) ([]domain.AdminAccount, error)
 	GetDevicePolicy(ctx context.Context, applicationID string) (*domain.DevicePolicy, error)

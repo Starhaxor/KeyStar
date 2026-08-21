@@ -1441,3 +1441,15 @@ func (router *Router) handleAdminAuditLogs(writer http.ResponseWriter, request *
 	}
 	httpapi.WriteJSON(writer, http.StatusOK, adminPageResponse{OK: true, Items: mapAuditEntries(logs), Total: total, Page: page, PageSize: pageSize})
 }
+
+func (router *Router) handleAdminActivity(writer http.ResponseWriter, request *http.Request, account *domain.AdminAccount) {
+	logs, err := router.Admin.Console.ListAdminActivity(request.Context(), account.ID, 10)
+	if err != nil {
+		router.WriteConsoleError(writer, request, err)
+		return
+	}
+	httpapi.WriteJSON(writer, http.StatusOK, struct {
+		OK    bool             `json:"ok"`
+		Items []auditEntryJSON `json:"items"`
+	}{OK: true, Items: mapAuditEntries(logs)})
+}

@@ -19,16 +19,13 @@ function initialsFor(email: string): string {
 }
 
 export default function ProfilePage() {
-  const { identity, loading: identityLoading, hasPermission } = useAdminIdentity();
+  const { identity, loading: identityLoading } = useAdminIdentity();
   const [activity, setActivity] = useState<AuditEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!hasPermission("audit.read")) {
-      return;
-    }
     let active = true;
-    void api.auditLogs(1).then(
+    void api.myActivity().then(
       (response) => {
         if (active) setActivity(response.items);
       },
@@ -41,7 +38,7 @@ export default function ProfilePage() {
     return () => {
       active = false;
     };
-  }, [hasPermission]);
+  }, []);
 
   if (identityLoading || !identity) {
     return (

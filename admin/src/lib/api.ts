@@ -332,6 +332,9 @@ export const api = {
   me() {
     return request<{ ok: boolean } & AdminIdentity>("/v1/admin/me");
   },
+  myActivity() {
+    return request<{ ok: boolean; items: AuditEntry[] }>("/v1/admin/me/activity");
+  },
   overview() {
     return request<{ ok: boolean } & Overview>("/v1/admin/overview");
   },

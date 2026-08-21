@@ -540,6 +540,26 @@ func (s *Store) ListAuditLogs(ctx context.Context, offset, limit int) ([]domain.
 	return logs, total, nil
 }
 
+func (s *Store) ListAdminActivity(ctx context.Context, adminID string, limit int) ([]domain.AuditLog, error) {
+	rows, err := s.db.Query(ctx, `select `+auditLogColumns+` from audit_logs where admin_account_id = $1::uuid order by created_at desc, id desc limit $2`, adminID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list admin activity: %w", err)
+	}
+	defer rows.Close()
+	items := make([]domain.AuditLog, 0, limit)
+	for rows.Next() {
+		item, scanErr := scanAuditLog(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("scan admin activity: %w", scanErr)
+		}
+		items = append(items, *item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list admin activity: %w", err)
+	}
+	return items, nil
+}
+
 // --- Security events ---
 
 func (s *Store) AppendSecurityEvent(ctx context.Context, input domain.NewSecurityEvent) error {
