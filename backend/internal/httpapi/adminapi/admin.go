@@ -182,6 +182,8 @@ func (router *Router) routeAdmin(writer http.ResponseWriter, request *http.Reque
 		router.handleAdminBanList(writer, request)
 	case len(segments) >= 1 && segments[0] == "licenses":
 		router.routeAdminLicenses(writer, request, account, segments)
+	case len(segments) >= 1 && segments[0] == "products":
+		router.routeAdminProducts(writer, request, account, segments)
 	case len(segments) >= 1 && segments[0] == "devices":
 		router.routeAdminDevices(writer, request, account, segments)
 	case len(segments) >= 1 && segments[0] == "sessions":
