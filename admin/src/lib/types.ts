@@ -226,3 +226,14 @@ export interface DevicePolicy {
   created_at: string;
   updated_at: string;
 }
+
+export interface Product {
+  id: string; application_id: string; name: string; slug: string; status: string;
+  created_at: string; updated_at: string;
+}
+
+export interface Plan {
+  id: string; product_id: string; name: string; code: string; level: number;
+  max_devices: number; default_duration_seconds: number | null; status: string;
+  created_at: string; updated_at: string;
+}

@@ -20,6 +20,8 @@ import type {
   MfaEnrollment,
   Overview,
   PageResult,
+  Plan,
+  Product,
   RoleMember,
   SecurityEvent,
   TodayStats,
@@ -208,6 +210,18 @@ export const api = {
     return request<{ ok: boolean; items: AdminRole[]; total: number }>(
       "/v1/admin/roles"
     );
+  },
+  products() {
+    return request<{ ok: boolean; items: Product[] }>("/v1/admin/products");
+  },
+  createProduct(name: string, slug = "") {
+    return request<{ ok: boolean; product: Product }>("/v1/admin/products", { method: "POST", body: { name, slug } });
+  },
+  plans(productId: string) {
+    return request<{ ok: boolean; items: Plan[] }>(`/v1/admin/products/${productId}/plans`);
+  },
+  createPlan(productId: string, input: { name: string; code: string; level: number; max_devices: number }) {
+    return request<{ ok: boolean; plan: Plan }>(`/v1/admin/products/${productId}/plans`, { method: "POST", body: input });
   },
   credentials() {
     return request<{ ok: boolean; credentials: ApplicationCredential[] }>(
