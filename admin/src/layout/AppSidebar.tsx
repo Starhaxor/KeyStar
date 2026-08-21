@@ -75,6 +75,12 @@ const navItems: NavItem[] = [
   },
   {
     icon: <LockIcon />,
+    name: "API Credentials",
+    path: "/credentials",
+    permission: "credentials.read",
+  },
+  {
+    icon: <LockIcon />,
     name: "Security",
     path: "/security",
     children: [
