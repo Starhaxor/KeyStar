@@ -25,39 +25,31 @@ function getSystemTheme(): ResolvedTheme {
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
-  const [theme, setThemeState] = useState<Theme>("system");
-  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>("light");
-  const [isInitialized, setIsInitialized] = useState(false);
+  const [theme, setThemeState] = useState<Theme>(() => {
+    if (typeof window === "undefined") return "system";
+    const saved = localStorage.getItem("theme");
+    return saved === "light" || saved === "dark" ? saved : "system";
+  });
+  const [systemTheme, setSystemTheme] = useState<ResolvedTheme>(() =>
+    typeof window === "undefined" ? "light" : getSystemTheme()
+  );
+  const resolvedTheme = theme === "system" ? systemTheme : theme;
 
   useEffect(() => {
-    const saved = localStorage.getItem("theme") as Theme | null;
-    const initial: Theme =
-      saved === "light" || saved === "dark" ? saved : "system";
-    setThemeState(initial);
-    setResolvedTheme(initial === "system" ? getSystemTheme() : initial);
-    setIsInitialized(true);
-  }, []);
+    if (theme !== "system") return;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const update = () => setSystemTheme(media.matches ? "dark" : "light");
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, [theme]);
 
   useEffect(() => {
-    if (!isInitialized) return;
-    if (theme === "system") {
-      const media = window.matchMedia("(prefers-color-scheme: dark)");
-      const update = () => setResolvedTheme(media.matches ? "dark" : "light");
-      update();
-      media.addEventListener("change", update);
-      return () => media.removeEventListener("change", update);
-    }
-    setResolvedTheme(theme);
-  }, [theme, isInitialized]);
-
-  useEffect(() => {
-    if (!isInitialized) return;
     localStorage.setItem("theme", theme);
     document.documentElement.classList.toggle(
       "dark",
       resolvedTheme === "dark"
     );
-  }, [theme, resolvedTheme, isInitialized]);
+  }, [theme, resolvedTheme]);
 
   const setTheme = (next: Theme) => setThemeState(next);
 

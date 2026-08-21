@@ -1,6 +1,5 @@
 "use client";
 import ConsoleSection, {
-  EmptyNote,
   ErrorNote,
   LoadingNote,
   PageTitle,
@@ -44,7 +43,7 @@ export default function SecurityEventsPage() {
     load();
   }, [load]);
 
-  const allItems = result?.items ?? [];
+  const allItems = useMemo(() => result?.items ?? [], [result]);
   const items = useMemo(() => {
     const q = filter.trim().toLowerCase();
     if (!q) return allItems;

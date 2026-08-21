@@ -2,7 +2,6 @@
 import ActionBadge from "@/components/console/ActionBadge";
 import ConsoleSection, {
   ErrorNote,
-  LoadingNote,
   PageTitle,
 } from "@/components/console/ConsoleSection";
 import EmptyState from "@/components/console/EmptyState";

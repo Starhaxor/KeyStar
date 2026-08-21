@@ -1,7 +1,6 @@
 "use client";
 import ConsoleSection, {
   ErrorNote,
-  LoadingNote,
   PageTitle,
 } from "@/components/console/ConsoleSection";
 import EmptyState from "@/components/console/EmptyState";
@@ -64,7 +63,7 @@ export default function SessionsPage() {
     }
   }
 
-  const allItems = result?.items ?? [];
+  const allItems = useMemo(() => result?.items ?? [], [result]);
   const items = useMemo(() => {
     const q = filter.trim().toLowerCase();
     if (!q) return allItems;

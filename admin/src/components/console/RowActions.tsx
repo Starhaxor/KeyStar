@@ -34,9 +34,6 @@ const toneClasses: Record<RowActionTone, string> = {
 export default function RowActions({ actions }: { actions: RowAction[] }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     if (!open) return;
@@ -68,7 +65,7 @@ export default function RowActions({ actions }: { actions: RowAction[] }) {
   }
 
   const menu =
-    open && pos && mounted
+    open && pos
       ? createPortal(
           <div
             data-row-actions
