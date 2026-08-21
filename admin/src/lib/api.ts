@@ -3,6 +3,7 @@
 
 import type {
   AdminAccount,
+  ApplicationCredential,
   AdminIdentity,
   AdminRole,
   AuditEntry,
@@ -11,6 +12,7 @@ import type {
   ConsoleDeviceDetail,
   ConsoleLicense,
   DailyStat,
+  DevicePolicy,
   ConsoleSession,
   ConsoleUser,
   CreatedLicense,
@@ -33,6 +35,8 @@ export const API_URL = "";
 const SESSION_COOKIE = "starloader_admin_session";
 const CSRF_COOKIE = "starloader_admin_csrf";
 const CSRF_HEADER = "X-CSRF-Token";
+const APPLICATION_COOKIE = "keystar_application_id";
+const APPLICATION_HEADER = "X-KeyStar-App";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -61,6 +65,8 @@ async function request<T>(
 ): Promise<T> {
   const method = init?.method ?? "GET";
   const headers: Record<string, string> = {};
+	const applicationID = readCookie(APPLICATION_COOKIE);
+	if (applicationID) headers[APPLICATION_HEADER] = applicationID;
   if (init?.body !== undefined) {
     headers["Content-Type"] = "application/json";
   }
@@ -202,6 +208,46 @@ export const api = {
     return request<{ ok: boolean; items: AdminRole[]; total: number }>(
       "/v1/admin/roles"
     );
+  },
+  credentials() {
+    return request<{ ok: boolean; credentials: ApplicationCredential[] }>(
+      "/v1/admin/credentials"
+    );
+  },
+  createCredential(input: {
+    name: string;
+    environment: "test" | "live";
+    type: "publishable" | "secret";
+    scopes: string[];
+    expires_in?: string;
+  }) {
+    return request<{ ok: boolean; credential: ApplicationCredential; key: string }>(
+      "/v1/admin/credentials",
+      { method: "POST", body: input }
+    );
+  },
+  revokeCredential(credentialId: string) {
+    return request<{ ok: boolean }>(
+      `/v1/admin/credentials/${credentialId}/revoke`,
+      { method: "POST", body: {} }
+    );
+  },
+  devicePolicy() {
+    return request<{ ok: boolean; policy: DevicePolicy }>(
+      "/v1/admin/devices/policy"
+    );
+  },
+  updateDevicePolicy(input: Omit<DevicePolicy, "id" | "application_id" | "created_at" | "updated_at">) {
+    return request<{ ok: boolean; policy: DevicePolicy }>(
+      "/v1/admin/devices/policy",
+      { method: "PATCH", body: input }
+    );
+  },
+  resetDevicePolicy() {
+    return request<{ ok: boolean }>("/v1/admin/devices/policy", {
+      method: "DELETE",
+      body: {},
+    });
   },
   createRole(
     name: string,

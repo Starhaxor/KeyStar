@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Preserve default-application behavior when no application header is sent.
+- Preserve default-application behavior when no `X-KeyStar-App` header is sent.
 - Validate authorization and application boundaries in Go for every request.
 - Return credential and webhook secrets only at creation time.
 - Write and observe a failing test before every production behavior change.
@@ -59,7 +59,7 @@ Expected: FAIL because handlers use the default application.
 
 - [ ] **Step 3: Implement context resolution**
 
-Resolve and validate `X-KeyStar-Application-ID` once in the admin router, place it in request context, update application-scoped routes to call `AdminApplicationID`, and preserve the existing default only for requests without a header. Add the matching domain and UI permissions.
+Resolve and validate `X-KeyStar-App` once in the admin router, place it in request context, update application-scoped routes to call `AdminApplicationID`, and preserve the existing default only for requests without a header. Add the matching domain and UI permissions.
 
 - [ ] **Step 4: Implement the frontend provider**
 
@@ -156,7 +156,7 @@ it("sends the selected application header for webhook creation", async () => {
   fetchMock.mockResponseOnce(JSON.stringify({ ok: true, webhook: { id: "w-1" }, secret: "once" }));
   await api.createWebhook({ url: "https://example.test/hook", events: ["license.*"] });
   expect(fetchMock).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
-    headers: expect.objectContaining({ "X-KeyStar-Application-ID": "app-2" }),
+    headers: expect.objectContaining({ "X-KeyStar-App": "app-2" }),
   }));
 });
 ```

@@ -200,3 +200,29 @@ export interface CreatedLicense {
   license: ConsoleLicense;
   key: string;
 }
+
+export interface ApplicationCredential {
+  id: string;
+  name: string;
+  environment: "test" | "live";
+  type: "publishable" | "secret";
+  scopes: string[];
+  key_prefix: string;
+  status: string;
+  last_used_at: string | null;
+  expires_at: string | null;
+  created_at: string;
+}
+
+export interface DevicePolicy {
+  id: string;
+  application_id: string;
+  tpm_policy: "optional" | "required" | "disabled";
+  min_match_score: number;
+  step_up_score: number;
+  allow_auto_rebind: boolean;
+  rebind_cooldown_seconds: number;
+  max_device_changes_per_30d: number;
+  created_at: string;
+  updated_at: string;
+}
