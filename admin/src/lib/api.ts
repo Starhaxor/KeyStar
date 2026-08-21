@@ -136,6 +136,15 @@ function pageQuery(page: number, extra?: Record<string, string>) {
   return params.toString();
 }
 
+export async function fetchAllPages<T>(load: (page: number, pageSize: number) => Promise<PageResult<T>>, pageSize = 100): Promise<T[]> {
+  const first = await load(1, pageSize);
+  const items = [...first.items];
+  for (let page = 2; page <= Math.ceil(first.total / pageSize); page += 1) {
+    items.push(...(await load(page, pageSize)).items);
+  }
+  return items;
+}
+
 export const api = {
   login(email: string, password: string) {
     return request<{ ok: boolean } & LoginResponse>("/v1/admin/auth/login", {
@@ -440,9 +449,9 @@ export const api = {
       body: { password: password ?? "" },
     });
   },
-  licenses(page: number) {
+  licenses(page: number, pageSize = 20) {
     return request<{ ok: boolean } & PageResult<ConsoleLicense>>(
-      `/v1/admin/licenses?${pageQuery(page)}`
+      `/v1/admin/licenses?${new URLSearchParams({ page: String(page), page_size: String(pageSize) })}`
     );
   },
   createLicense(
@@ -514,9 +523,9 @@ export const api = {
       { method: "POST", body: {} }
     );
   },
-  devices(page: number) {
+  devices(page: number, pageSize = 20) {
     return request<{ ok: boolean } & PageResult<ConsoleDevice>>(
-      `/v1/admin/devices?${pageQuery(page)}`
+      `/v1/admin/devices?${new URLSearchParams({ page: String(page), page_size: String(pageSize) })}`
     );
   },
   deviceDetail(deviceId: string) {
@@ -536,9 +545,9 @@ export const api = {
       body: {},
     });
   },
-  sessions(page: number) {
+  sessions(page: number, pageSize = 20) {
     return request<{ ok: boolean } & PageResult<ConsoleSession>>(
-      `/v1/admin/sessions?${pageQuery(page)}`
+      `/v1/admin/sessions?${new URLSearchParams({ page: String(page), page_size: String(pageSize) })}`
     );
   },
   revokeSession(sessionId: string) {

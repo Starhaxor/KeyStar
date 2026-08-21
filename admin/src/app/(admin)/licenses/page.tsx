@@ -13,7 +13,7 @@ import StatusBadge from "@/components/console/StatusBadge";
 import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import Pagination from "@/components/tables/Pagination";
-import { api, formatDateTime } from "@/lib/api";
+import { api, fetchAllPages, formatDateTime } from "@/lib/api";
 import type { ConsoleLicense, PageResult } from "@/lib/types";
 import { DocsIcon } from "@/icons";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -179,6 +179,7 @@ export default function LicensesPage() {
                 formatDateTime(l.expires_at),
                 formatDateTime(l.created_at),
               ])}
+              loadAllRows={async () => (await fetchAllPages(api.licenses)).map((l) => [l.user_email, l.product, l.status, l.max_devices, formatDateTime(l.expires_at), formatDateTime(l.created_at)])}
             />
           </div>
         }

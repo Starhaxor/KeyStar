@@ -14,7 +14,7 @@ import Pagination from "@/components/tables/Pagination";
 import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import { useAdminIdentity } from "@/context/AdminIdentityContext";
-import { api, formatDateTime } from "@/lib/api";
+import { api, fetchAllPages, formatDateTime } from "@/lib/api";
 import type { ConsoleDevice, ConsoleDeviceDetail, PageResult } from "@/lib/types";
 import { BoxCubeIcon } from "@/icons";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -184,6 +184,7 @@ export default function DevicesPage() {
                 formatDateTime(d.last_seen_at),
                 formatDateTime(d.created_at),
               ])}
+              loadAllRows={async () => (await fetchAllPages(api.devices)).map((d) => [d.id, d.user_email, d.tpm_registered ? "yes" : "no", d.status, formatDateTime(d.last_seen_at), formatDateTime(d.created_at)])}
             />
           </div>
         }

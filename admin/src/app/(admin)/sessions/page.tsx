@@ -11,7 +11,7 @@ import { TableSkeleton } from "@/components/common/Skeleton";
 import ExportCsvButton from "@/components/common/ExportCsvButton";
 import Pagination from "@/components/tables/Pagination";
 import { useToast } from "@/context/ToastContext";
-import { api, formatDateTime } from "@/lib/api";
+import { api, fetchAllPages, formatDateTime } from "@/lib/api";
 import type { ConsoleSession, PageResult } from "@/lib/types";
 import { TimeIcon } from "@/icons";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -128,6 +128,7 @@ export default function SessionsPage() {
                 formatDateTime(s.expires_at),
                 formatDateTime(s.created_at),
               ])}
+              loadAllRows={async () => (await fetchAllPages(api.sessions)).map((s) => [s.id, s.user_email, s.status, formatDateTime(s.expires_at), formatDateTime(s.created_at)])}
             />
           </div>
         }
