@@ -122,15 +122,15 @@ func (s *Store) ConsoleDailyStats(ctx context.Context, days int) ([]domain.Daily
 	return stats, nil
 }
 
-func (s *Store) ListConsoleUsers(ctx context.Context, offset, limit int, search string, status string) ([]domain.ConsoleUser, int64, error) {
+func (s *Store) ListConsoleUsers(ctx context.Context, applicationID string, offset, limit int, search string, status string) ([]domain.ConsoleUser, int64, error) {
 	search = strings.ToLower(strings.TrimSpace(search))
 	status = strings.ToLower(strings.TrimSpace(status))
 	var total int64
 	countQuery := `select count(*) from users`
-	countArgs := []any{}
-	where := []string{}
+	countArgs := []any{applicationID}
+	where := []string{"application_id = $1::uuid"}
 	if search != "" {
-		where = append(where, "position($1 in email) > 0")
+		where = append(where, "position($2 in email) > 0")
 		countArgs = append(countArgs, search)
 	}
 	if status == "active" || status == "disabled" || status == "banned" {
@@ -146,8 +146,9 @@ func (s *Store) ListConsoleUsers(ctx context.Context, offset, limit int, search 
 		with filtered as (
 			select id
 			from users
-			where ($3 = '' or position($3 in email) > 0)
-			  and ($4 = '' or status = $4)
+			where application_id = $1::uuid
+			  and ($4 = '' or position($4 in email) > 0)
+			  and ($5 = '' or status = $5)
 			order by created_at desc, id desc
 			limit $2 offset $1
 		)
@@ -159,7 +160,7 @@ func (s *Store) ListConsoleUsers(ctx context.Context, offset, limit int, search 
 			(select max(ss.created_at) from auth_sessions ss where ss.user_id = u.id)
 		from filtered f
 		join users u on u.id = f.id
-		order by u.created_at desc, u.id desc`, offset, limit, search, status)
+		order by u.created_at desc, u.id desc`, applicationID, offset, limit, search, status)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list console users: %w", err)
 	}
@@ -179,7 +180,7 @@ func (s *Store) ListConsoleUsers(ctx context.Context, offset, limit int, search 
 	return users, total, nil
 }
 
-func (s *Store) ConsoleUserDetail(ctx context.Context, userID string) (*domain.ConsoleUserDetail, error) {
+func (s *Store) ConsoleUserDetail(ctx context.Context, applicationID, userID string) (*domain.ConsoleUserDetail, error) {
 	row := s.db.QueryRow(ctx, `
 		select u.id::text, u.email, u.status, u.created_at,
 			(select count(*)::integer from licenses l where l.user_id = u.id),
@@ -189,7 +190,7 @@ func (s *Store) ConsoleUserDetail(ctx context.Context, userID string) (*domain.C
 			(select max(ss.created_at) from auth_sessions ss where ss.user_id = u.id),
 			u.notes, u.ban_reason, u.banned_at, u.ban_expires_at
 		from users u
-		where u.id = $1::uuid`, userID)
+		where u.id = $1::uuid and u.application_id = $2::uuid`, userID, applicationID)
 	var user domain.ConsoleUser
 	detail := &domain.ConsoleUserDetail{}
 	err := row.Scan(&user.ID, &user.Email, &user.Status, &user.CreatedAt,
@@ -424,12 +425,12 @@ func (s *Store) ResetUserDevices(ctx context.Context, applicationID, userID stri
 	return tag.RowsAffected(), nil
 }
 
-func (s *Store) ListConsoleLicenses(ctx context.Context, offset, limit int) ([]domain.ConsoleLicense, int64, error) {
+func (s *Store) ListConsoleLicenses(ctx context.Context, applicationID string, offset, limit int) ([]domain.ConsoleLicense, int64, error) {
 	var total int64
-	if err := s.db.QueryRow(ctx, `select count(*) from licenses`).Scan(&total); err != nil {
+	if err := s.db.QueryRow(ctx, `select count(*) from licenses where application_id = $1::uuid`, applicationID).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count console licenses: %w", err)
 	}
-	licenses, err := s.listConsoleLicenses(ctx, "order by l.created_at desc, l.id desc limit $1 offset $2", limit, offset)
+	licenses, err := s.listConsoleLicenses(ctx, "where l.application_id = $1::uuid order by l.created_at desc, l.id desc limit $2 offset $3", applicationID, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -595,12 +596,12 @@ func (s *Store) AdminRevokeLicense(ctx context.Context, applicationID, licenseID
 	return nil
 }
 
-func (s *Store) ListConsoleDevices(ctx context.Context, offset, limit int) ([]domain.ConsoleDevice, int64, error) {
+func (s *Store) ListConsoleDevices(ctx context.Context, applicationID string, offset, limit int) ([]domain.ConsoleDevice, int64, error) {
 	var total int64
-	if err := s.db.QueryRow(ctx, `select count(*) from devices`).Scan(&total); err != nil {
+	if err := s.db.QueryRow(ctx, `select count(*) from devices where application_id = $1::uuid`, applicationID).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count console devices: %w", err)
 	}
-	devices, err := s.listConsoleDevices(ctx, "order by d.last_seen_at desc, d.id desc limit $1 offset $2", limit, offset)
+	devices, err := s.listConsoleDevices(ctx, "where d.application_id = $1::uuid order by d.last_seen_at desc, d.id desc limit $2 offset $3", applicationID, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -644,7 +645,7 @@ func (s *Store) listConsoleDevices(ctx context.Context, tail string, args ...any
 // FindConsoleDeviceByID returns the redacted device view plus the TPM public
 // key fingerprint and the license product. No raw hardware identifier leaves
 // the database.
-func (s *Store) FindConsoleDeviceByID(ctx context.Context, deviceID string) (*domain.ConsoleDeviceDetail, error) {
+func (s *Store) FindConsoleDeviceByID(ctx context.Context, applicationID, deviceID string) (*domain.ConsoleDeviceDetail, error) {
 	row := s.db.QueryRow(ctx, `
 		select d.id::text, d.user_id::text, u.email, d.license_id::text,
 			octet_length(d.tpm_public_key) > 0,
@@ -659,7 +660,7 @@ func (s *Store) FindConsoleDeviceByID(ctx context.Context, deviceID string) (*do
 		join users u on u.id = d.user_id
 		join licenses l on l.id = d.license_id
 		join products p on p.id = l.product_id
-		where d.id = $1::uuid`, deviceID)
+		where d.id = $1::uuid and d.application_id = $2::uuid`, deviceID, applicationID)
 	var detail domain.ConsoleDeviceDetail
 	err := row.Scan(&detail.Device.ID, &detail.Device.UserID, &detail.Device.UserEmail, &detail.Device.LicenseID,
 		&detail.Device.TPMRegistered, &detail.Device.HasSMBIOSUUID, &detail.Device.HasMotherboardSerial,
@@ -776,12 +777,12 @@ func (s *Store) AdminRevokeDevice(ctx context.Context, applicationID, deviceID s
 	return nil
 }
 
-func (s *Store) ListConsoleSessions(ctx context.Context, offset, limit int) ([]domain.ConsoleSession, int64, error) {
+func (s *Store) ListConsoleSessions(ctx context.Context, applicationID string, offset, limit int) ([]domain.ConsoleSession, int64, error) {
 	var total int64
-	if err := s.db.QueryRow(ctx, `select count(*) from auth_sessions`).Scan(&total); err != nil {
+	if err := s.db.QueryRow(ctx, `select count(*) from auth_sessions where application_id = $1::uuid`, applicationID).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count console sessions: %w", err)
 	}
-	sessions, err := s.listConsoleSessions(ctx, "order by ss.created_at desc, ss.id desc limit $1 offset $2", limit, offset)
+	sessions, err := s.listConsoleSessions(ctx, "where ss.application_id = $1::uuid order by ss.created_at desc, ss.id desc limit $2 offset $3", applicationID, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}

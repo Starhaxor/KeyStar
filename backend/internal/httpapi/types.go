@@ -88,8 +88,8 @@ type AdminConsoleStore interface {
 	ConsoleOverview(ctx context.Context) (*domain.ConsoleOverview, error)
 	ConsoleTodayStats(ctx context.Context) (*domain.ConsoleTodayStats, error)
 	ConsoleDailyStats(ctx context.Context, days int) ([]domain.DailyStat, error)
-	ListConsoleUsers(ctx context.Context, offset, limit int, search string, status string) ([]domain.ConsoleUser, int64, error)
-	ConsoleUserDetail(ctx context.Context, userID string) (*domain.ConsoleUserDetail, error)
+	ListConsoleUsers(ctx context.Context, applicationID string, offset, limit int, search string, status string) ([]domain.ConsoleUser, int64, error)
+	ConsoleUserDetail(ctx context.Context, applicationID, userID string) (*domain.ConsoleUserDetail, error)
 	// End-user mutations are tenant-scoped; applicationID is the application
 	// boundary of the operation. Dashboard list/read views remain global until
 	// per-application console routing lands (platform phase 9).
@@ -107,7 +107,7 @@ type AdminConsoleStore interface {
 	SetUserPassword(ctx context.Context, applicationID, userID, passwordHash string) error
 	CreateUser(ctx context.Context, applicationID string, input domain.NewUser) (*domain.User, error)
 	RevokeUserSessions(ctx context.Context, applicationID, userID string) (int64, error)
-	ListConsoleLicenses(ctx context.Context, offset, limit int) ([]domain.ConsoleLicense, int64, error)
+	ListConsoleLicenses(ctx context.Context, applicationID string, offset, limit int) ([]domain.ConsoleLicense, int64, error)
 	ResolveProductPlan(ctx context.Context, applicationID, name string) (string, string, error)
 	CreateLicense(ctx context.Context, applicationID string, input domain.NewLicense) (*domain.License, error)
 	FindLicenseByID(ctx context.Context, applicationID, licenseID string) (*domain.License, error)
@@ -117,11 +117,11 @@ type AdminConsoleStore interface {
 	CreateVariable(ctx context.Context, applicationID, key, value, description string) (*domain.Variable, error)
 	UpdateVariable(ctx context.Context, applicationID, variableID, value, description string) error
 	DeleteVariable(ctx context.Context, applicationID, variableID string) error
-	ListConsoleDevices(ctx context.Context, offset, limit int) ([]domain.ConsoleDevice, int64, error)
-	FindConsoleDeviceByID(ctx context.Context, deviceID string) (*domain.ConsoleDeviceDetail, error)
+	ListConsoleDevices(ctx context.Context, applicationID string, offset, limit int) ([]domain.ConsoleDevice, int64, error)
+	FindConsoleDeviceByID(ctx context.Context, applicationID, deviceID string) (*domain.ConsoleDeviceDetail, error)
 	AdminRevokeDevice(ctx context.Context, applicationID, deviceID string) error
 	AdminResetDevice(ctx context.Context, applicationID, deviceID string) error
-	ListConsoleSessions(ctx context.Context, offset, limit int) ([]domain.ConsoleSession, int64, error)
+	ListConsoleSessions(ctx context.Context, applicationID string, offset, limit int) ([]domain.ConsoleSession, int64, error)
 	AdminRevokeAuthSession(ctx context.Context, applicationID, sessionID string) error
 	CreateCredential(ctx context.Context, input domain.NewApplicationCredential) (*domain.ApplicationCredential, error)
 	ListCredentials(ctx context.Context, applicationID string) ([]domain.ApplicationCredential, error)

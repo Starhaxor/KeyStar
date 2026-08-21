@@ -298,7 +298,7 @@ func (router *Router) handleAdminUserCreate(writer http.ResponseWriter, request 
 
 func (router *Router) handleAdminUserList(writer http.ResponseWriter, request *http.Request) {
 	page, pageSize, offset := parseAdminPagination(request)
-	users, total, err := router.Admin.Console.ListConsoleUsers(request.Context(), offset, pageSize, request.URL.Query().Get("search"), request.URL.Query().Get("status"))
+	users, total, err := router.Admin.Console.ListConsoleUsers(request.Context(), router.AdminApplicationID(request), offset, pageSize, request.URL.Query().Get("search"), request.URL.Query().Get("status"))
 	if err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
@@ -350,7 +350,7 @@ func (router *Router) handleAdminUserDetail(writer http.ResponseWriter, request 
 		httpapi.WriteError(writer, request, http.StatusNotFound, "USER_NOT_FOUND", "user not found")
 		return
 	}
-	detail, err := router.Admin.Console.ConsoleUserDetail(request.Context(), userID)
+	detail, err := router.Admin.Console.ConsoleUserDetail(request.Context(), router.AdminApplicationID(request), userID)
 	if err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
@@ -844,7 +844,7 @@ func (router *Router) routeAdminLicenses(writer http.ResponseWriter, request *ht
 
 func (router *Router) handleAdminLicenseList(writer http.ResponseWriter, request *http.Request) {
 	page, pageSize, offset := parseAdminPagination(request)
-	licenses, total, err := router.Admin.Console.ListConsoleLicenses(request.Context(), offset, pageSize)
+	licenses, total, err := router.Admin.Console.ListConsoleLicenses(request.Context(), router.AdminApplicationID(request), offset, pageSize)
 	if err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
@@ -1260,7 +1260,7 @@ func (router *Router) routeAdminDevices(writer http.ResponseWriter, request *htt
 
 func (router *Router) handleAdminDeviceList(writer http.ResponseWriter, request *http.Request) {
 	page, pageSize, offset := parseAdminPagination(request)
-	devices, total, err := router.Admin.Console.ListConsoleDevices(request.Context(), offset, pageSize)
+	devices, total, err := router.Admin.Console.ListConsoleDevices(request.Context(), router.AdminApplicationID(request), offset, pageSize)
 	if err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
@@ -1291,7 +1291,7 @@ func (router *Router) handleAdminDeviceDetail(writer http.ResponseWriter, reques
 		httpapi.WriteError(writer, request, http.StatusNotFound, "DEVICE_NOT_FOUND", "device not found")
 		return
 	}
-	detail, err := router.Admin.Console.FindConsoleDeviceByID(request.Context(), deviceID)
+	detail, err := router.Admin.Console.FindConsoleDeviceByID(request.Context(), router.AdminApplicationID(request), deviceID)
 	if err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
@@ -1373,7 +1373,7 @@ func (router *Router) routeAdminSessions(writer http.ResponseWriter, request *ht
 
 func (router *Router) handleAdminSessionList(writer http.ResponseWriter, request *http.Request) {
 	page, pageSize, offset := parseAdminPagination(request)
-	sessions, total, err := router.Admin.Console.ListConsoleSessions(request.Context(), offset, pageSize)
+	sessions, total, err := router.Admin.Console.ListConsoleSessions(request.Context(), router.AdminApplicationID(request), offset, pageSize)
 	if err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
