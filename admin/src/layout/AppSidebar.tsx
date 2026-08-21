@@ -90,6 +90,7 @@ const navItems: NavItem[] = [
     icon: <LockIcon />,
     name: "Security",
     path: "/security",
+    permission: "security.read",
     children: [
       { label: "MFA & settings", href: "/security" },
       { label: "Security events", href: "/security-events" },
