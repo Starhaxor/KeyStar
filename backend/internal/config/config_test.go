@@ -37,6 +37,18 @@ func TestLoadReturnsConfiguredValues(t *testing.T) {
 	}
 }
 
+func TestLoadRequiresClientCredentialsByDefault(t *testing.T) {
+	setRequiredEnvironment(t)
+
+	configuration, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !configuration.ClientCredentialsRequired {
+		t.Fatal("ClientCredentialsRequired should default to true")
+	}
+}
+
 func TestLoadRejectsReusedHMACKey(t *testing.T) {
 	setRequiredEnvironment(t)
 	t.Setenv("HARDWARE_HMAC_KEY", "license-hmac-key")

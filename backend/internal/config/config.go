@@ -40,6 +40,9 @@ type Config struct {
 	AdminAllowedOrigins []string
 	AdminSessionTTL     time.Duration
 	AdminCookieSecure   bool
+	// ClientCredentialsRequired keeps the public client API in strict mode:
+	// login and device verification require a publishable API key.
+	ClientCredentialsRequired bool
 }
 
 // Load reads the complete configuration, refusing to start when any required
@@ -107,18 +110,19 @@ func Load() (Config, error) {
 	}
 
 	return Config{
-		DatabaseURL:         values["DATABASE_URL"],
-		LicenseHMACKey:      values["LICENSE_HMAC_KEY"],
-		HardwareHMACKey:     values["HARDWARE_HMAC_KEY"],
-		Ed25519PrivateKey:   values["ED25519_PRIVATE_KEY"],
-		LicenseIssuer:       values["LICENSE_ISSUER"],
-		LicenseAudience:     values["LICENSE_AUDIENCE"],
-		Product:             values["PRODUCT"],
-		LoginTimeout:        loginTimeout,
-		AdminConsoleEnabled: adminConsoleEnabled,
-		AdminSessionSecret:  values["ADMIN_SESSION_SECRET"],
-		AdminAllowedOrigins: adminAllowedOrigins,
-		AdminSessionTTL:     adminSessionTTL,
-		AdminCookieSecure:   adminCookieSecure,
+		DatabaseURL:               values["DATABASE_URL"],
+		LicenseHMACKey:            values["LICENSE_HMAC_KEY"],
+		HardwareHMACKey:           values["HARDWARE_HMAC_KEY"],
+		Ed25519PrivateKey:         values["ED25519_PRIVATE_KEY"],
+		LicenseIssuer:             values["LICENSE_ISSUER"],
+		LicenseAudience:           values["LICENSE_AUDIENCE"],
+		Product:                   values["PRODUCT"],
+		LoginTimeout:              loginTimeout,
+		AdminConsoleEnabled:       adminConsoleEnabled,
+		AdminSessionSecret:        values["ADMIN_SESSION_SECRET"],
+		AdminAllowedOrigins:       adminAllowedOrigins,
+		AdminSessionTTL:           adminSessionTTL,
+		AdminCookieSecure:         adminCookieSecure,
+		ClientCredentialsRequired: true,
 	}, nil
 }

@@ -149,6 +149,8 @@ func (router *Router) writeDeviceVerifyError(writer http.ResponseWriter, request
 		WriteError(writer, request, http.StatusForbidden, "DEVICE_LIMIT_REACHED", "device limit reached")
 	case errors.Is(err, service.ErrDeviceRevoked):
 		WriteError(writer, request, http.StatusForbidden, "DEVICE_REVOKED", "device revoked")
+	case errors.Is(err, service.ErrDeviceBanned):
+		WriteError(writer, request, http.StatusForbidden, "DEVICE_BANNED", "device banned")
 	case errors.Is(err, service.ErrLicenseExpired):
 		WriteError(writer, request, http.StatusForbidden, "LICENSE_EXPIRED", "license expired")
 	case errors.Is(err, service.ErrLicenseRevoked):

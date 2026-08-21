@@ -2,6 +2,38 @@ package domain
 
 import "time"
 
+type BanStatus string
+
+const (
+	BanStatusActive  BanStatus = "active"
+	BanStatusLifted  BanStatus = "lifted"
+	BanStatusExpired BanStatus = "expired"
+)
+
+// DeviceBan is a ban on one existing device record. It deliberately retains
+// no hardware identifiers; verification matches the device's protected data.
+type DeviceBan struct {
+	ID            string
+	ApplicationID string
+	DeviceID      string
+	Reason        string
+	ExpiresAt     *time.Time
+	Status        BanStatus
+	BannedAt      time.Time
+	LiftedAt      *time.Time
+	LiftReason    string
+}
+
+type ConsoleDeviceBan struct {
+	DeviceBan
+	UserID    string
+	UserEmail string
+}
+
+func (ban *DeviceBan) IsActiveAt(now time.Time) bool {
+	return ban != nil && ban.Status == BanStatusActive && (ban.ExpiresAt == nil || ban.ExpiresAt.After(now))
+}
+
 // ConsoleUser is the admin dashboard view of an end user, enriched with
 // ownership counts so listing does not require per-row round trips.
 type ConsoleUser struct {

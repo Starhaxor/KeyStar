@@ -115,6 +115,22 @@ func (locked *LockedChallenge) UpdateDevice(ctx context.Context, input domain.Up
 	return nil
 }
 
+// IsDeviceBanned checks only an existing device ID inside the verification
+// transaction. The query never exposes protected hardware fields.
+func (locked *LockedChallenge) IsDeviceBanned(ctx context.Context, deviceID string, now time.Time) (bool, error) {
+	var banned bool
+	err := locked.tx.QueryRow(ctx, `
+		select exists(
+			select 1 from device_bans
+			where application_id = $1::uuid and device_id = $2::uuid and status = 'active'
+			and (expires_at is null or expires_at > $3)
+		)`, locked.applicationID, deviceID, now).Scan(&banned)
+	if err != nil {
+		return false, fmt.Errorf("check device ban: %w", err)
+	}
+	return banned, nil
+}
+
 func (locked *LockedChallenge) MarkSessionVerified(ctx context.Context, now time.Time) error {
 	tag, err := locked.tx.Exec(ctx, `
 		update auth_sessions

@@ -303,6 +303,10 @@ func (transaction *fakeDeviceTransaction) UpdateDevice(_ context.Context, input 
 	}
 	return errors.New("missing device")
 }
+
+func (transaction *fakeDeviceTransaction) IsDeviceBanned(context.Context, string, time.Time) (bool, error) {
+	return false, nil
+}
 func (transaction *fakeDeviceTransaction) MarkSessionVerified(_ context.Context, _ time.Time) error {
 	transaction.session.Status = domain.SessionStatusVerified
 	return nil

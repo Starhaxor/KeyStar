@@ -88,6 +88,7 @@ func TestDeviceVerifyMapsSafeServiceErrors(t *testing.T) {
 		{name: "invalid signature", err: service.ErrInvalidDeviceSignature, status: http.StatusUnauthorized, code: "INVALID_DEVICE_SIGNATURE"},
 		{name: "limit", err: service.ErrDeviceLimitReached, status: http.StatusForbidden, code: "DEVICE_LIMIT_REACHED"},
 		{name: "device revoked", err: service.ErrDeviceRevoked, status: http.StatusForbidden, code: "DEVICE_REVOKED"},
+		{name: "device banned", err: service.ErrDeviceBanned, status: http.StatusForbidden, code: "DEVICE_BANNED"},
 		{name: "license revoked", err: service.ErrLicenseRevoked, status: http.StatusForbidden, code: "LICENSE_REVOKED"},
 		{name: "invalid request", err: service.ErrInvalidVerifyRequest, status: http.StatusBadRequest, code: "INVALID_REQUEST"},
 		{name: "internal", err: errors.New("database secret.internal failed"), status: http.StatusInternalServerError, code: "SERVER_ERROR"},

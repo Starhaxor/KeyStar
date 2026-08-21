@@ -67,12 +67,12 @@ export function hasSessionCookie(): boolean {
 
 async function request<T>(
   path: string,
-  init?: { method?: string; body?: unknown; isLogin?: boolean }
+  init?: { method?: string; body?: unknown; isLogin?: boolean; skipApplicationHeader?: boolean }
 ): Promise<T> {
   const method = init?.method ?? "GET";
   const headers: Record<string, string> = {};
 	const applicationID = readCookie(APPLICATION_COOKIE);
-	if (applicationID) headers[APPLICATION_HEADER] = applicationID;
+	if (applicationID && !init?.skipApplicationHeader) headers[APPLICATION_HEADER] = applicationID;
   if (init?.body !== undefined) {
     headers["Content-Type"] = "application/json";
   }
@@ -90,6 +90,7 @@ async function request<T>(
       headers,
       credentials: "include",
       body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
+      cache: "no-store",
     });
   } catch {
     throw new ApiError(0, "NETWORK_ERROR", "Backend is unreachable");
@@ -225,10 +226,10 @@ export const api = {
     );
   },
   applications() {
-    return request<{ ok: boolean; items: Application[] }>("/v1/admin/applications");
+    return request<{ ok: boolean; items: Application[] }>("/v1/admin/applications", { skipApplicationHeader: true });
   },
   organizations() {
-    return request<{ ok: boolean; items: Organization[] }>("/v1/admin/applications/organizations");
+    return request<{ ok: boolean; items: Organization[] }>("/v1/admin/applications/organizations", { skipApplicationHeader: true });
   },
   createOrganization(name: string) {
     return request<{ ok: boolean; organization: Organization }>("/v1/admin/applications/organizations", { method: "POST", body: { name } });
@@ -365,6 +366,13 @@ export const api = {
       `/v1/admin/bans?${pageQuery(page, { search, status })}`
     );
   },
+  deviceBans(page: number, status = "") {
+    return request<{ ok: boolean } & PageResult<import("./types").DeviceBanRecord>>(`/v1/admin/device-bans?${pageQuery(page, { status })}`);
+  },
+  createDeviceBan(input: { device_id: string; reason: string; expires_at?: string }) {
+    return request<{ ok: boolean; ban: import("./types").DeviceBanRecord }>("/v1/admin/device-bans", { method: "POST", body: input });
+  },
+  liftDeviceBan(banId: string, reason = "") { return request<{ ok: boolean }>(`/v1/admin/device-bans/${banId}/lift`, { method: "POST", body: { reason } }); },
   createUser(email: string, password: string) {
     return request<{ ok: boolean; user: ConsoleUser }>("/v1/admin/users", {
       method: "POST",

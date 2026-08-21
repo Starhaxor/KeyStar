@@ -272,12 +272,12 @@ func (s *Store) BanUser(ctx context.Context, applicationID, userID, reason strin
 	if _, err := tx.Exec(ctx, `
 		update bans
 		set status = 'lifted', lifted_at = now(), lift_reason = 'superseded'
-		where user_id = $1::uuid and status = 'active'`, userID); err != nil {
+		where user_id = $1::uuid and application_id = $2::uuid and status = 'active'`, userID, applicationID); err != nil {
 		return fmt.Errorf("supersede previous ban record: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
-		insert into bans (user_id, reason, expires_at)
-		values ($1::uuid, $2, $3)`, userID, reason, expiresAt); err != nil {
+		insert into bans (application_id, user_id, reason, expires_at)
+		values ($1::uuid, $2::uuid, $3, $4)`, applicationID, userID, reason, expiresAt); err != nil {
 		return fmt.Errorf("record ban: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -311,8 +311,8 @@ func (s *Store) AutoUnbanExpired(ctx context.Context, applicationID, userID stri
 	if _, err := tx.Exec(ctx, `
 		update bans
 		set status = 'expired', lifted_at = now(), lift_reason = 'expired'
-		where user_id = $1::uuid and status = 'active'
-		  and expires_at is not null and expires_at <= now()`, userID); err != nil {
+		where user_id = $1::uuid and application_id = $2::uuid and status = 'active'
+		  and expires_at is not null and expires_at <= now()`, userID, applicationID); err != nil {
 		return fmt.Errorf("expire ban record: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -344,7 +344,7 @@ func (s *Store) UnbanUser(ctx context.Context, applicationID, userID string) err
 	if _, err := tx.Exec(ctx, `
 		update bans
 		set status = 'lifted', lifted_at = now(), lift_reason = 'admin'
-		where user_id = $1::uuid and status = 'active'`, userID); err != nil {
+		where user_id = $1::uuid and application_id = $2::uuid and status = 'active'`, userID, applicationID); err != nil {
 		return fmt.Errorf("lift ban record: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -356,11 +356,11 @@ func (s *Store) UnbanUser(ctx context.Context, applicationID, userID string) err
 // ListConsoleBans pages the ban history. statusFilter limits rows to one ban
 // state (active, lifted, expired); search is a substring match on the user's
 // email.
-func (s *Store) ListConsoleBans(ctx context.Context, offset, limit int, search, statusFilter string) ([]domain.BanRecord, int64, error) {
+func (s *Store) ListConsoleBans(ctx context.Context, applicationID string, offset, limit int, search, statusFilter string) ([]domain.BanRecord, int64, error) {
 	search = strings.ToLower(strings.TrimSpace(search))
 	statusFilter = strings.ToLower(strings.TrimSpace(statusFilter))
-	where := []string{}
-	args := []any{}
+	where := []string{"b.application_id = $1::uuid"}
+	args := []any{applicationID}
 	if search != "" {
 		args = append(args, search)
 		where = append(where, fmt.Sprintf("position($%d in lower(u.email)) > 0", len(args)))
@@ -404,6 +404,60 @@ func (s *Store) ListConsoleBans(ctx context.Context, offset, limit int, search, 
 		return nil, 0, fmt.Errorf("list console bans: %w", err)
 	}
 	return bans, total, nil
+}
+
+func (s *Store) ListConsoleDeviceBans(ctx context.Context, applicationID string, offset, limit int, status string) ([]domain.ConsoleDeviceBan, int64, error) {
+	args := []any{applicationID}
+	where := "where b.application_id = $1::uuid"
+	if status == "active" || status == "lifted" || status == "expired" {
+		args = append(args, status)
+		where += " and b.status = $2"
+	}
+	var total int64
+	if err := s.db.QueryRow(ctx, `select count(*) from device_bans b `+where, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count device bans: %w", err)
+	}
+	args = append(args, limit, offset)
+	rows, err := s.db.Query(ctx, `select b.id::text,b.application_id::text,b.device_id::text,b.reason,b.expires_at,b.status,b.banned_at,b.lifted_at,b.lift_reason,d.user_id::text,u.email from device_bans b join devices d on d.id=b.device_id join users u on u.id=d.user_id `+where+` order by b.banned_at desc,b.id desc limit $`+strconv.Itoa(len(args)-1)+` offset $`+strconv.Itoa(len(args)), args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list device bans: %w", err)
+	}
+	defer rows.Close()
+	items := make([]domain.ConsoleDeviceBan, 0, limit)
+	for rows.Next() {
+		var item domain.ConsoleDeviceBan
+		if err := rows.Scan(&item.ID, &item.ApplicationID, &item.DeviceID, &item.Reason, &item.ExpiresAt, &item.Status, &item.BannedAt, &item.LiftedAt, &item.LiftReason, &item.UserID, &item.UserEmail); err != nil {
+			return nil, 0, fmt.Errorf("scan device ban: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("list device bans: %w", err)
+	}
+	return items, total, nil
+}
+
+func (s *Store) CreateDeviceBan(ctx context.Context, applicationID, deviceID, reason string, expiresAt *time.Time) (*domain.ConsoleDeviceBan, error) {
+	row := s.db.QueryRow(ctx, `insert into device_bans(application_id,device_id,reason,expires_at) select $1::uuid,d.id,$3,$4 from devices d where d.id=$2::uuid and d.application_id=$1::uuid returning id::text,application_id::text,device_id::text,reason,expires_at,status,banned_at,lifted_at,lift_reason`, applicationID, deviceID, reason, expiresAt)
+	item := &domain.ConsoleDeviceBan{}
+	if err := row.Scan(&item.ID, &item.ApplicationID, &item.DeviceID, &item.Reason, &item.ExpiresAt, &item.Status, &item.BannedAt, &item.LiftedAt, &item.LiftReason); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, domain.ErrDeviceNotFound
+		}
+		return nil, fmt.Errorf("create device ban: %w", err)
+	}
+	return item, nil
+}
+
+func (s *Store) LiftDeviceBan(ctx context.Context, applicationID, banID, reason string) error {
+	err := s.db.QueryRow(ctx, `update device_bans set status='lifted',lifted_at=now(),lift_reason=$3 where id=$1::uuid and application_id=$2::uuid and status='active' returning id`, banID, applicationID, reason).Scan(new(string))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ErrDeviceNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("lift device ban: %w", err)
+	}
+	return nil
 }
 
 // ResetUserDevices revokes every device record of a user within one

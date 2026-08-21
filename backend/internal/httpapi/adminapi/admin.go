@@ -192,6 +192,8 @@ func (router *Router) routeAdmin(writer http.ResponseWriter, request *http.Reque
 		router.routeAdminApplications(writer, request, account, segments)
 	case len(segments) >= 1 && segments[0] == "devices":
 		router.routeAdminDevices(writer, request, account, segments)
+	case len(segments) >= 1 && segments[0] == "device-bans":
+		router.routeAdminDeviceBans(writer, request, account, segments)
 	case len(segments) >= 1 && segments[0] == "sessions":
 		router.routeAdminSessions(writer, request, account, segments)
 	case len(segments) == 1 && segments[0] == "audit-logs" && request.Method == http.MethodGet:

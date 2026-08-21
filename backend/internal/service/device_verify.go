@@ -33,6 +33,7 @@ var (
 	ErrInvalidDeviceSignature = errors.New("invalid device signature")
 	ErrDeviceLimitReached     = errors.New("device limit reached")
 	ErrDeviceRevoked          = errors.New("device revoked")
+	ErrDeviceBanned           = errors.New("device banned")
 	ErrTPMRequired            = errors.New("tpm is required by application device policy")
 	ErrInvalidRefreshToken    = errors.New("invalid refresh token")
 )
@@ -56,11 +57,11 @@ type VerifyInput struct {
 }
 
 type VerifiedSession struct {
-	Token         string
-	RefreshToken  string
-	ExpiresAt     time.Time
-	LicenseID     string
-	DeviceID      string
+	Token        string
+	RefreshToken string
+	ExpiresAt    time.Time
+	LicenseID    string
+	DeviceID     string
 }
 
 type DeviceTransaction interface {
@@ -70,6 +71,7 @@ type DeviceTransaction interface {
 	ListDevices(context.Context) ([]domain.Device, error)
 	CreateDevice(context.Context, domain.NewDevice) (*domain.Device, error)
 	UpdateDevice(context.Context, domain.UpdateDevice) error
+	IsDeviceBanned(context.Context, string, time.Time) (bool, error)
 	MarkSessionVerified(context.Context, time.Time) error
 }
 
@@ -232,6 +234,13 @@ func (service *DeviceService) Verify(ctx context.Context, input VerifyInput) (Ve
 			return err
 		}
 		if matched != nil {
+			banned, banErr := transaction.IsDeviceBanned(ctx, matched.ID, policyNow)
+			if banErr != nil {
+				return fmt.Errorf("check device ban: %w", banErr)
+			}
+			if banned {
+				return ErrDeviceBanned
+			}
 			if err := transaction.UpdateDevice(ctx, domain.UpdateDevice{
 				ID: matched.ID, SMBIOSUUIDHMAC: presented.SMBIOSUUIDHMAC,
 				MotherboardSerialHMAC: presented.MotherboardSerialHMAC, BIOSSerialHMAC: presented.BIOSSerialHMAC,
