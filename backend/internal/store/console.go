@@ -150,7 +150,7 @@ func (s *Store) ListConsoleUsers(ctx context.Context, applicationID string, offs
 			  and ($4 = '' or position($4 in email) > 0)
 			  and ($5 = '' or status = $5)
 			order by created_at desc, id desc
-			limit $2 offset $1
+			limit $3 offset $2
 		)
 		select u.id::text, u.email, u.status, u.created_at,
 			(select count(*)::integer from licenses l where l.user_id = u.id),
