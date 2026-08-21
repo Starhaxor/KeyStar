@@ -8,9 +8,11 @@ import ConsoleSection, {
 import EmptyState from "@/components/console/EmptyState";
 import ExportCsvButton from "@/components/common/ExportCsvButton";
 import ConfirmModal from "@/components/console/ConfirmModal";
+import DevicePolicyForm from "@/components/console/DevicePolicyForm";
 import RowActions, { type RowAction } from "@/components/console/RowActions";
 import StatusBadge from "@/components/console/StatusBadge";
 import Pagination from "@/components/tables/Pagination";
+import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import { useAdminIdentity } from "@/context/AdminIdentityContext";
 import { api, formatDateTime } from "@/lib/api";
@@ -52,6 +54,7 @@ export default function DevicesPage() {
   const [detail, setDetail] = useState<ConsoleDeviceDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [policyOpen, setPolicyOpen] = useState(false);
 
   const canWrite = hasPermission("devices.write");
 
@@ -141,6 +144,7 @@ export default function DevicesPage() {
       <PageTitle
         title="Devices"
         description="Hardware registrations bound to user licenses."
+        actions={canWrite ? <Button size="sm" onClick={() => setPolicyOpen(true)}>Device policy</Button> : undefined}
       />
       {result && (
         <div className="mb-4 flex flex-wrap gap-2">
@@ -334,6 +338,15 @@ export default function DevicesPage() {
         onConfirm={handleReset}
         onClose={() => setResetTarget(null)}
       />
+
+      <Modal
+        isOpen={policyOpen}
+        onClose={() => setPolicyOpen(false)}
+        className="max-w-xl p-6"
+      >
+        <h3 className="mb-4 text-lg font-semibold text-gray-800 dark:text-white/90">Device policy</h3>
+        <DevicePolicyForm onClose={() => setPolicyOpen(false)} />
+      </Modal>
 
       <Modal
         isOpen={detailDevice !== null}
