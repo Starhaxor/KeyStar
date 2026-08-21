@@ -43,7 +43,7 @@ func mapCredentials(entries []domain.ApplicationCredential) []credentialJSON {
 }
 
 func (router *Router) handleAdminCredentialList(writer http.ResponseWriter, request *http.Request) {
-	credentials, err := router.Admin.Console.ListCredentials(request.Context(), router.DefaultApplicationID())
+	credentials, err := router.Admin.Console.ListCredentials(request.Context(), router.AdminApplicationID(request))
 	if err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
@@ -117,7 +117,7 @@ func (router *Router) handleAdminCredentialCreate(writer http.ResponseWriter, re
 		return
 	}
 	created, err := router.Admin.Console.CreateCredential(request.Context(), domain.NewApplicationCredential{
-		ApplicationID:  router.DefaultApplicationID(),
+		ApplicationID:  router.AdminApplicationID(request),
 		Environment:    domain.CredentialEnvironment(environment),
 		CredentialType: domain.CredentialType(credentialType),
 		Name:           name,
@@ -147,7 +147,7 @@ func (router *Router) handleAdminCredentialCreate(writer http.ResponseWriter, re
 }
 
 func (router *Router) handleAdminCredentialRevoke(writer http.ResponseWriter, request *http.Request, account *domain.AdminAccount, credentialID string) {
-	if err := router.Admin.Console.RevokeCredential(request.Context(), router.DefaultApplicationID(), credentialID); err != nil {
+	if err := router.Admin.Console.RevokeCredential(request.Context(), router.AdminApplicationID(request), credentialID); err != nil {
 		router.writeCredentialError(writer, request, err)
 		return
 	}

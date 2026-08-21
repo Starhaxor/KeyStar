@@ -114,10 +114,20 @@ func (f *fakeAdminConsole) AppendSecurityEvent(_ context.Context, input domain.N
 	return nil
 }
 
+type fakeAdminApplicationResolver struct{}
+
+func (fakeAdminApplicationResolver) FindApplicationByID(_ context.Context, applicationID string) (*domain.Application, error) {
+	return &domain.Application{
+		ID: applicationID, OrganizationID: "org-id", Status: domain.ApplicationStatusActive,
+	}, nil
+}
+
 func newAdminTestRouter(t *testing.T, auth *fakeAdminAuth) (*Router, *fakeAdminConsole) {
 	t.Helper()
 	console := &fakeAdminConsole{}
 	core := httpapi.NewRouter(httpapi.RouterConfig{
+		DefaultApplicationID: "019c1111-1111-7111-8111-111111111111",
+		Applications:         fakeAdminApplicationResolver{},
 		Admin: httpapi.AdminConfig{
 			Auth:           auth,
 			Console:        console,
@@ -296,6 +306,27 @@ func TestAdminMeRequiresSessionCookie(t *testing.T) {
 		MFAEnrolled bool     `json:"mfa_enrolled"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil || body.Email != "root@example.com" || body.Role != domain.RoleOwner || len(body.Permissions) == 0 || !body.MFAEnrolled {
+		t.Fatalf("body = %s, err = %v", recorder.Body.String(), err)
+	}
+}
+
+func TestAdminRejectsInvalidSelectedApplication(t *testing.T) {
+	auth := &fakeAdminAuth{token: "session-token", account: testOwnerAccount()}
+	router, _ := newAdminTestRouter(t, auth)
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/admin/me", nil)
+	request.Header.Set("X-KeyStar-App", "not-a-uuid")
+	request.AddCookie(&http.Cookie{Name: httpapi.AdminSessionCookieName, Value: "session-token"})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil || body.Code != "INVALID_APPLICATION" {
 		t.Fatalf("body = %s, err = %v", recorder.Body.String(), err)
 	}
 }

@@ -177,6 +177,14 @@ func (router *Router) resolveApplicationPrincipal(writer http.ResponseWriter, re
 	}, true
 }
 
+// ResolveApplication validates the application selected by X-KeyStar-App and
+// returns its principal without requiring an application credential. Admin
+// endpoints use this after administrator authentication so their data access
+// has the same tenant boundary as the public and server APIs.
+func (router *Router) ResolveApplication(writer http.ResponseWriter, request *http.Request) (AppPrincipal, bool) {
+	return router.resolveApplicationPrincipal(writer, request)
+}
+
 func bearerKey(authorization string) (string, bool) {
 	scheme, value, found := strings.Cut(authorization, " ")
 	if !found || !strings.EqualFold(scheme, "Bearer") || strings.TrimSpace(value) == "" {
