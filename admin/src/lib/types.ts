@@ -237,3 +237,12 @@ export interface Plan {
   max_devices: number; default_duration_seconds: number | null; status: string;
   created_at: string; updated_at: string;
 }
+
+export interface Webhook {
+  id: string;
+  url: string;
+  status: "active" | "disabled";
+  events: string[];
+  created_at: string;
+  updated_at: string;
+}

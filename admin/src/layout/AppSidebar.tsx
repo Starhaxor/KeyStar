@@ -80,6 +80,12 @@ const navItems: NavItem[] = [
     permission: "credentials.read",
   },
   {
+    icon: <ListIcon />,
+    name: "Webhooks",
+    path: "/webhooks",
+    permission: "webhooks.read",
+  },
+  {
     icon: <LockIcon />,
     name: "Security",
     path: "/security",

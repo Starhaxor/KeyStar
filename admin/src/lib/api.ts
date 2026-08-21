@@ -27,6 +27,7 @@ import type {
   TodayStats,
   UserDetail,
   Variable,
+  Webhook,
 } from "./types";
 
 // Same-origin: requests go to this Next.js server and are proxied to the
@@ -222,6 +223,18 @@ export const api = {
   },
   createPlan(productId: string, input: { name: string; code: string; level: number; max_devices: number }) {
     return request<{ ok: boolean; plan: Plan }>(`/v1/admin/products/${productId}/plans`, { method: "POST", body: input });
+  },
+  webhooks() {
+    return request<{ ok: boolean; items: Webhook[] }>("/v1/admin/webhooks");
+  },
+  createWebhook(input: { url: string; events: string[] }) {
+    return request<{ ok: boolean; webhook: Webhook; secret: string }>("/v1/admin/webhooks", { method: "POST", body: input });
+  },
+  updateWebhook(webhookId: string, input: { url?: string; status?: "active" | "disabled"; events?: string[] }) {
+    return request<{ ok: boolean; webhook: Webhook }>(`/v1/admin/webhooks/${webhookId}`, { method: "PATCH", body: input });
+  },
+  deleteWebhook(webhookId: string) {
+    return request<{ ok: boolean }>(`/v1/admin/webhooks/${webhookId}`, { method: "DELETE", body: {} });
   },
   credentials() {
     return request<{ ok: boolean; credentials: ApplicationCredential[] }>(

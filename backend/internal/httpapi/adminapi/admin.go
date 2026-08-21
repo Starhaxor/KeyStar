@@ -184,6 +184,8 @@ func (router *Router) routeAdmin(writer http.ResponseWriter, request *http.Reque
 		router.routeAdminLicenses(writer, request, account, segments)
 	case len(segments) >= 1 && segments[0] == "products":
 		router.routeAdminProducts(writer, request, account, segments)
+	case len(segments) >= 1 && segments[0] == "webhooks":
+		router.routeAdminWebhooks(writer, request, account, segments)
 	case len(segments) >= 1 && segments[0] == "devices":
 		router.routeAdminDevices(writer, request, account, segments)
 	case len(segments) >= 1 && segments[0] == "sessions":
