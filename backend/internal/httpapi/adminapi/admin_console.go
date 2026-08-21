@@ -312,7 +312,7 @@ func (router *Router) handleAdminUserList(writer http.ResponseWriter, request *h
 
 func (router *Router) handleAdminBanList(writer http.ResponseWriter, request *http.Request) {
 	page, pageSize, offset := parseAdminPagination(request)
-	bans, total, err := router.Admin.Console.ListConsoleBans(request.Context(), offset, pageSize, request.URL.Query().Get("search"), request.URL.Query().Get("status"))
+	bans, total, err := router.Admin.Console.ListConsoleBans(request.Context(), router.AdminApplicationID(request), offset, pageSize, request.URL.Query().Get("search"), request.URL.Query().Get("status"))
 	if err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return

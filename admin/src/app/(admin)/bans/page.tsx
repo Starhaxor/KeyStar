@@ -13,18 +13,22 @@ import Pagination from "@/components/tables/Pagination";
 import { useAdminIdentity } from "@/context/AdminIdentityContext";
 import { useToast } from "@/context/ToastContext";
 import { api, formatDateTime } from "@/lib/api";
+import { moderationStatus } from "@/lib/moderation";
 import type { BanRecord, PageResult } from "@/lib/types";
 import Link from "next/link";
-import React, { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import React, { Suspense, useCallback, useEffect, useState } from "react";
 
-export default function BansPage() {
+function BansContent() {
   const { hasPermission } = useAdminIdentity();
   const toast = useToast();
+  const params = useSearchParams();
+  const statusFromUrl = moderationStatus(params, "active");
   const [result, setResult] = useState<PageResult<BanRecord> | null>(null);
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("active");
+  const [statusFilter, setStatusFilter] = useState(statusFromUrl);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -33,6 +37,11 @@ export default function BansPage() {
   const [unbanError, setUnbanError] = useState<string | null>(null);
 
   const canWrite = hasPermission("users.write");
+
+  useEffect(() => {
+    setPage(1);
+    setStatusFilter(statusFromUrl);
+  }, [statusFromUrl]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -257,4 +266,8 @@ export default function BansPage() {
       />
     </div>
   );
+}
+
+export default function BansPage() {
+  return <Suspense fallback={<div className="py-8"><TableSkeleton rows={6} cols={7} /></div>}><BansContent /></Suspense>;
 }

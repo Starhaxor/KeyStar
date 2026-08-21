@@ -256,6 +256,12 @@ export interface Application {
   environment_mode: string;
 }
 
+export interface DeviceBanRecord {
+  id: string; device_id: string; user_id: string; user_email: string; reason: string;
+  expires_at: string; status: "active" | "lifted" | "expired"; banned_at: string;
+  lifted_at: string; lift_reason: string;
+}
+
 export interface Organization {
   id: string;
   name: string;

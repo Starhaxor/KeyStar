@@ -98,7 +98,10 @@ type AdminConsoleStore interface {
 	BanUser(ctx context.Context, applicationID, userID, reason string, expiresAt *time.Time) error
 	UnbanUser(ctx context.Context, applicationID, userID string) error
 	AutoUnbanExpired(ctx context.Context, applicationID, userID string) error
-	ListConsoleBans(ctx context.Context, offset, limit int, search, statusFilter string) ([]domain.BanRecord, int64, error)
+	ListConsoleBans(ctx context.Context, applicationID string, offset, limit int, search, statusFilter string) ([]domain.BanRecord, int64, error)
+	ListConsoleDeviceBans(ctx context.Context, applicationID string, offset, limit int, status string) ([]domain.ConsoleDeviceBan, int64, error)
+	CreateDeviceBan(ctx context.Context, applicationID, deviceID, reason string, expiresAt *time.Time) (*domain.ConsoleDeviceBan, error)
+	LiftDeviceBan(ctx context.Context, applicationID, banID, reason string) error
 	ResetUserDevices(ctx context.Context, applicationID, userID string) (int64, error)
 	BulkSetUserStatus(ctx context.Context, applicationID string, userIDs []string, status domain.UserStatus) (int64, error)
 	BulkRevokeUserSessions(ctx context.Context, applicationID string, userIDs []string) (int64, error)

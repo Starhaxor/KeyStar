@@ -5,6 +5,14 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useSidebar } from "../context/SidebarContext";
 import { useAdminIdentity } from "../context/AdminIdentityContext";
+import { useApplication } from "../context/ApplicationContext";
+import {
+  sidebarSections,
+  type SidebarIcon,
+  type SidebarItem,
+  type SidebarSubItem,
+} from "./sidebarNavigation";
+import { applicationSelectorOptions } from "../lib/applicationSelection";
 import {
   BoxCubeIcon,
   ChevronLeftIcon,
@@ -19,84 +27,21 @@ import {
   UserCircleIcon,
 } from "../icons/index";
 
-type SubItem = { label: string; href: string; permission?: string };
-type NavItem = {
-  name: string;
-  icon: React.ReactNode;
-  path: string;
-  // permission gates the item in the UI; undefined means always visible.
-  permission?: string;
-  children?: SubItem[];
+const iconFor: Record<SidebarIcon, React.ReactNode> = {
+  grid: <GridIcon />,
+  app: <BoxCubeIcon />,
+  users: <UserCircleIcon />,
+  licenses: <DocsIcon />,
+  devices: <BoxCubeIcon />,
+  products: <BoxCubeIcon />,
+  sessions: <TimeIcon />,
+  audit: <ListIcon />,
+  admins: <GroupIcon />,
+  variables: <ListIcon />,
+  credentials: <LockIcon />,
+  webhooks: <ListIcon />,
+  security: <LockIcon />,
 };
-
-const navItems: NavItem[] = [
-  { icon: <GridIcon />, name: "Overview", path: "/", permission: "overview.read" },
-  { icon: <GridIcon />, name: "Applications", path: "/applications", permission: "applications.read" },
-  {
-    icon: <UserCircleIcon />,
-    name: "Users",
-    path: "/users",
-    permission: "users.read",
-    children: [
-      { label: "Directory", href: "/users" },
-      { label: "Bans", href: "/bans" },
-    ],
-  },
-  {
-    icon: <DocsIcon />,
-    name: "Licenses",
-    path: "/licenses",
-    permission: "licenses.read",
-    children: [{ label: "Directory", href: "/licenses" }],
-  },
-  { icon: <BoxCubeIcon />, name: "Devices", path: "/devices", permission: "devices.read" },
-  { icon: <BoxCubeIcon />, name: "Products & Plans", path: "/products", permission: "catalog.read" },
-  { icon: <TimeIcon />, name: "Sessions", path: "/sessions", permission: "sessions.read" },
-  {
-    icon: <ListIcon />,
-    name: "Audit Log",
-    path: "/audit-logs",
-    permission: "audit.read",
-  },
-  {
-    icon: <GroupIcon />,
-    name: "Admins",
-    path: "/admins",
-    permission: "admins.read",
-    children: [
-      { label: "Accounts", href: "/admins" },
-      { label: "Roles & permissions", href: "/roles", permission: "admins.read" },
-    ],
-  },
-  {
-    icon: <ListIcon />,
-    name: "Variables",
-    path: "/variables",
-    permission: "admins.read",
-  },
-  {
-    icon: <LockIcon />,
-    name: "API Credentials",
-    path: "/credentials",
-    permission: "credentials.read",
-  },
-  {
-    icon: <ListIcon />,
-    name: "Webhooks",
-    path: "/webhooks",
-    permission: "webhooks.read",
-  },
-  {
-    icon: <LockIcon />,
-    name: "Security",
-    path: "/security",
-    permission: "security.read",
-    children: [
-      { label: "MFA & settings", href: "/security" },
-      { label: "Security events", href: "/security-events" },
-    ],
-  },
-];
 
 function initialsFor(email: string): string {
   const local = email.split("@")[0] ?? "";
@@ -108,6 +53,7 @@ const AppSidebar: React.FC = () => {
     useSidebar();
   const pathname = usePathname();
   const { hasPermission, identity } = useAdminIdentity();
+  const { applications, selectedApplicationID, selectApplication, loading: applicationsLoading } = useApplication();
 
   // Sections explicitly expanded by the user. The active section is always
   // open without a navigation-side effect.
@@ -118,20 +64,23 @@ const AppSidebar: React.FC = () => {
 
   // A sub-item is the current location only when it is the canonical page
   // itself; query-string shortcuts are actions, never highlighted.
-  const isChildActive = (child: SubItem) => {
+  const isChildActive = (child: SidebarSubItem) => {
     if (child.href.includes("?")) return false;
     return pathname === child.href || pathname.startsWith(`${child.href}/`);
   };
 
-  const isSectionActive = (nav: NavItem) =>
+  const isSectionActive = (nav: SidebarItem) =>
     isActive(nav.path) || (nav.children ?? []).some(isChildActive);
 
   const toggleSection = (name: string) =>
     setOpenSections((prev) => ({ ...prev, [name]: !prev[name] }));
 
-  const visibleItems = navItems.filter(
-    (nav) => !nav.permission || hasPermission(nav.permission)
-  );
+  const visibleSections = sidebarSections
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => !item.permission || hasPermission(item.permission)),
+    }))
+    .filter((section) => section.items.length > 0);
 
   const expanded = isExpanded || isHovered || isMobileOpen;
   const email = identity?.email ?? "";
@@ -170,18 +119,24 @@ const AppSidebar: React.FC = () => {
         </Link>
       </div>
       <div className="flex flex-col overflow-y-auto duration-300 ease-linear no-scrollbar grow">
-        <nav className="mb-6">
-          <div className="flex flex-col gap-4">
-            <div>
-              <h2
-                className={`mb-4 text-xs uppercase flex leading-[20px] text-gray-400 ${
-                  !expanded ? "lg:justify-center" : "justify-start"
-                }`}
-              >
-                {expanded ? "Menu" : <HorizontaLDots />}
+        <nav className="mb-6 space-y-6" aria-label="Console navigation">
+          {visibleSections.map((section) => (
+            <section key={section.name}>
+              <h2 className={`mb-2 flex items-center text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-400 ${!expanded ? "lg:justify-center" : "justify-start"}`}>
+                {expanded ? section.name : <HorizontaLDots />}
               </h2>
-              <ul className="flex flex-col gap-4">
-                {visibleItems.map((nav) => {
+              {expanded && section.name === "Application" && (
+                <div className="mb-2 rounded-lg border border-gray-200 bg-gray-50 p-2 dark:border-gray-800 dark:bg-white/[0.03]">
+                  <label className="mb-1.5 block px-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400" htmlFor="sidebar-application-selector">Current application</label>
+                  <select id="sidebar-application-selector" aria-label="Current application" value={selectedApplicationID ?? ""} disabled={applicationsLoading || applications.length === 0} onChange={(event) => selectApplication(event.target.value)} className="h-9 w-full cursor-pointer rounded-md border border-gray-200 bg-white px-2.5 text-xs font-medium text-gray-700 outline-none transition-colors focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:[color-scheme:dark] disabled:cursor-not-allowed disabled:opacity-60">
+                    <option value="" disabled>{applicationsLoading ? "Loading applications…" : "Select application"}</option>
+                    {applicationSelectorOptions(applications).map((application) => <option key={application.value} value={application.value}>{application.label}</option>)}
+                  </select>
+                  <Link href="/applications" className="mt-2 block px-1 text-[11px] text-gray-500 transition-colors hover:text-brand-500 dark:hover:text-brand-400">Manage applications</Link>
+                </div>
+              )}
+              <ul className="flex flex-col gap-1.5">
+                {section.items.map((nav) => {
                   const active = isSectionActive(nav);
                   const sectionOpen = active || Boolean(openSections[nav.name]);
                   return (
@@ -208,7 +163,7 @@ const AppSidebar: React.FC = () => {
                                   : "menu-item-icon-inactive"
                               }
                             >
-                              {nav.icon}
+                              {iconFor[nav.icon]}
                             </span>
                             {expanded && (
                               <span className="flex-1 text-left">
@@ -242,7 +197,7 @@ const AppSidebar: React.FC = () => {
                                   : "menu-item-icon-inactive"
                               }
                             >
-                              {nav.icon}
+                              {iconFor[nav.icon]}
                             </span>
                             {expanded && (
                               <span className="flex-1 text-left">
@@ -288,8 +243,8 @@ const AppSidebar: React.FC = () => {
                   );
                 })}
               </ul>
-            </div>
-          </div>
+            </section>
+          ))}
         </nav>
       </div>
 

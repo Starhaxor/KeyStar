@@ -10,13 +10,13 @@ import (
 // longer carry a free-text product name; they reference products.id and the
 // display name is resolved through this table (migration 000010).
 type Product struct {
-	ID            string
-	ApplicationID string
-	Name          string
-	Slug          string
-	Status        string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID            string    `json:"id"`
+	ApplicationID string    `json:"application_id"`
+	Name          string    `json:"name"`
+	Slug          string    `json:"slug"`
+	Status        string    `json:"status"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // NewProduct carries the fields needed to create a catalog product. Slug is
@@ -31,16 +31,16 @@ type NewProduct struct {
 // Every license is bound to a plan so device limits and levels can later be
 // inherited from a single catalog row instead of per-license values.
 type Plan struct {
-	ID                     string
-	ProductID              string
-	Name                   string
-	Code                   string
-	Level                  int
-	MaxDevices             int
-	DefaultDurationSeconds *int64
-	Status                 string
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	ID                     string    `json:"id"`
+	ProductID              string    `json:"product_id"`
+	Name                   string    `json:"name"`
+	Code                   string    `json:"code"`
+	Level                  int       `json:"level"`
+	MaxDevices             int       `json:"max_devices"`
+	DefaultDurationSeconds *int64    `json:"default_duration_seconds"`
+	Status                 string    `json:"status"`
+	CreatedAt              time.Time `json:"created_at"`
+	UpdatedAt              time.Time `json:"updated_at"`
 }
 
 // NewPlan carries the fields needed to create a plan.

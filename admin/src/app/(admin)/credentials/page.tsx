@@ -5,6 +5,11 @@ import { EmptyNote, ErrorNote, LoadingNote, PageTitle } from "@/components/conso
 import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import { api } from "@/lib/api";
+import {
+  defaultScopesForCredentialType,
+  scopeOptionsForCredentialType,
+  type CredentialType,
+} from "@/lib/credentialScopes";
 import type { ApplicationCredential } from "@/lib/types";
 import React, { useCallback, useEffect, useState } from "react";
 
@@ -20,8 +25,8 @@ export default function CredentialsPage() {
   const [secret, setSecret] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [environment, setEnvironment] = useState<"test" | "live">("live");
-  const [type, setType] = useState<"publishable" | "secret">("secret");
-  const [scopes, setScopes] = useState("users.read");
+  const [type, setType] = useState<CredentialType>("publishable");
+  const [scopes, setScopes] = useState<string[]>(() => defaultScopesForCredentialType("publishable"));
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -37,11 +42,22 @@ export default function CredentialsPage() {
     try {
       const result = await api.createCredential({
         name: name.trim(), environment, type,
-        scopes: scopes.split(",").map((scope) => scope.trim()).filter(Boolean),
+        scopes,
       });
       setSecret(result.key); setCreateOpen(false); setName(""); await load();
     } catch (err) { setError(err instanceof Error ? err.message : "Credential could not be created"); }
     finally { setBusy(false); }
+  }
+
+  function changeCredentialType(nextType: CredentialType) {
+    setType(nextType);
+    setScopes(defaultScopesForCredentialType(nextType));
+  }
+
+  function toggleScope(scope: string) {
+    setScopes((current) => current.includes(scope)
+      ? current.filter((item) => item !== scope)
+      : [...current, scope]);
   }
 
   async function revokeCredential() {
@@ -65,13 +81,25 @@ export default function CredentialsPage() {
         )}
       </div>
 
-      <Modal isOpen={createOpen} onClose={() => !busy && setCreateOpen(false)} className="max-w-lg p-6">
+      <Modal isOpen={createOpen} onClose={() => !busy && setCreateOpen(false)} className="max-w-2xl p-6">
         <h2 className="text-lg font-semibold">Create credential</h2>
         <div className="mt-4 space-y-4">
           <label className="block text-sm">Name<input className={inputClass} value={name} onChange={(event) => setName(event.target.value)} /></label>
-          <div className="grid grid-cols-2 gap-4"><label className="text-sm">Environment<select className={inputClass} value={environment} onChange={(event) => setEnvironment(event.target.value as "test" | "live")}><option value="live">Live</option><option value="test">Test</option></select></label><label className="text-sm">Key type<select className={inputClass} value={type} onChange={(event) => setType(event.target.value as "publishable" | "secret")}><option value="secret">Secret</option><option value="publishable">Publishable</option></select></label></div>
-          <label className="block text-sm">Scopes (comma separated)<input className={inputClass} value={scopes} onChange={(event) => setScopes(event.target.value)} /></label>
-          <div className="flex justify-end gap-2"><Button variant="outline" size="sm" onClick={() => setCreateOpen(false)} disabled={busy}>Cancel</Button><Button size="sm" onClick={create} disabled={busy || !name.trim() || !scopes.trim()}>Create</Button></div>
+          <div className="grid grid-cols-2 gap-4"><label className="text-sm">Environment<select className={inputClass} value={environment} onChange={(event) => setEnvironment(event.target.value as "test" | "live")}><option value="live">Live</option><option value="test">Test</option></select></label><label className="text-sm">Key type<select className={inputClass} value={type} onChange={(event) => changeCredentialType(event.target.value as CredentialType)}><option value="publishable">Publishable</option><option value="secret">Secret</option></select></label></div>
+          <section aria-labelledby="credential-scopes-heading">
+            <div className="flex flex-wrap items-baseline justify-between gap-2"><div><h3 id="credential-scopes-heading" className="text-sm font-medium">Permissions</h3><p className="mt-1 text-xs text-gray-500">Select only the permissions this key needs.</p></div><span className="text-xs font-medium text-gray-500">{scopes.length} selected</span></div>
+            {type === "publishable" && <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-brand-700 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300"><span><strong>StarLoader desktop:</strong> User sign-in and Verify device are selected.</span><button type="button" onClick={() => setScopes(defaultScopesForCredentialType("publishable"))} className="font-semibold underline underline-offset-2">Reset to recommended</button></div>}
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              {scopeOptionsForCredentialType(type).map((scope) => {
+                const selected = scopes.includes(scope.value);
+                return <label key={scope.value} className={`flex cursor-pointer gap-3 rounded-xl border p-3 transition-colors ${selected ? "border-brand-500 bg-brand-50/70 dark:border-brand-500/60 dark:bg-brand-500/10" : "border-gray-200 bg-white hover:border-gray-300 dark:border-gray-800 dark:bg-white/[0.03] dark:hover:border-gray-700"}`}>
+                  <input type="checkbox" checked={selected} onChange={() => toggleScope(scope.value)} className="mt-0.5 h-4 w-4 rounded border-gray-300 text-brand-500 focus:ring-brand-500" />
+                  <span><span className="block text-sm font-medium text-gray-800 dark:text-white/90">{scope.label}</span><span className="mt-0.5 block text-xs text-gray-500">{scope.description}</span></span>
+                </label>;
+              })}
+            </div>
+          </section>
+          <div className="flex justify-end gap-2"><Button variant="outline" size="sm" onClick={() => setCreateOpen(false)} disabled={busy}>Cancel</Button><Button size="sm" onClick={create} disabled={busy || !name.trim() || scopes.length === 0}>Create</Button></div>
         </div>
       </Modal>
 

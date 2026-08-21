@@ -169,6 +169,31 @@
   --z-index-999999: 999999;
 }
 
+/* Console dark mode: a layered midnight-blue workspace, not flat black. */
+.dark {
+  --console-canvas: #0b1220;
+  --console-surface: #111c2d;
+  --console-elevated: #162438;
+  color-scheme: dark;
+}
+
+/* Keep shared gray tokens available to text utilities; target surface
+   utilities directly so a dark card never makes a dark text color. */
+.dark .dark\:bg-gray-950 { background-color: #08111d !important; }
+.dark .dark\:bg-gray-900 { background-color: var(--console-surface) !important; }
+.dark .dark\:bg-gray-dark { background-color: var(--console-elevated) !important; }
+.dark .dark\:bg-gray-800 { background-color: #1c2d44 !important; }
+.dark .dark\:border-gray-800 { border-color: #253b57 !important; }
+.dark .dark\:border-gray-700 { border-color: #31435d !important; }
+
+/* Some legacy page markup has a light-theme foreground class but no dark
+   counterpart. Preserve readable copy while the explicit dark:text-* rules
+   continue to take precedence where they exist. */
+.dark .text-gray-900,
+.dark .text-gray-800,
+.dark .text-black { color: #e8f0f7; }
+.dark .text-gray-700 { color: #c7d4e2; }
+
 /*
   The default border color has changed to `currentColor` in Tailwind CSS v4,
   so we've added these compatibility styles to make sure everything still
@@ -190,7 +215,11 @@
     cursor: pointer;
   }
   body {
-    @apply relative font-normal font-outfit z-1 bg-gray-50;
+    @apply relative z-1 bg-gray-50 font-normal font-outfit text-gray-800;
+  }
+  .dark body {
+    background: var(--console-canvas);
+    color: #e8f0f7;
   }
 }
 

@@ -17,21 +17,26 @@ import ExportCsvButton from "@/components/common/ExportCsvButton";
 import { useAdminIdentity } from "@/context/AdminIdentityContext";
 import { useToast } from "@/context/ToastContext";
 import { api, formatDateTime } from "@/lib/api";
+import { moderationStatus } from "@/lib/moderation";
 import type { PageResult, ConsoleUser } from "@/lib/types";
 import Link from "next/link";
-import React, { useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import React, { Suspense, useCallback, useEffect, useState } from "react";
 
 const inputClasses =
   "h-11 w-full rounded-lg border appearance-none px-4 py-2.5 text-sm shadow-theme-xs focus:outline-hidden focus:ring-3 dark:bg-gray-900 dark:text-white/90 bg-transparent text-gray-800 border-gray-300 focus:border-brand-300 focus:ring-brand-500/10 dark:border-gray-700 dark:focus:border-brand-800 placeholder:text-gray-400";
 
-export default function UsersPage() {
+function UsersContent() {
   const { hasPermission } = useAdminIdentity();
   const toast = useToast();
+  const params = useSearchParams();
+  const router = useRouter();
+  const statusFromUrl = moderationStatus(params, "");
   const [result, setResult] = useState<PageResult<ConsoleUser> | null>(null);
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState(statusFromUrl);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -61,6 +66,11 @@ export default function UsersPage() {
 
   const canWrite = hasPermission("users.write");
 
+  useEffect(() => {
+    setPage(1);
+    setStatusFilter(statusFromUrl);
+  }, [statusFromUrl]);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -81,6 +91,7 @@ export default function UsersPage() {
   function updateStatusFilter(next: string) {
     setStatusFilter(next);
     setPage(1);
+    router.push(next ? `/users?status=${next}` : "/users");
   }
 
   // Live search: debounce keystrokes, then refetch from page 1.
@@ -635,4 +646,8 @@ export default function UsersPage() {
       />
     </div>
   );
+}
+
+export default function UsersPage() {
+  return <Suspense fallback={<div className="py-8"><TableSkeleton rows={6} cols={9} /></div>}><UsersContent /></Suspense>;
 }
