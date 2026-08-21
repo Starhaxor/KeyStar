@@ -4,6 +4,7 @@
 import type {
   AdminAccount,
   Application,
+  Organization,
   ApplicationCredential,
   AdminIdentity,
   AdminRole,
@@ -216,6 +217,15 @@ export const api = {
   },
   applications() {
     return request<{ ok: boolean; items: Application[] }>("/v1/admin/applications");
+  },
+  organizations() {
+    return request<{ ok: boolean; items: Organization[] }>("/v1/admin/applications/organizations");
+  },
+  createOrganization(name: string) {
+    return request<{ ok: boolean; organization: Organization }>("/v1/admin/applications/organizations", { method: "POST", body: { name } });
+  },
+  createApplication(input: { organization_id: string; name: string; slug: string }) {
+    return request<{ ok: boolean; application: Application }>("/v1/admin/applications", { method: "POST", body: input });
   },
   products() {
     return request<{ ok: boolean; items: Product[] }>("/v1/admin/products");

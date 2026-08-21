@@ -31,6 +31,7 @@ type NavItem = {
 
 const navItems: NavItem[] = [
   { icon: <GridIcon />, name: "Overview", path: "/", permission: "overview.read" },
+  { icon: <GridIcon />, name: "Applications", path: "/applications", permission: "applications.read" },
   {
     icon: <UserCircleIcon />,
     name: "Users",

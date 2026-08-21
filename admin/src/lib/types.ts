@@ -255,3 +255,12 @@ export interface Application {
   status: "active" | "maintenance" | "suspended" | "disabled";
   environment_mode: string;
 }
+
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}

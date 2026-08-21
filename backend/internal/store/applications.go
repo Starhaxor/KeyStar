@@ -98,6 +98,27 @@ func (s *Store) CreateOrganization(ctx context.Context, name string) (*domain.Or
 	return organization, nil
 }
 
+// ListOrganizations returns all platform organizations for administration.
+func (s *Store) ListOrganizations(ctx context.Context) ([]domain.Organization, error) {
+	rows, err := s.db.Query(ctx, `select `+organizationColumns+` from organizations order by created_at, id`)
+	if err != nil {
+		return nil, fmt.Errorf("list organizations: %w", err)
+	}
+	defer rows.Close()
+	items := make([]domain.Organization, 0)
+	for rows.Next() {
+		organization, scanErr := scanOrganization(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("scan organization: %w", scanErr)
+		}
+		items = append(items, *organization)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list organizations: %w", err)
+	}
+	return items, nil
+}
+
 func scanApplication(row pgx.Row) (*domain.Application, error) {
 	var application domain.Application
 	err := row.Scan(

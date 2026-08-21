@@ -186,11 +186,8 @@ func (router *Router) routeAdmin(writer http.ResponseWriter, request *http.Reque
 		router.routeAdminProducts(writer, request, account, segments)
 	case len(segments) >= 1 && segments[0] == "webhooks":
 		router.routeAdminWebhooks(writer, request, account, segments)
-	case len(segments) == 1 && segments[0] == "applications" && request.Method == http.MethodGet:
-		if !router.RequirePermission(writer, request, account, domain.PermApplicationsRead) {
-			return
-		}
-		router.handleAdminApplicationList(writer, request)
+	case len(segments) >= 1 && segments[0] == "applications":
+		router.routeAdminApplications(writer, request, account, segments)
 	case len(segments) >= 1 && segments[0] == "devices":
 		router.routeAdminDevices(writer, request, account, segments)
 	case len(segments) >= 1 && segments[0] == "sessions":
