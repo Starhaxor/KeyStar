@@ -430,7 +430,8 @@ export const api = {
   createLicense(
     userEmail: string,
     duration: { value: number; unit: string },
-    maxDevices: number
+    maxDevices: number,
+    catalog?: { productId: string; planId: string }
   ) {
     return request<{ ok: boolean } & CreatedLicense>("/v1/admin/licenses", {
       method: "POST",
@@ -439,6 +440,7 @@ export const api = {
         value: duration.value,
         unit: duration.unit,
         max_devices: maxDevices,
+        ...(catalog ? { product_id: catalog.productId, plan_id: catalog.planId } : {}),
       },
     });
   },

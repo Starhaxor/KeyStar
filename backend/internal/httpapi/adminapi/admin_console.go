@@ -859,6 +859,8 @@ func (router *Router) handleAdminLicenseCreate(writer http.ResponseWriter, reque
 		Value      int    `json:"value"`
 		Unit       string `json:"unit"`
 		MaxDevices int    `json:"max_devices"`
+		ProductID  string `json:"product_id"`
+		PlanID     string `json:"plan_id"`
 	}
 	if err := httpapi.DecodeJSONBody(writer, request, &body); err != nil {
 		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
@@ -886,12 +888,36 @@ func (router *Router) handleAdminLicenseCreate(writer http.ResponseWriter, reque
 		router.WriteConsoleError(writer, request, err)
 		return
 	}
-	// The console product name is resolved into the application's product
-	// catalog and its default plan; the license is bound to both.
-	productID, planID, err := router.Admin.Console.ResolveProductPlan(request.Context(), router.AdminApplicationID(request), router.Admin.Product)
-	if err != nil {
-		router.WriteConsoleError(writer, request, err)
-		return
+	productID, planID := body.ProductID, body.PlanID
+	if productID == "" || planID == "" {
+		// Legacy callers use the configured product and its default plan.
+		productID, planID, err = router.Admin.Console.ResolveProductPlan(request.Context(), router.AdminApplicationID(request), router.Admin.Product)
+		if err != nil {
+			router.WriteConsoleError(writer, request, err)
+			return
+		}
+	} else {
+		product, findErr := router.Admin.Console.FindProductByID(request.Context(), router.AdminApplicationID(request), productID)
+		if findErr != nil || product == nil {
+			router.WriteConsoleError(writer, request, findErr)
+			return
+		}
+		plans, listErr := router.Admin.Console.ListPlans(request.Context(), productID)
+		if listErr != nil {
+			router.WriteConsoleError(writer, request, listErr)
+			return
+		}
+		found := false
+		for _, plan := range plans {
+			if plan.ID == planID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "plan does not belong to product")
+			return
+		}
 	}
 	plain, normalized, err := security.GenerateLicense(cryptorand.Reader)
 	if err != nil {
