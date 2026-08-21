@@ -15,3 +15,7 @@ admin/.env
 
 .staging
 .worktrees/
+
+admin/CLAUDE.md
+
+admin/AGENTS.md
