@@ -110,6 +110,31 @@ func TestMigrationUpIsIdempotentAndTracked(t *testing.T) {
 	}
 }
 
+func TestOwnerRoleReceivesAllConsoleManagementPermissions(t *testing.T) {
+	ctx := context.Background()
+	pool := openTestPool(t, ctx)
+	resetAndMigrate(t, ctx, pool)
+
+	var missing []string
+	if err := pool.QueryRow(ctx, `
+		select array_agg(permission order by permission)
+		from unnest(array[
+			'applications.read', 'applications.write',
+			'catalog.read', 'catalog.write',
+			'webhooks.read', 'webhooks.write'
+		]) as permission
+		where not exists (
+			select 1 from roles
+			where name = 'owner' and permission = any(permissions)
+		)
+	`).Scan(&missing); err != nil {
+		t.Fatalf("read owner role permissions: %v", err)
+	}
+	if len(missing) != 0 {
+		t.Fatalf("owner role is missing console management permissions: %v", missing)
+	}
+}
+
 func TestMigrationUpgradesVersionOneSchema(t *testing.T) {
 	ctx := context.Background()
 	pool := openTestPool(t, ctx)

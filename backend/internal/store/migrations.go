@@ -31,6 +31,7 @@ var versionedMigrations = []migration{
 	{version: 11, up: "000011_device_policy.up.sql", down: "000011_device_policy.down.sql"},
 	{version: 12, up: "000012_refresh_sessions.up.sql", down: "000012_refresh_sessions.down.sql"},
 	{version: 13, up: "000013_webhooks.up.sql", down: "000013_webhooks.down.sql"},
+	{version: 14, up: "000014_owner_console_permissions.up.sql", down: "000014_owner_console_permissions.down.sql"},
 }
 
 func MigrateUp(ctx context.Context, pool *pgxpool.Pool) error {

@@ -52,6 +52,13 @@ export const PERMISSION_GROUPS: {
     ],
   },
   {
+    resource: "Applications",
+    permissions: [
+      { id: "applications.read", label: "View organizations and applications" },
+      { id: "applications.write", label: "Manage organizations and applications" },
+    ],
+  },
+  {
     resource: "Catalog",
     permissions: [
       { id: "catalog.read", label: "View products and plans" },
