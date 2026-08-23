@@ -1,0 +1,301 @@
+openapi: 3.0.3
+info:
+  title: KeyStar Platform API
+  description: |
+    Public client API and server-to-server API of the KeyStar licensing platform.
+
+    Every request resolves to an application through the `X-KeyStar-App`
+    header plus a bearer credential. Two credential types exist:
+
+    * **Publishable key** (`ks_pk_test_...` / `ks_pk_live_...`) — ships inside
+      desktop or mobile clients; authorises login, device verification and
+      public configuration only.
+    * **Secret key** (`ks_sk_test_...` / `ks_sk_sk_...` style prefix
+      `ks_sk_...`) — server-side only; scoped to explicit permissions such as
+      `users.read`, `licenses.write`.
+
+    Never embed a secret key in a distributed application.
+  version: 1.0.0
+
+servers:
+  - url: https://your-keystar-host
+    description: Self-hosted deployment
+
+tags:
+  - name: Client Auth
+    description: End-user authentication and device verification (publishable key).
+  - name: Server Users
+    description: End-user administration (secret key, `users.*` scopes).
+  - name: Server Licenses
+    description: License provisioning and lifecycle (`licenses.*` scopes).
+  - name: Server Devices
+    description: Device registrations and policy (`devices.*` scopes).
+  - name: Server Sessions
+    description: Auth session inspection and revocation (`sessions.read`, `users.write`).
+  - name: Server Variables
+    description: Application key-value store (`admins.*` scopes).
+  - name: Server Webhooks
+    description: Webhook endpoint management (`webhooks.*` scopes).
+
+security:
+  - AppHeader: []
+  - PublishableKey: []
+  - SecretKey: []
+
+paths:
+  /v1/auth/login:
+    post:
+      tags: [Client Auth]
+      summary: Authenticate an end user
+      description: |
+        Authenticates with email/password and returns a pending device
+        challenge when the device is unknown. Successful completion yields a
+        short-lived access token plus refresh token. Rate limited per IP and
+        credential.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                device_fingerprint:
+                  type: string
+                  description: Aggregate hardware fingerprint produced by the SDK.
+      responses:
+        "200":
+          description: Login accepted. Returns tokens directly for trusted devices, otherwise a pending challenge.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResult"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/device/verify:
+    post:
+      tags: [Client Auth]
+      summary: Complete device verification
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                challenge_id: { type: string }
+                fingerprint: { type: string }
+      responses:
+        "200":
+          description: Device verified; session tokens returned.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/auth/refresh:
+    post:
+      tags: [Client Auth]
+      summary: Rotate a refresh token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        "200": { description: New token pair issued. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/me:
+    get:
+      tags: [Client Auth]
+      summary: Profile of the authenticated end user
+      security:
+        - AppHeader: []
+      responses:
+        "200": { description: Current user profile. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/server/users:
+    get:
+      tags: [Server Users]
+      summary: List users
+      parameters:
+        - { name: after, in: query, schema: { type: string }, description: Cursor (user id) pagination. }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+        - { name: search, in: query, schema: { type: string } }
+      responses:
+        "200": { description: Paginated user directory. }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [Server Users]
+      summary: Create a user
+      responses:
+        "200": { description: Created user. }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/server/users/{userId}:
+    parameters:
+      - { name: userId, in: path, required: true, schema: { type: string } }
+    get: { tags: [Server Users], summary: Get one user, responses: { "200": { description: The user. } } }
+    patch:
+      tags: [Server Users]
+      summary: Update status or notes
+      responses: { "200": { description: Updated. } }
+    delete:
+      tags: [Server Users]
+      summary: Delete a user
+      responses: { "200": { description: Deleted. } }
+
+  /v1/server/users/{userId}/ban:
+    parameters:
+      - { name: userId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Server Users]
+      summary: Ban a user (optionally temporary)
+      responses: { "200": { description: Ban applied. } }
+
+  /v1/server/users/{userId}/unban:
+    parameters:
+      - { name: userId, in: path, required: true, schema: { type: string } }
+    post: { tags: [Server Users], summary: Lift a user ban, responses: { "200": { description: Unbanned. } } }
+
+  /v1/server/users/{userId}/reset-devices:
+    parameters:
+      - { name: userId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Server Users]
+      summary: Delete all device registrations of one user
+      responses: { "200": { description: Devices removed. } }
+
+  /v1/server/users/{userId}/sessions:
+    parameters:
+      - { name: userId, in: path, required: true, schema: { type: string } }
+    get: { tags: [Server Sessions], summary: List sessions of one user, responses: { "200": { description: Sessions. } } }
+    post: { tags: [Server Sessions], summary: Revoke all sessions of one user, responses: { "200": { description: Revoked count. } } }
+
+  /v1/server/licenses:
+    get: { tags: [Server Licenses], summary: List licenses, responses: { "200": { description: Licenses. } } }
+    post:
+      tags: [Server Licenses]
+      summary: Issue a license
+      responses: { "200": { description: Created license including the plaintext key exactly once. } }
+
+  /v1/server/licenses/{licenseId}:
+    parameters:
+      - { name: licenseId, in: path, required: true, schema: { type: string } }
+    get: { tags: [Server Licenses], summary: Fetch one license, responses: { "200": { description: The license. } } }
+
+  /v1/server/licenses/{licenseId}/revoke:
+    parameters:
+      - { name: licenseId, in: path, required: true, schema: { type: string } }
+    post: { tags: [Server Licenses], summary: Revoke a license, responses: { "200": { description: Revoked. } } }
+
+  /v1/server/licenses/{licenseId}/extend:
+    parameters:
+      - { name: licenseId, in: path, required: true, schema: { type: string } }
+    post: { tags: [Server Licenses], summary: Extend expiry, devices or level, responses: { "200": { description: Updated. } } }
+
+  /v1/server/device-policy:
+    get: { tags: [Server Devices], summary: Show the effective device policy, responses: { "200": { description: Policy. } } }
+    put: { tags: [Server Devices], summary: Replace the device policy, responses: { "200": { description: Stored policy. } } }
+
+  /v1/server/sessions:
+    get: { tags: [Server Sessions], summary: List active auth sessions, responses: { "200": { description: Sessions. } } }
+
+  /v1/server/sessions/{sessionId}/revoke:
+    parameters:
+      - { name: sessionId, in: path, required: true, schema: { type: string } }
+    post: { tags: [Server Sessions], summary: Revoke one session, responses: { "200": { description: Revoked. } } }
+
+  /v1/server/variables:
+    get: { tags: [Server Variables], summary: List variables, responses: { "200": { description: Variables. } } }
+    post: { tags: [Server Variables], summary: Create a variable, responses: { "200": { description: Created. } } }
+
+  /v1/server/variables/{variableId}:
+    parameters:
+      - { name: variableId, in: path, required: true, schema: { type: string } }
+    patch: { tags: [Server Variables], summary: Update value/description, responses: { "200": { description: Updated. } } }
+    delete: { tags: [Server Variables], summary: Delete a variable, responses: { "200": { description: Deleted. } } }
+
+  /v1/server/webhooks:
+    get: { tags: [Server Webhooks], summary: List webhook endpoints, responses: { "200": { description: Webhooks. } } }
+    post:
+      tags: [Server Webhooks]
+      summary: Register a webhook endpoint
+      description: The signing secret is returned once in this response.
+      responses: { "201": { description: Created webhook plus secret. } }
+
+  /v1/server/webhooks/{webhookId}:
+    parameters:
+      - { name: webhookId, in: path, required: true, schema: { type: string } }
+    patch: { tags: [Server Webhooks], summary: Update URL/status/events, responses: { "200": { description: Updated. } } }
+    delete: { tags: [Server Webhooks], summary: Delete the endpoint, responses: { "200": { description: Deleted. } } }
+
+components:
+  securitySchemes:
+    AppHeader:
+      type: apiKey
+      in: header
+      name: X-KeyStar-App
+      description: Application UUID that forms the tenant boundary.
+    PublishableKey:
+      type: http
+      scheme: bearer
+      description: "`ks_pk_*` client credential."
+    SecretKey:
+      type: http
+      scheme: bearer
+      description: "`ks_sk_*` server credential with explicit scopes."
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid credential.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: Credential lacks a required scope.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    RateLimited:
+      description: Per-credential or per-IP rate limit exceeded. Retry using the Retry-After header.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+          description: Seconds until the request may be retried.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        ok: { type: boolean, example: false }
+        code: { type: string, example: INVALID_CREDENTIAL }
+        message: { type: string }
+        request_id: { type: string, format: uuid }
+
+    LoginResult:
+      type: object
+      description: Either a completed token pair or a pending device challenge.
+      properties:
+        ok: { type: boolean }
+        status:
+          type: string
+          enum: [authenticated, device_challenge]
+        access_token: { type: string }
+        refresh_token: { type: string }
+        expires_at: { type: string, format: date-time }
+        challenge:
+          type: object
+          nullable: true

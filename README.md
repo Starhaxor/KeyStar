@@ -457,6 +457,7 @@ npm run build
 ## Further reading
 
 - [KeyStar Platform and SDK Architecture](docs/KEYSTAR_PLATFORM_SDK_ARCHITECTURE.md)
+- [OpenAPI description of the public and server API](docs/openapi.yaml)
 - [Database migrations](backend/migrations)
 
 ---

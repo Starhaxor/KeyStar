@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/starloader/backend/internal/admin"
 	"github.com/starloader/backend/internal/config"
+	"github.com/starloader/backend/internal/metrics"
 	"github.com/starloader/backend/internal/credential"
 	"github.com/starloader/backend/internal/domain"
 	"github.com/starloader/backend/internal/httpapi"
@@ -204,6 +205,16 @@ func runServer() error {
 		log.Printf("admin console disabled: /v1/admin endpoints will return 503")
 	}
 	credentialVerifier := credential.NewVerifier(repository)
+	// Optional Prometheus instrumentation, gated so metrics (including
+	// route-level traffic) are never exposed unintentionally.
+	var registry *metrics.Registry
+	if envInt("ENABLE_METRICS", 0) == 1 {
+		registry = metrics.NewRegistry()
+		registry.DeclareCounter("keystar_http_requests_total", "HTTP requests processed.")
+		registry.DeclareHistogram("keystar_http_request_duration_seconds", "HTTP request latency in seconds.")
+		registry.DeclareGauge("keystar_webhook_backlog", "Webhook deliveries waiting to be sent.")
+	}
+
 	router := httpapi.NewRouter(httpapi.RouterConfig{
 		Login:                    loginService,
 		DeviceVerification:       deviceService,
@@ -215,6 +226,7 @@ func runServer() error {
 		RateLimitMaxKeys:         envInt("RATE_LIMIT_MAX_KEYS", 0),
 		CredentialRateLimit:      envInt("CREDENTIAL_RATE_LIMIT", 0),
 		HealthCheck:              pool.Ping,
+		Metrics:                  registry,
 		Admin:                    adminConfig,
 		DefaultApplicationID:     defaultApplication.ID,
 		Applications:             repository,
@@ -242,7 +254,9 @@ func runServer() error {
 	webhookDispatcher := service.NewWebhookDispatcher(service.WebhookDispatcherConfig{
 		WebhookRepo: repository,
 	})
-	go runWebhookWorker(applicationCtx, webhookDispatcher, log.Default())
+	go runWebhookWorker(applicationCtx, webhookDispatcher,
+		func() (int64, error) { return repository.CountOutboxBacklog(applicationCtx) },
+		registry, log.Default())
 
 	// Start periodic cleanup of expired refresh sessions plus audit and
 	// security-event retention. Retention is disabled (keep forever) unless a

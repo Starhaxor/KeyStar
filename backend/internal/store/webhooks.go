@@ -197,6 +197,18 @@ func (s *Store) MarkDeliveryFailed(ctx context.Context, deliveryID string, errMs
 	return nil
 }
 
+// CountOutboxBacklog returns pending + failed deliveries. The worker exposes
+// it as the webhook backlog gauge.
+func (s *Store) CountOutboxBacklog(ctx context.Context) (int64, error) {
+	var backlog int64
+	err := s.db.QueryRow(ctx, `
+		select count(*) from webhook_deliveries where status in ('pending', 'failed')`).Scan(&backlog)
+	if err != nil {
+		return 0, fmt.Errorf("count outbox backlog: %w", err)
+	}
+	return backlog, nil
+}
+
 // FindWebhookForDelivery looks up a webhook by ID without application
 // scoping. Only the trusted delivery worker uses it.
 func (s *Store) FindWebhookForDelivery(ctx context.Context, webhookID string) (*domain.Webhook, error) {

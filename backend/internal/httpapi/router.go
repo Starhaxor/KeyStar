@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/starloader/backend/internal/domain"
+	"github.com/starloader/backend/internal/metrics"
 )
 
 type RouterConfig struct {
@@ -48,6 +49,9 @@ type RouterConfig struct {
 	ServerStore ServerStore
 	// RefreshService manages refresh token issuance, rotation and reuse detection.
 	RefreshService RefreshService
+	// Metrics, when set, enables request instrumentation and the /metrics
+	// endpoint. Nil keeps both disabled (default).
+	Metrics *metrics.Registry
 }
 
 // Router is the root HTTP handler. It serves the public client API directly
@@ -82,6 +86,7 @@ type Router struct {
 	deviceVerifyHandler      http.Handler
 	meHandler                http.Handler
 	handler                  http.Handler
+	metrics                  *metrics.Registry
 }
 
 // Now returns the router clock (injectable in tests).
@@ -182,7 +187,12 @@ func NewRouter(config RouterConfig) *Router {
 	router.loginHandler = router.RequireCredential(domain.CredentialPublishable, "auth.login")(http.HandlerFunc(router.handleLogin))
 	router.deviceVerifyHandler = router.RequireCredential(domain.CredentialPublishable, "device.verify")(http.HandlerFunc(router.handleDeviceVerify))
 	router.meHandler = RequireSession(config.SessionVerifier, http.HandlerFunc(router.handleMe))
-	router.handler = requestIDMiddleware(recoveryMiddleware(logger, http.HandlerFunc(router.route)))
+	router.metrics = config.Metrics
+	var core http.Handler = http.HandlerFunc(router.route)
+	if config.Metrics != nil {
+		core = RequestObserver(config.Metrics, core)
+	}
+	router.handler = requestIDMiddleware(recoveryMiddleware(logger, core))
 	return router
 }
 
@@ -204,6 +214,8 @@ func (router *Router) route(writer http.ResponseWriter, request *http.Request) {
 		router.handleReadyz(writer, request)
 	case request.Method == http.MethodGet && request.URL.Path == "/status":
 		router.handleStatus(writer, request)
+	case request.Method == http.MethodGet && request.URL.Path == "/metrics" && router.metrics != nil:
+		router.metrics.Handler().ServeHTTP(writer, request)
 	case request.Method == http.MethodGet && request.URL.Path == "/v1/me":
 		router.meHandler.ServeHTTP(writer, request)
 	case strings.HasPrefix(request.URL.Path, AdminPathPrefix):

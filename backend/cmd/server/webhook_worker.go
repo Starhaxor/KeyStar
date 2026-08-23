@@ -5,6 +5,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/starloader/backend/internal/metrics"
 	"github.com/starloader/backend/internal/service"
 )
 
@@ -12,7 +13,7 @@ import (
 // context is cancelled. Each tick dequeues due deliveries and POSTs them;
 // failures stay in the outbox with the backoff schedule applied by the
 // store, so no event is ever lost on shutdown or error.
-func runWebhookWorker(ctx context.Context, dispatcher *service.WebhookDispatcher, logger *log.Logger) {
+func runWebhookWorker(ctx context.Context, dispatcher *service.WebhookDispatcher, backlog func() (int64, error), gauge *metrics.Registry, logger *log.Logger) {
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -25,10 +26,13 @@ func runWebhookWorker(ctx context.Context, dispatcher *service.WebhookDispatcher
 			cancel()
 			if err != nil {
 				logger.Printf("webhook worker: %v", err)
-				continue
-			}
-			if delivered > 0 {
+			} else if delivered > 0 {
 				logger.Printf("webhook worker: delivered %d event(s)", delivered)
+			}
+			if gauge != nil && backlog != nil {
+				if pending, err := backlog(); err == nil {
+					gauge.SetGauge("keystar_webhook_backlog", nil, float64(pending))
+				}
 			}
 		}
 	}
