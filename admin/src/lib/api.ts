@@ -295,6 +295,15 @@ export const api = {
       { method: "POST", body: {} }
     );
   },
+  rotateCredential(
+    credentialId: string,
+    graceHours: number
+  ): Promise<{ ok: boolean; key: string; old_expires_at?: string }> {
+    return request(
+      `/v1/admin/credentials/${credentialId}/rotate`,
+      { method: "POST", body: { grace_hours: graceHours } }
+    );
+  },
   devicePolicy() {
     return request<{ ok: boolean; policy: DevicePolicy }>(
       "/v1/admin/devices/policy"

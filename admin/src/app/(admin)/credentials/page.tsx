@@ -22,6 +22,9 @@ export default function CredentialsPage() {
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [revoke, setRevoke] = useState<ApplicationCredential | null>(null);
+  const [rotating, setRotating] = useState<ApplicationCredential | null>(null);
+  const [graceHours, setGraceHours] = useState(24);
+  const [rotateBusy, setRotateBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [secret, setSecret] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -69,6 +72,21 @@ export default function CredentialsPage() {
     finally { setBusy(false); }
   }
 
+  async function rotateCredential() {
+    if (!rotating) return;
+    setRotateBusy(true);
+    try {
+      const result = await api.rotateCredential(rotating.id, graceHours);
+      setRotating(null);
+      setSecret(result.key);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Credential could not be rotated");
+    } finally {
+      setRotateBusy(false);
+    }
+  }
+
   return (
     <>
       <PageTitle title="API Credentials" description="Create and revoke application keys. Secret keys are shown only once." actions={<Button size="sm" onClick={() => setCreateOpen(true)}>Create credential</Button>} />
@@ -77,7 +95,7 @@ export default function CredentialsPage() {
         {loading ? <LoadingNote /> : items.length === 0 ? <EmptyNote message="No credentials have been created for this application." /> : (
           <table className="min-w-full text-left text-sm">
             <thead className="border-b border-gray-200 text-xs uppercase text-gray-500 dark:border-gray-800"><tr><th className="px-5 py-3">Name</th><th>Type</th><th>Prefix</th><th>Scopes</th><th>Status</th><th>Last used</th><th className="px-5 py-3 text-right">Action</th></tr></thead>
-            <tbody>{items.map((item) => <tr key={item.id} className="border-b border-gray-100 dark:border-gray-800"><td className="px-5 py-4 font-medium">{item.name}<div className="text-xs text-gray-500">{item.environment}</div></td><td>{item.type}</td><td><code>{item.key_prefix}</code></td><td className="max-w-xs truncate">{item.scopes.join(", ")}</td><td>{item.status}</td><td className="whitespace-nowrap px-5 py-4 text-gray-500 dark:text-gray-400"><TimeAgo value={item.last_used_at} /></td><td className="px-5 text-right">{item.status === "active" && <Button size="sm" variant="outline" onClick={() => setRevoke(item)}>Revoke</Button>}</td></tr>)}</tbody>
+            <tbody>{items.map((item) => <tr key={item.id} className="border-b border-gray-100 dark:border-gray-800"><td className="px-5 py-4 font-medium">{item.name}<div className="text-xs text-gray-500">{item.environment}</div></td><td>{item.type}</td><td><code>{item.key_prefix}</code></td><td className="max-w-xs truncate">{item.scopes.join(", ")}</td><td>{item.status}</td><td className="whitespace-nowrap px-5 py-4 text-gray-500 dark:text-gray-400"><TimeAgo value={item.last_used_at} /></td><td className="px-5 text-right"><div className="flex justify-end gap-2">{item.status === "active" && (<><Button size="sm" variant="outline" onClick={() => { setGraceHours(24); setRotating(item); }}>Rotate</Button><Button size="sm" variant="outline" onClick={() => setRevoke(item)}>Revoke</Button></>)}</div></td></tr>)}</tbody>
           </table>
         )}
       </div>
@@ -111,6 +129,32 @@ export default function CredentialsPage() {
       </Modal>
 
       <ConfirmModal isOpen={revoke !== null} title="Revoke credential" message="This key will stop working immediately and cannot be restored." confirmLabel="Revoke" busy={busy} error={null} onConfirm={revokeCredential} onClose={() => !busy && setRevoke(null)} />
+
+      <Modal isOpen={rotating !== null} onClose={() => !rotateBusy && setRotating(null)} className="max-w-md p-6">
+        <h2 className="text-lg font-semibold">Rotate credential</h2>
+        {rotating && (
+          <>
+            <p className="mt-2 text-sm text-gray-500">
+              Issues a fresh key with the same name, type and scopes as
+              <strong> {rotating.name}</strong>. Choose how long the old key
+              stays valid.
+            </p>
+            <label className="mt-4 block text-sm">
+              Grace period for the old key
+              <select className={inputClass + " mt-1.5"} value={graceHours} onChange={(event) => setGraceHours(Number(event.target.value))}>
+                <option value={0}>Revoke immediately</option>
+                <option value={24}>24 hours (recommended)</option>
+                <option value={72}>3 days</option>
+                <option value={168}>7 days</option>
+              </select>
+            </label>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button size="sm" variant="outline" disabled={rotateBusy} onClick={() => setRotating(null)}>Cancel</Button>
+              <Button size="sm" disabled={rotateBusy} onClick={rotateCredential}>{rotateBusy ? "Rotating..." : "Rotate key"}</Button>
+            </div>
+          </>
+        )}
+      </Modal>
     </>
   );
 }
