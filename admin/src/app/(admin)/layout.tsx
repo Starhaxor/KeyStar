@@ -9,6 +9,7 @@ import AppHeader from "@/layout/AppHeader";
 import { ApplicationProvider } from "@/context/ApplicationContext";
 import AppSidebar from "@/layout/AppSidebar";
 import Backdrop from "@/layout/Backdrop";
+import CommandPalette from "@/components/common/CommandPalette";
 import Link from "next/link";
 import React from "react";
 
@@ -65,6 +66,7 @@ export default function AdminLayout({
           </div>
         </div>
       </div>
+      <CommandPalette />
       </ApplicationProvider>
     </AdminIdentityProvider>
   );

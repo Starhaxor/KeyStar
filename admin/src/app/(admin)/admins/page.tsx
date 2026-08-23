@@ -9,6 +9,7 @@ import StatusBadge from "@/components/console/StatusBadge";
 import RowActions, { type RowAction } from "@/components/console/RowActions";
 import ResetPasswordModal from "@/components/console/ResetPasswordModal";
 import Label from "@/components/form/Label";
+import { inputClasses } from "@/components/form/inputStyles";
 import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import { useAdminIdentity } from "@/context/AdminIdentityContext";
@@ -20,9 +21,6 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 const selectClasses =
   "h-11 w-full rounded-lg border appearance-none px-4 py-2.5 text-sm shadow-theme-xs focus:outline-hidden focus:ring-3 dark:bg-gray-900 dark:text-white/90 bg-transparent text-gray-800 border-gray-300 focus:border-brand-300 focus:ring-brand-500/10 dark:border-gray-700 dark:focus:border-brand-800";
-
-const inputClasses =
-  "h-11 w-full rounded-lg border appearance-none px-4 py-2.5 text-sm shadow-theme-xs focus:outline-hidden focus:ring-3 dark:bg-gray-900 dark:text-white/90 bg-transparent text-gray-800 border-gray-300 focus:border-brand-300 focus:ring-brand-500/10 dark:border-gray-700 dark:focus:border-brand-800 placeholder:text-gray-400";
 
 // Admins page: lists admin accounts and lets holders of admins.write change
 // another account's role or status. Editing your own account is blocked both

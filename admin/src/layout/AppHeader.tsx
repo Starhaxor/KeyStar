@@ -1,6 +1,10 @@
 "use client";
 import { ThemeToggleButton } from "@/components/common/ThemeToggleButton";
 import UserDropdown from "@/components/header/UserDropdown";
+import {
+  COMMAND_PALETTE_EVENT,
+} from "@/components/common/CommandPalette";
+import { SearchIcon } from "@/icons";
 import { useSidebar } from "@/context/SidebarContext";
 import { useApplication } from "@/context/ApplicationContext";
 import React from "react";
@@ -15,6 +19,10 @@ const AppHeader: React.FC = () => {
     } else {
       toggleMobileSidebar();
     }
+  };
+
+  const openCommandPalette = () => {
+    window.dispatchEvent(new Event(COMMAND_PALETTE_EVENT));
   };
 
   return (
@@ -71,6 +79,18 @@ const AppHeader: React.FC = () => {
         </div>
         <div className="flex items-center justify-end w-full gap-4 px-5 py-4 lg:px-0 lg:w-auto lg:py-4">
           <div className="flex items-center gap-2 2xsm:gap-3">
+            <button
+              type="button"
+              onClick={openCommandPalette}
+              aria-label="Search (Ctrl+K)"
+              className="flex h-10 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-gray-500 shadow-theme-xs transition hover:bg-gray-50 hover:text-gray-700 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
+            >
+              <SearchIcon />
+              <span className="hidden text-sm font-medium lg:block">Search</span>
+              <kbd className="hidden rounded border border-gray-200 px-1.5 py-0.5 text-xs font-medium text-gray-400 xl:block dark:border-gray-700 dark:text-gray-500">
+                Ctrl K
+              </kbd>
+            </button>
             <ThemeToggleButton />
           </div>
           <UserDropdown />

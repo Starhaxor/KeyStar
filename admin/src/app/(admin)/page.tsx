@@ -2,12 +2,14 @@
 import ActivityChart from "@/components/console/ActivityChart";
 import CompositionChart from "@/components/console/CompositionChart";
 import { CardSkeleton, Skeleton, TableSkeleton } from "@/components/common/Skeleton";
+import TimeAgo from "@/components/common/TimeAgo";
 import ConsoleSection, {
   EmptyNote,
   PageTitle,
 } from "@/components/console/ConsoleSection";
 import StatCard from "@/components/console/StatCard";
-import { api, formatDateTime } from "@/lib/api";
+import Button from "@/components/ui/button/Button";
+import { api } from "@/lib/api";
 import type { DailyStat, Overview, TodayStats } from "@/lib/types";
 import {
   AlertIcon,
@@ -19,46 +21,53 @@ import {
   UserCircleIcon,
   UserIcon,
 } from "@/icons";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 
 export default function OverviewPage() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [stats, setStats] = useState<DailyStat[] | null>(null);
   const [today, setToday] = useState<TodayStats | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Fetch on mount and refresh every 60s so the dashboard behaves like a
   // live operations center. State updates only happen after the awaited
   // fetch resolves, never synchronously inside the effect.
+  const refresh = useCallback(async (disposed: () => boolean) => {
+    setRefreshing(true);
+    try {
+      const [overviewResponse, statsResponse, todayResponse] =
+        await Promise.all([
+          api.overview(),
+          api.overviewStats(),
+          api.overviewToday(),
+        ]);
+      if (disposed()) return;
+      setError(null);
+      setOverview(overviewResponse);
+      setStats(statsResponse.days);
+      setToday(todayResponse);
+      setLastUpdated(new Date());
+    } catch (err) {
+      if (disposed()) return;
+      setError(
+        err instanceof Error ? err.message : "Failed to load overview"
+      );
+    } finally {
+      if (!disposed()) setRefreshing(false);
+    }
+  }, []);
+
   useEffect(() => {
     let disposed = false;
-    async function refresh() {
-      try {
-        const [overviewResponse, statsResponse, todayResponse] =
-          await Promise.all([
-            api.overview(),
-            api.overviewStats(),
-            api.overviewToday(),
-          ]);
-        if (disposed) return;
-        setError(null);
-        setOverview(overviewResponse);
-        setStats(statsResponse.days);
-        setToday(todayResponse);
-      } catch (err) {
-        if (disposed) return;
-        setError(
-          err instanceof Error ? err.message : "Failed to load overview"
-        );
-      }
-    }
-    refresh();
-    const timer = setInterval(refresh, 60_000);
+    refresh(() => disposed);
+    const timer = setInterval(() => refresh(() => disposed), 60_000);
     return () => {
       disposed = true;
       clearInterval(timer);
     };
-  }, []);
+  }, [refresh]);
 
   return (
     <div>
@@ -66,10 +75,26 @@ export default function OverviewPage() {
         title="Overview"
         description="Live snapshot of the StarLoader licensing system."
         actions={
-          <span className="flex items-center gap-1.5 rounded-full border border-gray-200 px-3 py-1 text-xs font-medium text-gray-500 dark:border-gray-800 dark:text-gray-400">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-success-500" />
-            Live · refreshes every 60s
-          </span>
+          <div className="flex items-center gap-3">
+            {lastUpdated && (
+              <span className="hidden text-xs text-gray-400 sm:block dark:text-gray-500">
+                Updated{" "}
+                <TimeAgo value={lastUpdated.toISOString()} />
+              </span>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => refresh(() => false)}
+              disabled={refreshing}
+            >
+              {refreshing ? "Refreshing..." : "Refresh"}
+            </Button>
+            <span className="flex items-center gap-1.5 rounded-full border border-gray-200 px-3 py-1 text-xs font-medium text-gray-500 dark:border-gray-800 dark:text-gray-400">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-success-500" />
+              Live · 60s
+            </span>
+          </div>
         }
       />
       {error && (
@@ -252,7 +277,7 @@ export default function OverviewPage() {
                           : "—"}
                       </td>
                       <td className="px-5 py-3 text-gray-500 dark:text-gray-400">
-                        {formatDateTime(entry.created_at)}
+                        <TimeAgo value={entry.created_at} />
                       </td>
                     </tr>
                   ))}

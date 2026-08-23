@@ -7,24 +7,25 @@ import EmptyState from "@/components/console/EmptyState";
 import StatusBadge from "@/components/console/StatusBadge";
 import RowActions, { type RowAction } from "@/components/console/RowActions";
 import Label from "@/components/form/Label";
+import { inputClasses } from "@/components/form/inputStyles";
 import Pagination from "@/components/tables/Pagination";
+import SortableHeader from "@/components/tables/SortableHeader";
 import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import { TableSkeleton } from "@/components/common/Skeleton";
+import TimeAgo from "@/components/common/TimeAgo";
 import ConfirmModal from "@/components/console/ConfirmModal";
 import ResetPasswordModal from "@/components/console/ResetPasswordModal";
 import ExportCsvButton from "@/components/common/ExportCsvButton";
 import { useAdminIdentity } from "@/context/AdminIdentityContext";
 import { useToast } from "@/context/ToastContext";
+import { useTableSort } from "@/hooks/useTableSort";
 import { api, formatDateTime } from "@/lib/api";
 import { moderationStatus } from "@/lib/moderation";
 import type { PageResult, ConsoleUser } from "@/lib/types";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import React, { Suspense, useCallback, useEffect, useState } from "react";
-
-const inputClasses =
-  "h-11 w-full rounded-lg border appearance-none px-4 py-2.5 text-sm shadow-theme-xs focus:outline-hidden focus:ring-3 dark:bg-gray-900 dark:text-white/90 bg-transparent text-gray-800 border-gray-300 focus:border-brand-300 focus:ring-brand-500/10 dark:border-gray-700 dark:focus:border-brand-800 placeholder:text-gray-400";
 
 function UsersContent() {
   const { hasPermission } = useAdminIdentity();
@@ -178,6 +179,29 @@ function UsersContent() {
     : 1;
 
   const items = result?.items ?? [];
+
+  type UserSortKey =
+    | "email"
+    | "status"
+    | "licenses"
+    | "devices"
+    | "sessions"
+    | "lastLogin";
+
+  // Sorting applies to the rows on the current page; pagination stays
+  // server-side so this never hides records from later pages.
+  const { sorted: sortedItems, sort, toggleSort } = useTableSort<
+    ConsoleUser,
+    UserSortKey
+  >(items, {
+    email: (user) => user.email,
+    status: (user) => user.status,
+    licenses: (user) => user.license_count,
+    devices: (user) => user.device_count,
+    sessions: (user) => user.active_session_count,
+    lastLogin: (user) => user.last_login_at,
+  });
+
   const activeCount = items.filter((u) => u.status === "active").length;
   const bannedCount = items.filter((u) => u.status === "banned").length;
   const disabledCount = items.length - activeCount - bannedCount;
@@ -374,18 +398,48 @@ function UsersContent() {
                       className="h-4 w-4 rounded border-gray-300 accent-brand-500 dark:border-gray-700"
                     />
                   </th>
-                  <th className="px-5 py-3 font-medium">Email</th>
-                  <th className="px-5 py-3 font-medium">Status</th>
-                  <th className="px-5 py-3 font-medium">Licenses</th>
-                  <th className="px-5 py-3 font-medium">Devices</th>
-                  <th className="px-5 py-3 font-medium">Active Sessions</th>
-                  <th className="px-5 py-3 font-medium">Last Login</th>
+                  <SortableHeader
+                    label="Email"
+                    sortKey="email"
+                    sort={sort}
+                    onToggle={toggleSort}
+                  />
+                  <SortableHeader
+                    label="Status"
+                    sortKey="status"
+                    sort={sort}
+                    onToggle={toggleSort}
+                  />
+                  <SortableHeader
+                    label="Licenses"
+                    sortKey="licenses"
+                    sort={sort}
+                    onToggle={toggleSort}
+                  />
+                  <SortableHeader
+                    label="Devices"
+                    sortKey="devices"
+                    sort={sort}
+                    onToggle={toggleSort}
+                  />
+                  <SortableHeader
+                    label="Active Sessions"
+                    sortKey="sessions"
+                    sort={sort}
+                    onToggle={toggleSort}
+                  />
+                  <SortableHeader
+                    label="Last Login"
+                    sortKey="lastLogin"
+                    sort={sort}
+                    onToggle={toggleSort}
+                  />
                   <th className="px-5 py-3 font-medium">Created</th>
                   <th className="px-5 py-3 font-medium text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {result.items.map((user) => {
+                {sortedItems.map((user) => {
                   const actions: RowAction[] = [
                     {
                       label: "View profile",
@@ -470,7 +524,7 @@ function UsersContent() {
                         {user.active_session_count}
                       </td>
                       <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
-                        {formatDateTime(user.last_login_at)}
+                        <TimeAgo value={user.last_login_at} />
                       </td>
                       <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
                         {formatDateTime(user.created_at)}

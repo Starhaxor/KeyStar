@@ -8,6 +8,7 @@ import EmptyState from "@/components/console/EmptyState";
 import ConfirmModal from "@/components/console/ConfirmModal";
 import RowActions, { type RowAction } from "@/components/console/RowActions";
 import Label from "@/components/form/Label";
+import { inputClasses } from "@/components/form/inputStyles";
 import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import { useAdminIdentity } from "@/context/AdminIdentityContext";
@@ -17,9 +18,6 @@ import { PERMISSION_GROUPS } from "@/lib/permissions";
 import type { AdminRole, RoleMember } from "@/lib/types";
 import { GroupIcon } from "@/icons";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-
-const inputClasses =
-  "h-11 w-full rounded-lg border appearance-none px-4 py-2.5 text-sm shadow-theme-xs focus:outline-hidden focus:ring-3 dark:bg-gray-900 dark:text-white/90 bg-transparent text-gray-800 border-gray-300 focus:border-brand-300 focus:ring-brand-500/10 dark:border-gray-700 dark:focus:border-brand-800 placeholder:text-gray-400";
 
 const TOTAL_PERMISSIONS = PERMISSION_GROUPS.reduce(
   (total, group) => total + group.permissions.length,

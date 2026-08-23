@@ -92,7 +92,7 @@ Administration console
 ```text
                               ┌──────────────────────────────────────┐
                               │               KeyStar                │
-                              │        Go API + PostgreSQL            │
+                              │        Go API + PostgreSQL           │
                               └──────────────────┬───────────────────┘
                                                  │
                           application resolver + credential verification
@@ -103,7 +103,7 @@ Administration console
            │                     │               │               │                     │
       publishable key      publishable key  publishable key   MFA + RBAC      scoped secret key
            │                     │               │               │                     │
-      user + device flow   user + device flow               operations        server automation
+      user + device flow   user + device flow  server          operations        server automation
 ```
 
 ### API surfaces
