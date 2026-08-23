@@ -33,3 +33,23 @@ export function formatRelativeTime(
   const span = relativeSpan(Math.abs(diffSeconds));
   return diffSeconds >= 0 ? `${span} ago` : `in ${span}`;
 }
+
+// Compact human label for second-based durations coming from the catalog
+// API (e.g. plan default durations): 2592000 -> "30d". Returns null for
+// absent values so callers can fall back to their own copy.
+export function formatDuration(
+  seconds: number | null | undefined
+): string | null {
+  if (seconds == null || !Number.isFinite(seconds)) return null;
+  const total = Math.round(seconds);
+  if (total <= 0) return null;
+  if (total % 86400 === 0) {
+    const days = total / 86400;
+    if (days % 365 === 0) return `${days / 365}y`;
+    if (days % 30 === 0) return `${days / 30}mo`;
+    return `${days}d`;
+  }
+  if (total % 3600 === 0) return `${total / 3600}h`;
+  if (total % 60 === 0) return `${total / 60}m`;
+  return `${total}s`;
+}

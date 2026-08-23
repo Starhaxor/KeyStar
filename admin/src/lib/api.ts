@@ -261,6 +261,17 @@ export const api = {
   deleteWebhook(webhookId: string) {
     return request<{ ok: boolean }>(`/v1/admin/webhooks/${webhookId}`, { method: "DELETE", body: {} });
   },
+  webhookDeliveries(webhookId: string, page = 1) {
+    return request<{ ok: boolean } & PageResult<import("./types").WebhookDelivery>>(
+      `/v1/admin/webhooks/${webhookId}/deliveries?${pageQuery(page)}`
+    );
+  },
+  retryWebhookDelivery(webhookId: string, deliveryId: string) {
+    return request<{ ok: boolean }>(
+      `/v1/admin/webhooks/${webhookId}/deliveries/${deliveryId}/retry`,
+      { method: "POST", body: {} }
+    );
+  },
   credentials() {
     return request<{ ok: boolean; credentials: ApplicationCredential[] }>(
       "/v1/admin/credentials"
@@ -328,9 +339,9 @@ export const api = {
       body: {},
     });
   },
-  securityEvents(page: number) {
+  securityEvents(page: number, search = "", severity = "") {
     return request<{ ok: boolean } & PageResult<SecurityEvent>>(
-      `/v1/admin/security-events?${pageQuery(page)}`
+      `/v1/admin/security-events?${pageQuery(page, { search, severity })}`
     );
   },
   logout() {
@@ -348,9 +359,9 @@ export const api = {
   overview() {
     return request<{ ok: boolean } & Overview>("/v1/admin/overview");
   },
-  overviewStats() {
+  overviewStats(days = 14) {
     return request<{ ok: boolean; days: DailyStat[] }>(
-      "/v1/admin/overview/stats"
+      `/v1/admin/overview/stats?${new URLSearchParams({ days: String(days) })}`
     );
   },
   overviewToday() {
@@ -457,9 +468,9 @@ export const api = {
       body: { password: password ?? "" },
     });
   },
-  licenses(page: number, pageSize = 20) {
+  licenses(page: number, pageSize = 20, search = "", status = "") {
     return request<{ ok: boolean } & PageResult<ConsoleLicense>>(
-      `/v1/admin/licenses?${new URLSearchParams({ page: String(page), page_size: String(pageSize) })}`
+      `/v1/admin/licenses?${pageQuery(page, { search, status, page_size: String(pageSize) })}`
     );
   },
   createLicense(
@@ -531,9 +542,9 @@ export const api = {
       { method: "POST", body: {} }
     );
   },
-  devices(page: number, pageSize = 20) {
+  devices(page: number, pageSize = 20, search = "", status = "") {
     return request<{ ok: boolean } & PageResult<ConsoleDevice>>(
-      `/v1/admin/devices?${new URLSearchParams({ page: String(page), page_size: String(pageSize) })}`
+      `/v1/admin/devices?${pageQuery(page, { search, status, page_size: String(pageSize) })}`
     );
   },
   deviceDetail(deviceId: string) {
@@ -553,9 +564,9 @@ export const api = {
       body: {},
     });
   },
-  sessions(page: number, pageSize = 20) {
+  sessions(page: number, pageSize = 20, search = "", status = "") {
     return request<{ ok: boolean } & PageResult<ConsoleSession>>(
-      `/v1/admin/sessions?${new URLSearchParams({ page: String(page), page_size: String(pageSize) })}`
+      `/v1/admin/sessions?${pageQuery(page, { search, status, page_size: String(pageSize) })}`
     );
   },
   revokeSession(sessionId: string) {
@@ -564,9 +575,9 @@ export const api = {
       { method: "POST", body: {} }
     );
   },
-  auditLogs(page: number) {
+  auditLogs(page: number, search = "") {
     return request<{ ok: boolean } & PageResult<AuditEntry>>(
-      `/v1/admin/audit-logs?${pageQuery(page)}`
+      `/v1/admin/audit-logs?${pageQuery(page, { search })}`
     );
   },
 };

@@ -5,8 +5,12 @@ import ConsoleSection, {
   PageTitle,
 } from "@/components/console/ConsoleSection";
 import EmptyState from "@/components/console/EmptyState";
+import ExportCsvButton from "@/components/common/ExportCsvButton";
+import TimeAgo from "@/components/common/TimeAgo";
 import Pagination from "@/components/tables/Pagination";
-import { api, formatDateTime } from "@/lib/api";
+import SortableHeader from "@/components/tables/SortableHeader";
+import { useTableSort } from "@/hooks/useTableSort";
+import { api, fetchAllPages } from "@/lib/api";
 import type { PageResult, SecurityEvent } from "@/lib/types";
 import { AlertIcon } from "@/icons";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -22,42 +26,57 @@ const severityStyles: Record<string, string> = {
 export default function SecurityEventsPage() {
   const [result, setResult] = useState<PageResult<SecurityEvent> | null>(null);
   const [page, setPage] = useState(1);
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [severityFilter, setSeverityFilter] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       setError(null);
-      const response = await api.securityEvents(page);
+      const response = await api.securityEvents(page, search, severityFilter);
       setResult(response);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load events");
     } finally {
       setLoading(false);
     }
-  }, [page]);
+  }, [page, search, severityFilter]);
 
   useEffect(() => {
     load();
   }, [load]);
 
+  // Live search: debounce keystrokes, then refetch from page 1. The backend
+  // matches actor email and event kind.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPage(1);
+      setSearch(searchInput.trim());
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
   const allItems = useMemo(() => result?.items ?? [], [result]);
-  const items = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    if (!q) return allItems;
-    return allItems.filter(
-      (event) =>
-        event.kind.toLowerCase().includes(q) ||
-        event.severity.toLowerCase().includes(q) ||
-        (event.actor_email ?? "").toLowerCase().includes(q)
-    );
-  }, [allItems, filter]);
+  const items = allItems;
 
   const totalPages = result
     ? Math.max(1, Math.ceil(result.total / result.page_size))
     : 1;
+
+  type EventSortKey = "time" | "kind" | "severity" | "account";
+
+  const { sorted: sortedItems, sort, toggleSort } = useTableSort<
+    SecurityEvent,
+    EventSortKey
+  >(items, {
+    time: (event) => event.created_at,
+    kind: (event) => event.kind,
+    severity: (event) => event.severity,
+    account: (event) => event.actor_email ?? "",
+  });
 
   const criticalCount = allItems.filter((e) => e.severity === "critical").length;
   const warningCount = allItems.filter((e) => e.severity === "warning").length;
@@ -89,13 +108,53 @@ export default function SecurityEventsPage() {
         title="Recent Events"
         description={result ? `${result.total} event(s) total` : "Loading events"}
         actions={
-          <input
-            type="search"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Type to filter..."
-            className="h-10 w-56 rounded-lg border border-gray-300 bg-transparent px-3.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
-          />
+          <div className="flex items-center gap-2">
+            <input
+              type="search"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search by email or event kind..."
+              className="h-10 w-56 rounded-lg border border-gray-300 bg-transparent px-3.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+            />
+            <select
+              value={severityFilter}
+              onChange={(e) => {
+                setSeverityFilter(e.target.value);
+                setPage(1);
+              }}
+              aria-label="Filter events by severity"
+              className="h-10 rounded-lg border border-gray-300 bg-transparent px-2.5 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+            >
+              <option value="">All severities</option>
+              <option value="critical">Critical</option>
+              <option value="warning">Warning</option>
+              <option value="info">Info</option>
+            </select>
+            <ExportCsvButton
+              filename="security-events.csv"
+              headers={["created_at", "kind", "severity", "actor_email", "user_agent"]}
+              rows={items.map((event) => [
+                event.created_at,
+                event.kind,
+                event.severity,
+                event.actor_email ?? "",
+                event.user_agent ?? "",
+              ])}
+              loadAllRows={async () =>
+                (
+                  await fetchAllPages((page: number) =>
+                    api.securityEvents(page)
+                  )
+                ).map((event) => [
+                  event.created_at,
+                  event.kind,
+                  event.severity,
+                  event.actor_email ?? "",
+                  event.user_agent ?? "",
+                ])
+              }
+            />
+          </div>
         }
       >
         {loading && !error ? (
@@ -103,37 +162,39 @@ export default function SecurityEventsPage() {
         ) : error ? (
           <ErrorNote message={error} />
         ) : !result || result.items.length === 0 ? (
-          <EmptyState
-            icon={<AlertIcon />}
-            title="No security events yet"
-            message="Authentication, MFA and authorization signals will appear here."
-          />
-        ) : items.length === 0 ? (
-          <EmptyState
-            icon={<AlertIcon />}
-            title="No matching events"
-            message={`Nothing matches “${filter}” on this page.`}
-          />
+          search || severityFilter ? (
+            <EmptyState
+              icon={<AlertIcon />}
+              title="No matching events"
+              message="Nothing matches the current filters."
+            />
+          ) : (
+            <EmptyState
+              icon={<AlertIcon />}
+              title="No security events yet"
+              message="Authentication, MFA and authorization signals will appear here."
+            />
+          )
         ) : (
           <>
             <table className="w-full text-left text-sm">
               <thead className="border-b border-gray-200 dark:border-gray-800">
                 <tr className="text-xs uppercase text-gray-400">
-                  <th className="px-5 py-3 font-medium">Time</th>
-                  <th className="px-5 py-3 font-medium">Event</th>
-                  <th className="px-5 py-3 font-medium">Severity</th>
-                  <th className="px-5 py-3 font-medium">Account</th>
+                  <SortableHeader label="Time" sortKey="time" sort={sort} onToggle={toggleSort} />
+                  <SortableHeader label="Event" sortKey="kind" sort={sort} onToggle={toggleSort} />
+                  <SortableHeader label="Severity" sortKey="severity" sort={sort} onToggle={toggleSort} />
+                  <SortableHeader label="Account" sortKey="account" sort={sort} onToggle={toggleSort} />
                   <th className="px-5 py-3 font-medium">User Agent</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {items.map((event) => (
+                {sortedItems.map((event) => (
                   <tr
                     key={event.id}
                     className="hover:bg-gray-50 dark:hover:bg-white/[0.02]"
                   >
                     <td className="whitespace-nowrap px-5 py-3.5 text-gray-500 dark:text-gray-400">
-                      {formatDateTime(event.created_at)}
+                      <TimeAgo value={event.created_at} />
                     </td>
                     <td className="px-5 py-3.5 font-medium text-gray-700 dark:text-gray-300">
                       {event.kind}

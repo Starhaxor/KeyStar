@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDateTime, formatRelativeTime } from "./time";
+import { formatDateTime, formatDuration, formatRelativeTime } from "./time";
 
 describe("formatRelativeTime", () => {
   const now = new Date("2026-08-23T12:00:00Z");
@@ -35,5 +35,26 @@ describe("formatDateTime", () => {
   it("falls back to a dash for empty or unparseable input", () => {
     expect(formatDateTime(null)).toBe("—");
     expect(formatDateTime("garbage")).toBe("—");
+  });
+});
+
+describe("formatDuration", () => {
+  it("returns null for absent, zero or invalid values", () => {
+    expect(formatDuration(null)).toBeNull();
+    expect(formatDuration(undefined)).toBeNull();
+    expect(formatDuration(0)).toBeNull();
+    expect(formatDuration(Number.NaN)).toBeNull();
+  });
+
+  it("prefers the largest clean unit", () => {
+    expect(formatDuration(86400)).toBe("1d");
+    expect(formatDuration(45 * 86400)).toBe("45d");
+    expect(formatDuration(2592000)).toBe("1mo");
+    expect(formatDuration(31536000)).toBe("1y");
+    expect(formatDuration(730 * 86400)).toBe("2y");
+    expect(formatDuration(3600)).toBe("1h");
+    expect(formatDuration(7200)).toBe("2h");
+    expect(formatDuration(90 * 60)).toBe("90m");
+    expect(formatDuration(45)).toBe("45s");
   });
 });

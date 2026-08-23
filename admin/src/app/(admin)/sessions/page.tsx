@@ -10,6 +10,8 @@ import StatusBadge from "@/components/console/StatusBadge";
 import { TableSkeleton } from "@/components/common/Skeleton";
 import ExportCsvButton from "@/components/common/ExportCsvButton";
 import Pagination from "@/components/tables/Pagination";
+import SortableHeader from "@/components/tables/SortableHeader";
+import { useTableSort } from "@/hooks/useTableSort";
 import { useToast } from "@/context/ToastContext";
 import { api, fetchAllPages, formatDateTime } from "@/lib/api";
 import type { ConsoleSession, PageResult } from "@/lib/types";
@@ -22,7 +24,9 @@ export default function SessionsPage() {
   const [page, setPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
 
   const [revokeTarget, setRevokeTarget] = useState<ConsoleSession | null>(null);
   const [revokeBusy, setRevokeBusy] = useState(false);
@@ -32,18 +36,27 @@ export default function SessionsPage() {
     setLoading(true);
     try {
       setError(null);
-      const response = await api.sessions(page);
+      const response = await api.sessions(page, 20, search, statusFilter);
       setResult(response);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load sessions");
     } finally {
       setLoading(false);
     }
-  }, [page]);
+  }, [page, search, statusFilter]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // Live search: debounce keystrokes, then refetch from page 1.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPage(1);
+      setSearch(searchInput.trim());
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   async function handleRevoke() {
     if (!revokeTarget) return;
@@ -64,17 +77,23 @@ export default function SessionsPage() {
   }
 
   const allItems = useMemo(() => result?.items ?? [], [result]);
-  const items = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    if (!q) return allItems;
-    return allItems.filter(
-      (session) =>
-        session.user_email.toLowerCase().includes(q) ||
-        session.id.toLowerCase().includes(q) ||
-        session.license_id.toLowerCase().includes(q) ||
-        session.status.toLowerCase().includes(q)
-    );
-  }, [allItems, filter]);
+  const items = allItems;
+
+  type SessionSortKey =
+    | "user"
+    | "status"
+    | "expires"
+    | "created";
+
+  const { sorted: sortedItems, sort, toggleSort } = useTableSort<
+    ConsoleSession,
+    SessionSortKey
+  >(items, {
+    user: (session) => session.user_email,
+    status: (session) => session.status,
+    expires: (session) => session.expires_at,
+    created: (session) => session.created_at,
+  });
 
   const totalPages = result
     ? Math.max(1, Math.ceil(result.total / result.page_size))
@@ -113,11 +132,25 @@ export default function SessionsPage() {
           <div className="flex items-center gap-2">
             <input
               type="search"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Type to filter..."
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search by email or session id..."
               className="h-10 w-56 rounded-lg border border-gray-300 bg-transparent px-3.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
             />
+            <select
+              value={statusFilter}
+              onChange={(e) => {
+                setStatusFilter(e.target.value);
+                setPage(1);
+              }}
+              aria-label="Filter sessions by status"
+              className="h-10 rounded-lg border border-gray-300 bg-transparent px-2.5 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+            >
+              <option value="">All statuses</option>
+              <option value="verified">Verified</option>
+              <option value="pending">Pending</option>
+              <option value="expired">Expired</option>
+            </select>
             <ExportCsvButton
               filename="sessions.csv"
               headers={["id", "user_email", "status", "expires_at", "created_at"]}
@@ -138,33 +171,35 @@ export default function SessionsPage() {
         ) : error ? (
           <ErrorNote message={error} />
         ) : !result || result.items.length === 0 ? (
-          <EmptyState
-            icon={<TimeIcon />}
-            title="No sessions found"
-            message="Verified auth sessions will appear here."
-          />
-        ) : items.length === 0 ? (
-          <EmptyState
-            icon={<TimeIcon />}
-            title="No matching sessions"
-            message={`Nothing matches “${filter}” on this page.`}
-          />
+          search || statusFilter ? (
+            <EmptyState
+              icon={<TimeIcon />}
+              title="No matching sessions"
+              message="Nothing matches the current filters."
+            />
+          ) : (
+            <EmptyState
+              icon={<TimeIcon />}
+              title="No sessions found"
+              message="Verified auth sessions will appear here."
+            />
+          )
         ) : (
           <>
             <table className="w-full text-left text-sm">
               <thead className="border-b border-gray-200 dark:border-gray-800">
                 <tr className="text-xs uppercase text-gray-400">
                   <th className="px-5 py-3 font-medium">Session</th>
-                  <th className="px-5 py-3 font-medium">User</th>
+                  <SortableHeader label="User" sortKey="user" sort={sort} onToggle={toggleSort} />
                   <th className="px-5 py-3 font-medium">License</th>
-                  <th className="px-5 py-3 font-medium">Status</th>
-                  <th className="px-5 py-3 font-medium">Expires</th>
-                  <th className="px-5 py-3 font-medium">Created</th>
+                  <SortableHeader label="Status" sortKey="status" sort={sort} onToggle={toggleSort} />
+                  <SortableHeader label="Expires" sortKey="expires" sort={sort} onToggle={toggleSort} />
+                  <SortableHeader label="Created" sortKey="created" sort={sort} onToggle={toggleSort} />
                   <th className="px-5 py-3 font-medium text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {items.map((session) => {
+                {sortedItems.map((session) => {
                   const actions: RowAction[] = [
                     {
                       label: "Revoke",

@@ -247,6 +247,25 @@ export interface Webhook {
   updated_at: string;
 }
 
+export type WebhookDeliveryStatus =
+  | "pending"
+  | "delivering"
+  | "delivered"
+  | "failed";
+
+export interface WebhookDelivery {
+  id: string;
+  webhook_id: string;
+  event_type: string;
+  status: WebhookDeliveryStatus;
+  attempts: number;
+  max_attempts: number;
+  next_attempt_at: string;
+  last_error: string;
+  delivered_at: string | null;
+  created_at: string;
+}
+
 export interface Application {
   id: string;
   organization_id: string;

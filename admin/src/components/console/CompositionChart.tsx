@@ -5,13 +5,20 @@ import React, { useMemo } from "react";
 
 const Chart = dynamic(() => import("react-apexcharts"), { ssr: false });
 
-export default function CompositionChart({ stats }: { stats: DailyStat[] }) {
+export default function CompositionChart({
+  stats,
+  range = 14,
+}: {
+  stats: DailyStat[];
+  range?: number;
+}) {
   const { series, labels } = useMemo(() => {
     const totals = {
       Licenses: stats.reduce((sum, stat) => sum + stat.licenses_created, 0),
       Devices: stats.reduce((sum, stat) => sum + stat.devices_registered, 0),
       Sessions: stats.reduce((sum, stat) => sum + stat.sessions_created, 0),
       "Admin logins": stats.reduce((sum, stat) => sum + stat.admin_logins, 0),
+      "Audit events": stats.reduce((sum, stat) => sum + stat.audit_events, 0),
     };
     return {
       series: Object.values(totals),
@@ -28,7 +35,7 @@ export default function CompositionChart({ stats }: { stats: DailyStat[] }) {
         toolbar: { show: false },
       },
       labels,
-      colors: ["#16a34a", "#0ba5ec", "#f79009", "#7a5af8"],
+      colors: ["#16a34a", "#0ba5ec", "#f79009", "#7a5af8", "#ee46bc"],
       stroke: { width: 0 },
       dataLabels: { enabled: false },
       legend: {
@@ -51,7 +58,7 @@ export default function CompositionChart({ stats }: { stats: DailyStat[] }) {
               },
               total: {
                 show: true,
-                label: "14-day total",
+                label: `${range}-day total`,
                 fontSize: "12px",
                 color: "#98a2b3",
               },
@@ -60,7 +67,7 @@ export default function CompositionChart({ stats }: { stats: DailyStat[] }) {
         },
       },
     }),
-    [labels]
+    [labels, range]
   );
 
   return (

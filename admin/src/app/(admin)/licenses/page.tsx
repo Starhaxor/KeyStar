@@ -13,6 +13,8 @@ import StatusBadge from "@/components/console/StatusBadge";
 import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import Pagination from "@/components/tables/Pagination";
+import SortableHeader from "@/components/tables/SortableHeader";
+import { useTableSort } from "@/hooks/useTableSort";
 import { api, fetchAllPages, formatDateTime } from "@/lib/api";
 import type { ConsoleLicense, PageResult } from "@/lib/types";
 import { DocsIcon } from "@/icons";
@@ -27,7 +29,9 @@ export default function LicensesPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const [filter, setFilter] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
 
   const [createOpen, setCreateOpen] = useState(false);
 
@@ -48,18 +52,27 @@ export default function LicensesPage() {
     setLoading(true);
     try {
       setError(null);
-      const response = await api.licenses(page);
+      const response = await api.licenses(page, 20, search, statusFilter);
       setResult(response);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load licenses");
     } finally {
       setLoading(false);
     }
-  }, [page]);
+  }, [page, search, statusFilter]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // Live search: debounce keystrokes, then refetch from page 1.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPage(1);
+      setSearch(searchInput.trim());
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -70,17 +83,29 @@ export default function LicensesPage() {
   }, []);
 
   const allItems = useMemo(() => result?.items ?? [], [result]);
-  const items = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    if (!q) return allItems;
-    return allItems.filter(
-      (license) =>
-        license.user_email.toLowerCase().includes(q) ||
-        license.product.toLowerCase().includes(q) ||
-        license.status.toLowerCase().includes(q) ||
-        license.id.toLowerCase().includes(q)
-    );
-  }, [allItems, filter]);
+  const items = allItems;
+
+  type LicenseSortKey =
+    | "user"
+    | "product"
+    | "status"
+    | "level"
+    | "maxDevices"
+    | "expires"
+    | "created";
+
+  const { sorted: sortedItems, sort, toggleSort } = useTableSort<
+    ConsoleLicense,
+    LicenseSortKey
+  >(items, {
+    user: (license) => license.user_email,
+    product: (license) => license.product,
+    status: (license) => license.status,
+    level: (license) => license.level ?? 1,
+    maxDevices: (license) => license.max_devices,
+    expires: (license) => license.expires_at,
+    created: (license) => license.created_at,
+  });
 
   async function handleExtend(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -163,11 +188,25 @@ export default function LicensesPage() {
           <div className="flex items-center gap-2">
             <input
               type="search"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Type to filter..."
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search by email, product, notes..."
               className="h-10 w-56 rounded-lg border border-gray-300 bg-transparent px-3.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
             />
+            <select
+              value={statusFilter}
+              onChange={(e) => {
+                setStatusFilter(e.target.value);
+                setPage(1);
+              }}
+              aria-label="Filter licenses by status"
+              className="h-10 rounded-lg border border-gray-300 bg-transparent px-2.5 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+            >
+              <option value="">All statuses</option>
+              <option value="active">Active</option>
+              <option value="revoked">Revoked</option>
+              <option value="expired">Expired</option>
+            </select>
             <ExportCsvButton
               filename="licenses.csv"
               headers={["user_email", "product", "status", "max_devices", "expires_at", "created_at"]}
@@ -189,34 +228,36 @@ export default function LicensesPage() {
         ) : error ? (
           <ErrorNote message={error} />
         ) : !result || result.items.length === 0 ? (
-          <EmptyState
-            icon={<DocsIcon />}
-            title="No licenses found"
-            message="Issue a license to an end user to get started."
-          />
-        ) : items.length === 0 ? (
-          <EmptyState
-            icon={<DocsIcon />}
-            title="No matching licenses"
-            message={`Nothing matches “${filter}” on this page.`}
-          />
+          search || statusFilter ? (
+            <EmptyState
+              icon={<DocsIcon />}
+              title="No matching licenses"
+              message="Nothing matches the current filters."
+            />
+          ) : (
+            <EmptyState
+              icon={<DocsIcon />}
+              title="No licenses found"
+              message="Issue a license to an end user to get started."
+            />
+          )
         ) : (
           <>
             <table className="w-full text-left text-sm">
               <thead className="border-b border-gray-200 dark:border-gray-800">
                 <tr className="text-xs uppercase text-gray-400">
-                  <th className="px-5 py-3 font-medium">User</th>
-                  <th className="px-5 py-3 font-medium">Product</th>
-                  <th className="px-5 py-3 font-medium">Status</th>
-                  <th className="px-5 py-3 font-medium">Level</th>
-                  <th className="px-5 py-3 font-medium">Max Devices</th>
-                  <th className="px-5 py-3 font-medium">Expires</th>
-                  <th className="px-5 py-3 font-medium">Created</th>
+                  <SortableHeader label="User" sortKey="user" sort={sort} onToggle={toggleSort} />
+                  <SortableHeader label="Product" sortKey="product" sort={sort} onToggle={toggleSort} />
+                  <SortableHeader label="Status" sortKey="status" sort={sort} onToggle={toggleSort} />
+                  <SortableHeader label="Level" sortKey="level" sort={sort} onToggle={toggleSort} />
+                  <SortableHeader label="Max Devices" sortKey="maxDevices" sort={sort} onToggle={toggleSort} />
+                  <SortableHeader label="Expires" sortKey="expires" sort={sort} onToggle={toggleSort} />
+                  <SortableHeader label="Created" sortKey="created" sort={sort} onToggle={toggleSort} />
                   <th className="px-5 py-3 font-medium text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {items.map((license) => {
+                {sortedItems.map((license) => {
                   const actions: RowAction[] = [
                     {
                       label: "Extend",

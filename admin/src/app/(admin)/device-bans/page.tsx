@@ -4,6 +4,8 @@ import ConsoleSection, { EmptyNote, ErrorNote, LoadingNote, PageTitle } from "@/
 import ConfirmModal from "@/components/console/ConfirmModal";
 import StatusBadge from "@/components/console/StatusBadge";
 import Pagination from "@/components/tables/Pagination";
+import SortableHeader from "@/components/tables/SortableHeader";
+import { useTableSort } from "@/hooks/useTableSort";
 import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import { useAdminIdentity } from "@/context/AdminIdentityContext";
@@ -85,15 +87,44 @@ function DeviceBansContent() {
   const items = result?.items ?? [];
   const totalPages = result ? Math.max(1, Math.ceil(result.total / result.page_size)) : 1;
 
+  // The backend offers status filtering only, so the quick text filter runs
+  // over the rows on the current page.
+  const [filter, setFilter] = useState("");
+  const filteredItems = filter.trim()
+    ? items.filter((item) =>
+        `${item.user_email} ${item.device_id} ${item.reason}`
+          .toLowerCase()
+          .includes(filter.trim().toLowerCase())
+      )
+    : items;
+
+  type DeviceBanSortKey = "account" | "status" | "ends";
+
+  const { sorted: sortedItems, sort, toggleSort } = useTableSort<
+    DeviceBanRecord,
+    DeviceBanSortKey
+  >(filteredItems, {
+    account: (item) => item.user_email,
+    status: (item) => item.status,
+    ends: (item) => item.expires_at ?? "",
+  });
+
   return <div>
     <PageTitle title="Device / HWID Bans" description="Block a registered device in this application. Raw hardware identifiers never leave the server." actions={canWrite ? <Button size="sm" onClick={openCreate}>Ban a device</Button> : undefined} />
     <div className="mb-5 flex flex-wrap items-center gap-2" aria-label="Device ban status filter">
       {[{ value: "active", label: "Active" }, { value: "lifted", label: "Lifted" }, { value: "expired", label: "Expired" }, { value: "", label: "All history" }].map((option) => <button key={option.value || "all"} type="button" onClick={() => setStatus(option.value)} className={`rounded-full px-3.5 py-2 text-sm font-medium transition ${status === option.value ? "bg-brand-500 text-white shadow-theme-xs" : "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-white/[0.05] dark:text-gray-300 dark:hover:bg-white/[0.08]"}`}>{option.label}</button>)}
       {result && <span className="ml-1 text-sm text-gray-500 dark:text-gray-400">{result.total} record{result.total === 1 ? "" : "s"}</span>}
     </div>
-    <ConsoleSection title="Device enforcement" description="Device-specific enforcement with a full audit-friendly history.">
+    <ConsoleSection title="Device enforcement" description="Device-specific enforcement with a full audit-friendly history." actions={<input type="search" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Filter by email, device, reason..." className="h-10 w-56 rounded-lg border border-gray-300 bg-transparent px-3.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90" />}>
       {loading && !error ? <LoadingNote /> : error ? <ErrorNote message={error} /> : items.length === 0 ? <EmptyNote message="No device bans match this view." /> : <>
-        <table className="w-full text-left text-sm"><thead className="border-b border-gray-200 dark:border-gray-800"><tr className="text-xs uppercase text-gray-400"><th className="px-5 py-3 font-medium">Account</th><th className="px-5 py-3 font-medium">Device record</th><th className="px-5 py-3 font-medium">Reason</th><th className="px-5 py-3 font-medium">Status</th><th className="px-5 py-3 font-medium">Ends</th><th className="px-5 py-3 font-medium text-right">Action</th></tr></thead><tbody className="divide-y divide-gray-100 dark:divide-gray-800">{items.map((item) => <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-white/[0.02]"><td className="px-5 py-4"><Link className="font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400" href={`/users/${item.user_id}`}>{item.user_email}</Link><p className="mt-1 text-xs text-gray-400">Banned {formatDateTime(item.banned_at)}</p></td><td className="px-5 py-4 font-mono text-xs text-gray-500 dark:text-gray-400">{item.device_id.slice(0, 12)}…</td><td className="max-w-xs px-5 py-4 text-gray-700 dark:text-gray-300">{item.reason || "—"}</td><td className="px-5 py-4"><StatusBadge status={item.status} /></td><td className="px-5 py-4 text-gray-500 dark:text-gray-400">{item.expires_at ? formatDateTime(item.expires_at) : "Permanent"}</td><td className="px-5 py-4 text-right">{canWrite && item.status === "active" ? <Button size="sm" variant="outline" onClick={() => setTarget(item)}>Lift ban</Button> : "—"}</td></tr>)}</tbody></table>
+        <table className="w-full text-left text-sm"><thead className="border-b border-gray-200 dark:border-gray-800"><tr className="text-xs uppercase text-gray-400">
+          <SortableHeader label="Account" sortKey="account" sort={sort} onToggle={toggleSort} />
+          <th className="px-5 py-3 font-medium">Device record</th>
+          <th className="px-5 py-3 font-medium">Reason</th>
+          <SortableHeader label="Status" sortKey="status" sort={sort} onToggle={toggleSort} />
+          <SortableHeader label="Ends" sortKey="ends" sort={sort} onToggle={toggleSort} />
+          <th className="px-5 py-3 font-medium text-right">Action</th>
+        </tr></thead><tbody className="divide-y divide-gray-100 dark:divide-gray-800">{sortedItems.map((item) => <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-white/[0.02]"><td className="px-5 py-4"><Link className="font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400" href={`/users/${item.user_id}`}>{item.user_email}</Link><p className="mt-1 text-xs text-gray-400">Banned {formatDateTime(item.banned_at)}</p></td><td className="px-5 py-4 font-mono text-xs text-gray-500 dark:text-gray-400">{item.device_id.slice(0, 12)}…</td><td className="max-w-xs px-5 py-4 text-gray-700 dark:text-gray-300">{item.reason || "—"}</td><td className="px-5 py-4"><StatusBadge status={item.status} /></td><td className="px-5 py-4 text-gray-500 dark:text-gray-400">{item.expires_at ? formatDateTime(item.expires_at) : "Permanent"}</td><td className="px-5 py-4 text-right">{canWrite && item.status === "active" ? <Button size="sm" variant="outline" onClick={() => setTarget(item)}>Lift ban</Button> : "—"}</td></tr>)}</tbody></table>
         <div className="flex justify-end border-t border-gray-200 px-5 py-4 dark:border-gray-800"><Pagination currentPage={result?.page ?? 1} totalPages={totalPages} onPageChange={(next) => setPage(Math.max(1, Math.min(next, totalPages)))} /></div>
       </>}
     </ConsoleSection>

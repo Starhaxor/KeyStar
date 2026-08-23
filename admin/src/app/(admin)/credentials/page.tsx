@@ -2,6 +2,7 @@
 
 import ConfirmModal from "@/components/console/ConfirmModal";
 import { EmptyNote, ErrorNote, LoadingNote, PageTitle } from "@/components/console/ConsoleSection";
+import TimeAgo from "@/components/common/TimeAgo";
 import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import { api } from "@/lib/api";
@@ -75,8 +76,8 @@ export default function CredentialsPage() {
       <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
         {loading ? <LoadingNote /> : items.length === 0 ? <EmptyNote message="No credentials have been created for this application." /> : (
           <table className="min-w-full text-left text-sm">
-            <thead className="border-b border-gray-200 text-xs uppercase text-gray-500 dark:border-gray-800"><tr><th className="px-5 py-3">Name</th><th>Type</th><th>Prefix</th><th>Scopes</th><th>Status</th><th className="px-5 py-3 text-right">Action</th></tr></thead>
-            <tbody>{items.map((item) => <tr key={item.id} className="border-b border-gray-100 dark:border-gray-800"><td className="px-5 py-4 font-medium">{item.name}<div className="text-xs text-gray-500">{item.environment}</div></td><td>{item.type}</td><td><code>{item.key_prefix}</code></td><td className="max-w-xs truncate">{item.scopes.join(", ")}</td><td>{item.status}</td><td className="px-5 text-right">{item.status === "active" && <Button size="sm" variant="outline" onClick={() => setRevoke(item)}>Revoke</Button>}</td></tr>)}</tbody>
+            <thead className="border-b border-gray-200 text-xs uppercase text-gray-500 dark:border-gray-800"><tr><th className="px-5 py-3">Name</th><th>Type</th><th>Prefix</th><th>Scopes</th><th>Status</th><th>Last used</th><th className="px-5 py-3 text-right">Action</th></tr></thead>
+            <tbody>{items.map((item) => <tr key={item.id} className="border-b border-gray-100 dark:border-gray-800"><td className="px-5 py-4 font-medium">{item.name}<div className="text-xs text-gray-500">{item.environment}</div></td><td>{item.type}</td><td><code>{item.key_prefix}</code></td><td className="max-w-xs truncate">{item.scopes.join(", ")}</td><td>{item.status}</td><td className="whitespace-nowrap px-5 py-4 text-gray-500 dark:text-gray-400"><TimeAgo value={item.last_used_at} /></td><td className="px-5 text-right">{item.status === "active" && <Button size="sm" variant="outline" onClick={() => setRevoke(item)}>Revoke</Button>}</td></tr>)}</tbody>
           </table>
         )}
       </div>

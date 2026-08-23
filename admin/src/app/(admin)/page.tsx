@@ -23,6 +23,8 @@ import {
 } from "@/icons";
 import React, { useCallback, useEffect, useState } from "react";
 
+const STAT_RANGES = [7, 14, 30, 90] as const;
+
 export default function OverviewPage() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [stats, setStats] = useState<DailyStat[] | null>(null);
@@ -30,6 +32,7 @@ export default function OverviewPage() {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [range, setRange] = useState<number>(14);
 
   // Fetch on mount and refresh every 60s so the dashboard behaves like a
   // live operations center. State updates only happen after the awaited
@@ -37,16 +40,11 @@ export default function OverviewPage() {
   const refresh = useCallback(async (disposed: () => boolean) => {
     setRefreshing(true);
     try {
-      const [overviewResponse, statsResponse, todayResponse] =
-        await Promise.all([
-          api.overview(),
-          api.overviewStats(),
-          api.overviewToday(),
-        ]);
+      const [overviewResponse, todayResponse] =
+        await Promise.all([api.overview(), api.overviewToday()]);
       if (disposed()) return;
       setError(null);
       setOverview(overviewResponse);
-      setStats(statsResponse.days);
       setToday(todayResponse);
       setLastUpdated(new Date());
     } catch (err) {
@@ -69,6 +67,24 @@ export default function OverviewPage() {
     };
   }, [refresh]);
 
+  // Chart data follows its own range selection; historical daily stats do
+  // not need to reload with every live overview poll.
+  useEffect(() => {
+    let disposed = false;
+    api
+      .overviewStats(range)
+      .then((response) => {
+        if (disposed) return;
+        setStats(response.days);
+      })
+      .catch(() => {
+        // The main error banner already surfaces connectivity problems.
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [range]);
+
   return (
     <div>
       <PageTitle
@@ -76,6 +92,27 @@ export default function OverviewPage() {
         description="Live snapshot of the StarLoader licensing system."
         actions={
           <div className="flex items-center gap-3">
+            <div
+              role="group"
+              aria-label="Chart date range"
+              className="flex items-center rounded-lg bg-gray-100 p-0.5 dark:bg-gray-900"
+            >
+              {STAT_RANGES.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => setRange(option)}
+                  aria-pressed={range === option}
+                  className={`rounded-md px-2.5 py-1.5 text-xs font-medium transition ${
+                    range === option
+                      ? "bg-white text-gray-800 shadow-theme-xs dark:bg-gray-800 dark:text-white/90"
+                      : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                  }`}
+                >
+                  {option}d
+                </button>
+              ))}
+            </div>
             {lastUpdated && (
               <span className="hidden text-xs text-gray-400 sm:block dark:text-gray-500">
                 Updated{" "}
@@ -212,7 +249,7 @@ export default function OverviewPage() {
             <div className="xl:col-span-2">
               <ConsoleSection
                 title="Activity"
-                description="Licenses, devices, sessions and admin logins over the last 14 days."
+                description={`Licenses, devices, sessions, admin logins and audit events over the last ${range} days.`}
               >
                 {!stats ? (
                   <div className="p-5">
@@ -227,7 +264,7 @@ export default function OverviewPage() {
             </div>
             <ConsoleSection
               title="Composition"
-              description="Share of activity over the last 14 days."
+              description={`Share of activity over the last ${range} days.`}
             >
               {!stats ? (
                 <div className="p-5">
@@ -236,7 +273,7 @@ export default function OverviewPage() {
               ) : stats.length === 0 ? (
                 <EmptyNote message="No activity data yet." />
               ) : (
-                <CompositionChart stats={stats} />
+                <CompositionChart stats={stats} range={range} />
               )}
             </ConsoleSection>
           </div>

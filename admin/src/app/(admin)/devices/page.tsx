@@ -11,6 +11,8 @@ import DevicePolicyForm from "@/components/console/DevicePolicyForm";
 import RowActions, { type RowAction } from "@/components/console/RowActions";
 import StatusBadge from "@/components/console/StatusBadge";
 import Pagination from "@/components/tables/Pagination";
+import SortableHeader from "@/components/tables/SortableHeader";
+import { useTableSort } from "@/hooks/useTableSort";
 import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import { useAdminIdentity } from "@/context/AdminIdentityContext";
@@ -39,7 +41,9 @@ export default function DevicesPage() {
   const [page, setPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
 
   const [revokeTarget, setRevokeTarget] = useState<ConsoleDevice | null>(null);
   const [revokeBusy, setRevokeBusy] = useState(false);
@@ -61,18 +65,27 @@ export default function DevicesPage() {
     setLoading(true);
     try {
       setError(null);
-      const response = await api.devices(page);
+      const response = await api.devices(page, 20, search, statusFilter);
       setResult(response);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load devices");
     } finally {
       setLoading(false);
     }
-  }, [page]);
+  }, [page, search, statusFilter]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // Live search: debounce keystrokes, then refetch from page 1.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPage(1);
+      setSearch(searchInput.trim());
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   async function handleRevoke() {
     if (!revokeTarget) return;
@@ -119,16 +132,27 @@ export default function DevicesPage() {
   }
 
   const allItems = useMemo(() => result?.items ?? [], [result]);
-  const items = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    if (!q) return allItems;
-    return allItems.filter(
-      (device) =>
-        device.user_email.toLowerCase().includes(q) ||
-        device.id.toLowerCase().includes(q) ||
-        device.status.toLowerCase().includes(q)
-    );
-  }, [allItems, filter]);
+  const items = allItems;
+
+  type DeviceSortKey =
+    | "user"
+    | "tpm"
+    | "hwid"
+    | "status"
+    | "lastSeen"
+    | "created";
+
+  const { sorted: sortedItems, sort, toggleSort } = useTableSort<
+    ConsoleDevice,
+    DeviceSortKey
+  >(items, {
+    user: (device) => device.user_email,
+    tpm: (device) => (device.tpm_registered ? 1 : 0),
+    hwid: hwidCount,
+    status: (device) => device.status,
+    lastSeen: (device) => device.last_seen_at,
+    created: (device) => device.created_at,
+  });
 
   const totalPages = result
     ? Math.max(1, Math.ceil(result.total / result.page_size))
@@ -168,11 +192,24 @@ export default function DevicesPage() {
           <div className="flex items-center gap-2">
             <input
               type="search"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Type to filter..."
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search by email or device id..."
               className="h-10 w-56 rounded-lg border border-gray-300 bg-transparent px-3.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
             />
+            <select
+              value={statusFilter}
+              onChange={(e) => {
+                setStatusFilter(e.target.value);
+                setPage(1);
+              }}
+              aria-label="Filter devices by status"
+              className="h-10 rounded-lg border border-gray-300 bg-transparent px-2.5 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+            >
+              <option value="">All statuses</option>
+              <option value="active">Active</option>
+              <option value="revoked">Revoked</option>
+            </select>
             <ExportCsvButton
               filename="devices.csv"
               headers={["id", "user_email", "tpm_registered", "status", "last_seen_at", "created_at"]}
@@ -194,34 +231,36 @@ export default function DevicesPage() {
         ) : error ? (
           <ErrorNote message={error} />
         ) : !result || result.items.length === 0 ? (
-          <EmptyState
-            icon={<BoxCubeIcon />}
-            title="No devices found"
-            message="Hardware registrations appear here when users activate licenses."
-          />
-        ) : items.length === 0 ? (
-          <EmptyState
-            icon={<BoxCubeIcon />}
-            title="No matching devices"
-            message={`Nothing matches “${filter}” on this page.`}
-          />
+          search || statusFilter ? (
+            <EmptyState
+              icon={<BoxCubeIcon />}
+              title="No matching devices"
+              message="Nothing matches the current filters."
+            />
+          ) : (
+            <EmptyState
+              icon={<BoxCubeIcon />}
+              title="No devices found"
+              message="Hardware registrations appear here when users activate licenses."
+            />
+          )
         ) : (
           <>
             <table className="w-full text-left text-sm">
               <thead className="border-b border-gray-200 dark:border-gray-800">
                 <tr className="text-xs uppercase text-gray-400">
                   <th className="px-5 py-3 font-medium">Device</th>
-                  <th className="px-5 py-3 font-medium">User</th>
-                  <th className="px-5 py-3 font-medium">TPM</th>
-                  <th className="px-5 py-3 font-medium">HWID</th>
-                  <th className="px-5 py-3 font-medium">Status</th>
-                  <th className="px-5 py-3 font-medium">Last Seen</th>
-                  <th className="px-5 py-3 font-medium">Created</th>
+                  <SortableHeader label="User" sortKey="user" sort={sort} onToggle={toggleSort} />
+                  <SortableHeader label="TPM" sortKey="tpm" sort={sort} onToggle={toggleSort} />
+                  <SortableHeader label="HWID" sortKey="hwid" sort={sort} onToggle={toggleSort} />
+                  <SortableHeader label="Status" sortKey="status" sort={sort} onToggle={toggleSort} />
+                  <SortableHeader label="Last Seen" sortKey="lastSeen" sort={sort} onToggle={toggleSort} />
+                  <SortableHeader label="Created" sortKey="created" sort={sort} onToggle={toggleSort} />
                   <th className="px-5 py-3 font-medium text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {items.map((device) => {
+                {sortedItems.map((device) => {
                   const parts = hwidCount(device);
                   const actions: RowAction[] = [
                     {

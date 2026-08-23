@@ -7,16 +7,20 @@ import ConsoleSection, {
 import EmptyState from "@/components/console/EmptyState";
 import { TableSkeleton } from "@/components/common/Skeleton";
 import ExportCsvButton from "@/components/common/ExportCsvButton";
+import TimeAgo from "@/components/common/TimeAgo";
 import Pagination from "@/components/tables/Pagination";
+import SortableHeader from "@/components/tables/SortableHeader";
+import { useTableSort } from "@/hooks/useTableSort";
 import { api, formatDateTime } from "@/lib/api";
 import type { AuditEntry, PageResult } from "@/lib/types";
 import { ListIcon } from "@/icons";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 
 export default function AuditLogsPage() {
   const [result, setResult] = useState<PageResult<AuditEntry> | null>(null);
   const [page, setPage] = useState(1);
-  const [filter, setFilter] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -24,33 +28,43 @@ export default function AuditLogsPage() {
     setLoading(true);
     try {
       setError(null);
-      const response = await api.auditLogs(page);
+      const response = await api.auditLogs(page, search);
       setResult(response);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load audit logs");
     } finally {
       setLoading(false);
     }
-  }, [page]);
+  }, [page, search]);
 
   useEffect(() => {
     load();
   }, [load]);
 
+  // Live search: debounce keystrokes, then refetch from page 1. The backend
+  // matches actor email, action and resource fields.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPage(1);
+      setSearch(searchInput.trim());
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
   const totalPages = result
     ? Math.max(1, Math.ceil(result.total / result.page_size))
     : 1;
 
-  // Client-side filter over the current page: matches action or actor.
-  const items = useMemo(() => {
-    const needle = filter.trim().toLowerCase();
-    if (!needle || !result) return result?.items ?? [];
-    return result.items.filter(
-      (entry) =>
-        entry.action.toLowerCase().includes(needle) ||
-        entry.actor_email.toLowerCase().includes(needle)
-    );
-  }, [result, filter]);
+  type AuditSortKey = "time" | "action" | "admin";
+
+  const { sorted: items, sort, toggleSort } = useTableSort<
+    AuditEntry,
+    AuditSortKey
+  >(result?.items ?? [], {
+    time: (entry) => entry.created_at,
+    action: (entry) => entry.action,
+    admin: (entry) => entry.actor_email,
+  });
 
   return (
     <div>
@@ -65,9 +79,9 @@ export default function AuditLogsPage() {
           <div className="flex items-center gap-2">
             <input
               type="search"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Filter by action or admin..."
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search by action, admin, resource..."
               className="h-10 w-60 rounded-lg border border-gray-300 bg-transparent px-3.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
             />
             <ExportCsvButton
@@ -92,13 +106,13 @@ export default function AuditLogsPage() {
           <EmptyState
             icon={<ListIcon />}
             title={
-              filter.trim()
+              search.trim()
                 ? "No matching audit events"
                 : "No audit events yet"
             }
             message={
-              filter.trim()
-                ? `Nothing matches "${filter.trim()}" on this page.`
+              search.trim()
+                ? "Nothing matches the current filters."
                 : "Administrator actions will appear here."
             }
           />
@@ -107,9 +121,9 @@ export default function AuditLogsPage() {
             <table className="w-full text-left text-sm">
               <thead className="border-b border-gray-200 dark:border-gray-800">
                 <tr className="text-xs uppercase text-gray-400">
-                  <th className="px-5 py-3 font-medium">Time</th>
-                  <th className="px-5 py-3 font-medium">Action</th>
-                  <th className="px-5 py-3 font-medium">Admin</th>
+                  <SortableHeader label="Time" sortKey="time" sort={sort} onToggle={toggleSort} />
+                  <SortableHeader label="Action" sortKey="action" sort={sort} onToggle={toggleSort} />
+                  <SortableHeader label="Admin" sortKey="admin" sort={sort} onToggle={toggleSort} />
                   <th className="px-5 py-3 font-medium">Resource</th>
                   <th className="px-5 py-3 font-medium">Details</th>
                 </tr>
@@ -121,7 +135,7 @@ export default function AuditLogsPage() {
                     className="hover:bg-gray-50 dark:hover:bg-white/[0.02]"
                   >
                     <td className="whitespace-nowrap px-5 py-3.5 text-gray-500 dark:text-gray-400">
-                      {formatDateTime(entry.created_at)}
+                      <TimeAgo value={entry.created_at} />
                     </td>
                     <td className="px-5 py-3.5">
                       <ActionBadge action={entry.action} />

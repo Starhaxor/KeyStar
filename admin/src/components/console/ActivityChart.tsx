@@ -30,6 +30,10 @@ export default function ActivityChart({ stats }: { stats: DailyStat[] }) {
         name: "Admin logins",
         data: stats.map((stat) => stat.admin_logins),
       },
+      {
+        name: "Audit events",
+        data: stats.map((stat) => stat.audit_events),
+      },
     ],
     [stats]
   );
@@ -45,7 +49,7 @@ export default function ActivityChart({ stats }: { stats: DailyStat[] }) {
         foreColor: "#98a2b3",
         zoom: { enabled: false },
       },
-      colors: ["#16a34a", "#0ba5ec", "#f79009", "#7a5af8"],
+      colors: ["#16a34a", "#0ba5ec", "#f79009", "#7a5af8", "#ee46bc"],
       dataLabels: { enabled: false },
       stroke: { curve: "smooth" as const, width: 2 },
       fill: {
