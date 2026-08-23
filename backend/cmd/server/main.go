@@ -234,6 +234,13 @@ func runServer() error {
 	}
 	server := newHTTPServer(address, router, applicationCtx)
 
+	// Start the webhook delivery worker. It drains the outbox table that
+	// console mutations enqueue events into; without it webhooks never fire.
+	webhookDispatcher := service.NewWebhookDispatcher(service.WebhookDispatcherConfig{
+		WebhookRepo: repository,
+	})
+	go runWebhookWorker(applicationCtx, webhookDispatcher, log.Default())
+
 	// Start periodic cleanup of expired refresh sessions.
 	go func() {
 		ticker := time.NewTicker(1 * time.Hour)

@@ -285,6 +285,7 @@ func (router *Router) handleAdminUserCreate(writer http.ResponseWriter, request 
 		return
 	}
 	router.AuditAdmin(request, account, "USER_CREATED", "user", user.ID, map[string]string{"email": user.Email})
+	router.EmitWebhookEvent(request, "user.created", map[string]any{"user_id": user.ID, "email": user.Email})
 	httpapi.WriteJSON(writer, http.StatusOK, struct {
 		OK   bool            `json:"ok"`
 		User consoleUserJSON `json:"user"`
@@ -688,6 +689,10 @@ func (router *Router) handleAdminUserBan(writer http.ResponseWriter, request *ht
 		metadata["duration"] = "permanent"
 	}
 	router.AuditAdmin(request, account, "USER_BANNED", "user", userID, metadata)
+	router.EmitWebhookEvent(request, "user.banned", map[string]any{
+		"user_id": userID, "reason": reason, "permanent": expiresAt == nil,
+		"ban_until": metadata["ban_until"],
+	})
 	httpapi.WriteJSON(writer, http.StatusOK, struct {
 		OK        bool   `json:"ok"`
 		BanUntil  string `json:"ban_until"`
@@ -710,6 +715,7 @@ func (router *Router) handleAdminUserUnban(writer http.ResponseWriter, request *
 		return
 	}
 	router.AuditAdmin(request, account, "USER_UNBANNED", "user", userID, nil)
+	router.EmitWebhookEvent(request, "user.unbanned", map[string]any{"user_id": userID})
 	httpapi.WriteJSON(writer, http.StatusOK, struct {
 		OK bool `json:"ok"`
 	}{OK: true})
@@ -844,7 +850,8 @@ func (router *Router) routeAdminLicenses(writer http.ResponseWriter, request *ht
 
 func (router *Router) handleAdminLicenseList(writer http.ResponseWriter, request *http.Request) {
 	page, pageSize, offset := parseAdminPagination(request)
-	licenses, total, err := router.Admin.Console.ListConsoleLicenses(request.Context(), router.AdminApplicationID(request), offset, pageSize)
+	query := request.URL.Query()
+	licenses, total, err := router.Admin.Console.ListConsoleLicenses(request.Context(), router.AdminApplicationID(request), offset, pageSize, query.Get("search"), query.Get("status"))
 	if err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
@@ -937,6 +944,11 @@ func (router *Router) handleAdminLicenseCreate(writer http.ResponseWriter, reque
 		return
 	}
 	router.AuditAdmin(request, account, "LICENSE_CREATED", "license", license.ID, map[string]string{"user_email": user.Email})
+	router.EmitWebhookEvent(request, "license.created", map[string]any{
+		"license_id": license.ID, "user_id": user.ID, "user_email": user.Email,
+		"product": license.Product, "max_devices": license.MaxDevices,
+		"expires_at": httpapi.FormatTime(license.ExpiresAt),
+	})
 	httpapi.WriteJSON(writer, http.StatusOK, struct {
 		OK      bool               `json:"ok"`
 		License consoleLicenseJSON `json:"license"`
@@ -1056,6 +1068,7 @@ func (router *Router) handleAdminLicenseRevoke(writer http.ResponseWriter, reque
 		return
 	}
 	router.AuditAdmin(request, account, "LICENSE_REVOKED", "license", licenseID, nil)
+	router.EmitWebhookEvent(request, "license.revoked", map[string]any{"license_id": licenseID})
 	httpapi.WriteJSON(writer, http.StatusOK, struct {
 		OK bool `json:"ok"`
 	}{OK: true})
@@ -1260,7 +1273,8 @@ func (router *Router) routeAdminDevices(writer http.ResponseWriter, request *htt
 
 func (router *Router) handleAdminDeviceList(writer http.ResponseWriter, request *http.Request) {
 	page, pageSize, offset := parseAdminPagination(request)
-	devices, total, err := router.Admin.Console.ListConsoleDevices(request.Context(), router.AdminApplicationID(request), offset, pageSize)
+	query := request.URL.Query()
+	devices, total, err := router.Admin.Console.ListConsoleDevices(request.Context(), router.AdminApplicationID(request), offset, pageSize, query.Get("search"), query.Get("status"))
 	if err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
@@ -1278,6 +1292,7 @@ func (router *Router) handleAdminDeviceRevoke(writer http.ResponseWriter, reques
 		return
 	}
 	router.AuditAdmin(request, account, "DEVICE_REVOKED", "device", deviceID, nil)
+	router.EmitWebhookEvent(request, "device.revoked", map[string]any{"device_id": deviceID})
 	httpapi.WriteJSON(writer, http.StatusOK, struct {
 		OK bool `json:"ok"`
 	}{OK: true})
@@ -1373,7 +1388,8 @@ func (router *Router) routeAdminSessions(writer http.ResponseWriter, request *ht
 
 func (router *Router) handleAdminSessionList(writer http.ResponseWriter, request *http.Request) {
 	page, pageSize, offset := parseAdminPagination(request)
-	sessions, total, err := router.Admin.Console.ListConsoleSessions(request.Context(), router.AdminApplicationID(request), offset, pageSize)
+	query := request.URL.Query()
+	sessions, total, err := router.Admin.Console.ListConsoleSessions(request.Context(), router.AdminApplicationID(request), offset, pageSize, query.Get("search"), query.Get("status"))
 	if err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
@@ -1434,7 +1450,7 @@ func mapAuditEntries(logs []domain.AuditLog) []auditEntryJSON {
 
 func (router *Router) handleAdminAuditLogs(writer http.ResponseWriter, request *http.Request) {
 	page, pageSize, offset := parseAdminPagination(request)
-	logs, total, err := router.Admin.Console.ListAuditLogs(request.Context(), offset, pageSize)
+	logs, total, err := router.Admin.Console.ListAuditLogs(request.Context(), offset, pageSize, request.URL.Query().Get("search"))
 	if err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return

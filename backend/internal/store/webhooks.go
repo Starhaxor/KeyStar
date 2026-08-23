@@ -16,8 +16,8 @@ const webhookColumns = `
 	created_at, updated_at`
 
 const webhookDeliveryColumns = `
-	id::text, webhook_id::text, event_type, payload, status, attempts,
-	max_attempts, next_attempt_at, last_error, delivered_at, created_at`
+	d.id::text, d.webhook_id::text, d.event_type, d.payload, d.status, d.attempts,
+	d.max_attempts, d.next_attempt_at, d.last_error, d.delivered_at, d.created_at`
 
 // CreateWebhook stores a new webhook endpoint.
 func (s *Store) CreateWebhook(ctx context.Context, applicationID string, input domain.NewWebhook, secretHash []byte) (*domain.Webhook, error) {
@@ -119,10 +119,14 @@ func (s *Store) DeleteWebhook(ctx context.Context, applicationID, webhookID stri
 }
 
 // EnqueueWebhookEvent writes an event to the outbox for delivery.
+// QueryRow + returning keeps the write on one round trip; a bare Query would
+// leak a pooled connection per insert because its rows are discarded.
 func (s *Store) EnqueueWebhookEvent(ctx context.Context, webhookID, eventType string, payload json.RawMessage) error {
-	_, err := s.db.Query(ctx, `
+	var id string
+	err := s.db.QueryRow(ctx, `
 		insert into webhook_deliveries (webhook_id, event_type, payload)
-		values ($1::uuid, $2, $3)`, webhookID, eventType, payload)
+		values ($1::uuid, $2, $3)
+		returning id`, webhookID, eventType, payload).Scan(&id)
 	if err != nil {
 		return fmt.Errorf("enqueue webhook event: %w", err)
 	}
@@ -136,9 +140,9 @@ func (s *Store) DequeuePendingDeliveries(ctx context.Context, limit int) ([]doma
 	}
 	rows, err := s.db.Query(ctx, `
 		select `+webhookDeliveryColumns+`
-		from webhook_deliveries
-		where status in ('pending', 'failed') and next_attempt_at <= now()
-		order by next_attempt_at
+		from webhook_deliveries d
+		where d.status in ('pending', 'failed') and d.next_attempt_at <= now()
+		order by d.next_attempt_at
 		limit $1`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("dequeue pending deliveries: %w", err)
@@ -171,7 +175,8 @@ func (s *Store) MarkDeliveryDelivered(ctx context.Context, deliveryID string) er
 // MarkDeliveryFailed increments attempts and schedules the next retry with
 // exponential backoff: 1m, 5m, 15m, 1h, 6h, 24h.
 func (s *Store) MarkDeliveryFailed(ctx context.Context, deliveryID string, errMsg string) error {
-	_, err := s.db.Query(ctx, `
+	var id string
+	err := s.db.QueryRow(ctx, `
 		update webhook_deliveries
 		set status = case when attempts + 1 >= max_attempts then 'failed' else 'pending' end,
 		    attempts = attempts + 1,
@@ -185,9 +190,82 @@ func (s *Store) MarkDeliveryFailed(ctx context.Context, deliveryID string, errMs
 		        WHEN attempts = 4 THEN 360
 		        ELSE 1440
 		    END
-		where id = $1::uuid`, deliveryID, errMsg)
+		where id = $1::uuid returning id`, deliveryID, errMsg).Scan(&id)
 	if err != nil {
 		return fmt.Errorf("mark delivery failed: %w", err)
+	}
+	return nil
+}
+
+// FindWebhookForDelivery looks up a webhook by ID without application
+// scoping. Only the trusted delivery worker uses it.
+func (s *Store) FindWebhookForDelivery(ctx context.Context, webhookID string) (*domain.Webhook, error) {
+	wh, err := scanWebhook(s.db.QueryRow(ctx,
+		`select `+webhookColumns+` from webhooks where id = $1::uuid`, webhookID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrVariableNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find webhook for delivery: %w", err)
+	}
+	return wh, nil
+}
+
+// ListWebhookDeliveries pages the delivery history of one application's
+// webhook, newest first.
+func (s *Store) ListWebhookDeliveries(ctx context.Context, applicationID, webhookID string, offset, limit int) ([]domain.WebhookDelivery, int64, error) {
+	var total int64
+	if err := s.db.QueryRow(ctx, `
+		select count(*)
+		from webhook_deliveries d
+		join webhooks w on w.id = d.webhook_id
+		where w.application_id = $1::uuid and w.id = $2::uuid`,
+		applicationID, webhookID).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count webhook deliveries: %w", err)
+	}
+	rows, err := s.db.Query(ctx, `
+		select `+webhookDeliveryColumns+`
+		from webhook_deliveries d
+		join webhooks w on w.id = d.webhook_id
+		where w.application_id = $1::uuid and w.id = $2::uuid
+		order by d.created_at desc, d.id desc
+		limit $3 offset $4`, applicationID, webhookID, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list webhook deliveries: %w", err)
+	}
+	defer rows.Close()
+	deliveries := make([]domain.WebhookDelivery, 0, limit)
+	for rows.Next() {
+		delivery, err := scanWebhookDelivery(rows)
+		if err != nil {
+			return nil, 0, fmt.Errorf("scan webhook delivery: %w", err)
+		}
+		deliveries = append(deliveries, *delivery)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("list webhook deliveries: %w", err)
+	}
+	return deliveries, total, nil
+}
+
+// RetryWebhookDelivery requeues a failed or already delivered event with a
+// fresh attempt budget. The webhook scoping keeps the operation inside one
+// application boundary.
+func (s *Store) RetryWebhookDelivery(ctx context.Context, applicationID, webhookID, deliveryID string) error {
+	var id string
+	err := s.db.QueryRow(ctx, `
+		update webhook_deliveries d
+		set status = 'pending', attempts = 0, next_attempt_at = now(), last_error = null, delivered_at = null
+		from webhooks w
+		where w.id = d.webhook_id and w.application_id = $1::uuid and w.id = $2::uuid
+		  and d.id = $3::uuid and d.status in ('failed', 'delivered')
+		returning d.id`,
+		applicationID, webhookID, deliveryID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ErrVariableNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("retry webhook delivery: %w", err)
 	}
 	return nil
 }

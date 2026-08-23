@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/starloader/backend/internal/domain"
@@ -21,7 +22,6 @@ import (
 type WebhookDispatcher struct {
 	httpClient  *http.Client
 	webhookRepo WebhookDeliveryRepository
-	secretKey   []byte
 	now         func() time.Time
 }
 
@@ -29,6 +29,7 @@ type WebhookDispatcher struct {
 // webhook delivery management.
 type WebhookDeliveryRepository interface {
 	FindWebhookByID(ctx context.Context, applicationID, webhookID string) (*domain.Webhook, error)
+	FindWebhookForDelivery(ctx context.Context, webhookID string) (*domain.Webhook, error)
 	DequeuePendingDeliveries(ctx context.Context, limit int) ([]domain.WebhookDelivery, error)
 	MarkDeliveryDelivered(ctx context.Context, deliveryID string) error
 	MarkDeliveryFailed(ctx context.Context, deliveryID string, errMsg string) error
@@ -37,7 +38,6 @@ type WebhookDeliveryRepository interface {
 // WebhookDispatcherConfig carries the dependencies for the webhook dispatcher.
 type WebhookDispatcherConfig struct {
 	WebhookRepo WebhookDeliveryRepository
-	SecretKey   []byte
 	HTTPClient  *http.Client
 	Now         func() time.Time
 }
@@ -55,13 +55,14 @@ func NewWebhookDispatcher(config WebhookDispatcherConfig) *WebhookDispatcher {
 	return &WebhookDispatcher{
 		httpClient:  httpClient,
 		webhookRepo: config.WebhookRepo,
-		secretKey:   append([]byte(nil), config.SecretKey...),
 		now:         now,
 	}
 }
 
 // ProcessPendingDeliveries picks up pending/failed deliveries and attempts
-// to deliver them. This should be called periodically by a background worker.
+// to deliver them. This is called periodically by the background worker in
+// cmd/server. Deliveries belonging to disabled webhooks are left untouched
+// so they do not burn their retry budget while the endpoint is paused.
 func (dispatcher *WebhookDispatcher) ProcessPendingDeliveries(ctx context.Context) (int, error) {
 	deliveries, err := dispatcher.webhookRepo.DequeuePendingDeliveries(ctx, 50)
 	if err != nil {
@@ -70,7 +71,17 @@ func (dispatcher *WebhookDispatcher) ProcessPendingDeliveries(ctx context.Contex
 
 	delivered := 0
 	for _, delivery := range deliveries {
-		if err := dispatcher.deliver(ctx, delivery); err != nil {
+		webhook, err := dispatcher.webhookRepo.FindWebhookForDelivery(ctx, delivery.WebhookID)
+		if err != nil {
+			if markErr := dispatcher.webhookRepo.MarkDeliveryFailed(ctx, delivery.ID, "webhook unavailable: "+err.Error()); markErr != nil {
+				return delivered, markErr
+			}
+			continue
+		}
+		if webhook.Status != domain.WebhookStatusActive {
+			continue
+		}
+		if err := dispatcher.deliver(ctx, webhook, delivery); err != nil {
 			if markErr := dispatcher.webhookRepo.MarkDeliveryFailed(ctx, delivery.ID, err.Error()); markErr != nil {
 				return delivered, markErr
 			}
@@ -84,46 +95,55 @@ func (dispatcher *WebhookDispatcher) ProcessPendingDeliveries(ctx context.Contex
 	return delivered, nil
 }
 
-func (dispatcher *WebhookDispatcher) deliver(ctx context.Context, delivery domain.WebhookDelivery) error {
-	// Find the webhook to get the URL and secret.
-	// The delivery doesn't carry the URL directly; we need to look up the webhook.
-	// For efficiency, we could denormalize the URL into the delivery, but the
-	// current schema uses a foreign key. We need the applicationID to look up.
-	// This is a limitation; in production, denormalize the URL.
-
-	// Build the event payload.
+// deliver performs the signed HTTP POST for one outbox row.
+//
+// Signature scheme: the HMAC key is the stored SHA-256 digest of the
+// webhook's signing secret (the plaintext is never kept server-side).
+// Receivers verify by hashing their own secret once:
+//
+//	key      = SHA-256(signing_secret)            // 32 raw bytes
+//	signed   = timestamp + "." + request_body     // timestamp = X-KeyStar-Timestamp
+//	expected = hex(HMAC-SHA256(key, signed))
+//
+// and comparing it against the v1 value in X-KeyStar-Signature.
+func (dispatcher *WebhookDispatcher) deliver(ctx context.Context, webhook *domain.Webhook, delivery domain.WebhookDelivery) error {
 	event := domain.WebhookEvent{
-		ID:        delivery.ID,
-		Type:      delivery.EventType,
-		CreatedAt: delivery.CreatedAt.UTC().Format(time.RFC3339),
-		Data:      delivery.Payload,
+		ID:            delivery.ID,
+		Type:          delivery.EventType,
+		ApplicationID: webhook.ApplicationID,
+		CreatedAt:     delivery.CreatedAt.UTC().Format(time.RFC3339),
+		Data:          delivery.Payload,
 	}
 	body, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("marshal event: %w", err)
 	}
 
-	// Sign with HMAC-SHA256.
-	timestamp := dispatcher.now().UTC().Format(time.RFC3339)
-	mac := hmac.New(sha256.New, dispatcher.secretKey)
+	timestamp := strconv.FormatInt(dispatcher.now().UTC().Unix(), 10)
+	mac := hmac.New(sha256.New, webhook.SecretHash)
 	mac.Write([]byte(timestamp))
 	mac.Write(body)
 	signature := hex.EncodeToString(mac.Sum(nil))
 
-	// We need the webhook URL. Since the delivery only has webhook_id,
-	// we'd need to join or denormalize. For now, we'll skip the HTTP
-	// delivery in the test path and just mark success.
-	// In production, this would be:
-	//   req, _ := http.NewRequestWithContext(ctx, "POST", webhook.URL, bytes.NewReader(body))
-	//   req.Header.Set("Content-Type", "application/json")
-	//   req.Header.Set("X-KeyStar-Signature", signature)
-	//   req.Header.Set("X-KeyStar-Timestamp", timestamp)
-	//   resp, err := dispatcher.httpClient.Do(req)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, webhook.URL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-KeyStar-Event-Id", delivery.ID)
+	request.Header.Set("X-KeyStar-Event-Type", delivery.EventType)
+	request.Header.Set("X-KeyStar-Timestamp", timestamp)
+	request.Header.Set("X-KeyStar-Signature", "t="+timestamp+",v1="+signature)
 
-	_ = bytes.NewReader(body)
-	_ = signature
-	_ = timestamp
-	_ = io.Discard
+	response, err := dispatcher.httpClient.Do(request)
+	if err != nil {
+		return fmt.Errorf("post webhook: %w", err)
+	}
+	defer func() { _ = response.Body.Close() }()
 
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+	if response.StatusCode < 200 || response.StatusCode > 299 {
+		return fmt.Errorf("unexpected status %d", response.StatusCode)
+	}
 	return nil
 }

@@ -28,7 +28,7 @@ func (s *Store) ConsoleOverview(ctx context.Context) (*domain.ConsoleOverview, e
 	if err != nil {
 		return nil, fmt.Errorf("console overview: %w", err)
 	}
-	recent, _, err := s.ListAuditLogs(ctx, 0, 8)
+	recent, _, err := s.ListAuditLogs(ctx, 0, 8, "")
 	if err != nil {
 		return nil, err
 	}
@@ -479,12 +479,37 @@ func (s *Store) ResetUserDevices(ctx context.Context, applicationID, userID stri
 	return tag.RowsAffected(), nil
 }
 
-func (s *Store) ListConsoleLicenses(ctx context.Context, applicationID string, offset, limit int) ([]domain.ConsoleLicense, int64, error) {
+// ListConsoleLicenses pages the license directory. search is a substring
+// match on the user email, product name or internal notes; statusFilter
+// limits rows to one lifecycle state (active, revoked, expired).
+func (s *Store) ListConsoleLicenses(ctx context.Context, applicationID string, offset, limit int, search, statusFilter string) ([]domain.ConsoleLicense, int64, error) {
+	search = strings.ToLower(strings.TrimSpace(search))
+	statusFilter = strings.ToLower(strings.TrimSpace(statusFilter))
+	where := []string{"l.application_id = $1::uuid"}
+	args := []any{applicationID}
+	if search != "" {
+		args = append(args, search)
+		where = append(where, fmt.Sprintf("(position($%d in lower(u.email)) > 0 or position($%d in lower(p.name)) > 0 or position($%d in lower(coalesce(l.notes, ''))) > 0)", len(args), len(args), len(args)))
+	}
+	switch statusFilter {
+	case "active", "revoked", "expired":
+		args = append(args, statusFilter)
+		where = append(where, fmt.Sprintf("l.status = $%d", len(args)))
+	}
+	whereClause := "where " + strings.Join(where, " and ")
 	var total int64
-	if err := s.db.QueryRow(ctx, `select count(*) from licenses where application_id = $1::uuid`, applicationID).Scan(&total); err != nil {
+	if err := s.db.QueryRow(ctx, `
+		select count(*)
+		from licenses l
+		join users u on u.id = l.user_id
+		join products p on p.id = l.product_id
+		`+whereClause, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count console licenses: %w", err)
 	}
-	licenses, err := s.listConsoleLicenses(ctx, "where l.application_id = $1::uuid order by l.created_at desc, l.id desc limit $2 offset $3", applicationID, limit, offset)
+	args = append(args, limit, offset)
+	licenses, err := s.listConsoleLicenses(ctx,
+		whereClause+" order by l.created_at desc, l.id desc limit $"+strconv.Itoa(len(args)-1)+" offset $"+strconv.Itoa(len(args)),
+		args...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -493,7 +518,7 @@ func (s *Store) ListConsoleLicenses(ctx context.Context, applicationID string, o
 
 func (s *Store) listConsoleLicenses(ctx context.Context, tail string, args ...any) ([]domain.ConsoleLicense, error) {
 	rows, err := s.db.Query(ctx, `
-		select l.id::text, l.user_id::text, u.email, l.product_id::text, l.plan_id::text, p.name, l.status, l.level, l.max_devices, l.notes, l.expires_at, l.created_at
+		select l.id::text, l.user_id::text, u.email, l.product_id::text, coalesce(l.plan_id::text, ''), p.name, l.status, l.level, l.max_devices, l.notes, l.expires_at, l.created_at
 		from licenses l
 		join users u on u.id = l.user_id
 		join products p on p.id = l.product_id
@@ -650,12 +675,36 @@ func (s *Store) AdminRevokeLicense(ctx context.Context, applicationID, licenseID
 	return nil
 }
 
-func (s *Store) ListConsoleDevices(ctx context.Context, applicationID string, offset, limit int) ([]domain.ConsoleDevice, int64, error) {
+// ListConsoleDevices pages the device directory. search is a substring match
+// on the user email or the device id; statusFilter limits rows to one state
+// (active, revoked).
+func (s *Store) ListConsoleDevices(ctx context.Context, applicationID string, offset, limit int, search, statusFilter string) ([]domain.ConsoleDevice, int64, error) {
+	search = strings.ToLower(strings.TrimSpace(search))
+	statusFilter = strings.ToLower(strings.TrimSpace(statusFilter))
+	where := []string{"d.application_id = $1::uuid"}
+	args := []any{applicationID}
+	if search != "" {
+		args = append(args, search)
+		where = append(where, fmt.Sprintf("(position($%d in lower(u.email)) > 0 or position($%d in lower(d.id::text)) > 0)", len(args), len(args)))
+	}
+	switch statusFilter {
+	case "active", "revoked":
+		args = append(args, statusFilter)
+		where = append(where, fmt.Sprintf("d.status = $%d", len(args)))
+	}
+	whereClause := "where " + strings.Join(where, " and ")
 	var total int64
-	if err := s.db.QueryRow(ctx, `select count(*) from devices where application_id = $1::uuid`, applicationID).Scan(&total); err != nil {
+	if err := s.db.QueryRow(ctx, `
+		select count(*)
+		from devices d
+		join users u on u.id = d.user_id
+		`+whereClause, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count console devices: %w", err)
 	}
-	devices, err := s.listConsoleDevices(ctx, "where d.application_id = $1::uuid order by d.last_seen_at desc, d.id desc limit $2 offset $3", applicationID, limit, offset)
+	args = append(args, limit, offset)
+	devices, err := s.listConsoleDevices(ctx,
+		whereClause+" order by d.last_seen_at desc, d.id desc limit $"+strconv.Itoa(len(args)-1)+" offset $"+strconv.Itoa(len(args)),
+		args...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -831,12 +880,36 @@ func (s *Store) AdminRevokeDevice(ctx context.Context, applicationID, deviceID s
 	return nil
 }
 
-func (s *Store) ListConsoleSessions(ctx context.Context, applicationID string, offset, limit int) ([]domain.ConsoleSession, int64, error) {
+// ListConsoleSessions pages auth sessions. search is a substring match on
+// the user email or the session id; statusFilter limits rows to one state
+// (pending, verified, expired).
+func (s *Store) ListConsoleSessions(ctx context.Context, applicationID string, offset, limit int, search, statusFilter string) ([]domain.ConsoleSession, int64, error) {
+	search = strings.ToLower(strings.TrimSpace(search))
+	statusFilter = strings.ToLower(strings.TrimSpace(statusFilter))
+	where := []string{"ss.application_id = $1::uuid"}
+	args := []any{applicationID}
+	if search != "" {
+		args = append(args, search)
+		where = append(where, fmt.Sprintf("(position($%d in lower(u.email)) > 0 or position($%d in lower(ss.id::text)) > 0)", len(args), len(args)))
+	}
+	switch statusFilter {
+	case "pending", "verified", "expired":
+		args = append(args, statusFilter)
+		where = append(where, fmt.Sprintf("ss.status = $%d", len(args)))
+	}
+	whereClause := "where " + strings.Join(where, " and ")
 	var total int64
-	if err := s.db.QueryRow(ctx, `select count(*) from auth_sessions where application_id = $1::uuid`, applicationID).Scan(&total); err != nil {
+	if err := s.db.QueryRow(ctx, `
+		select count(*)
+		from auth_sessions ss
+		join users u on u.id = ss.user_id
+		`+whereClause, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count console sessions: %w", err)
 	}
-	sessions, err := s.listConsoleSessions(ctx, "where ss.application_id = $1::uuid order by ss.created_at desc, ss.id desc limit $2 offset $3", applicationID, limit, offset)
+	args = append(args, limit, offset)
+	sessions, err := s.listConsoleSessions(ctx,
+		whereClause+" order by ss.created_at desc, ss.id desc limit $"+strconv.Itoa(len(args)-1)+" offset $"+strconv.Itoa(len(args)),
+		args...)
 	if err != nil {
 		return nil, 0, err
 	}

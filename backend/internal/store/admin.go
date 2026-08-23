@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -512,16 +513,30 @@ func (s *Store) AppendAuditLog(ctx context.Context, input domain.NewAuditLog) er
 	return nil
 }
 
-func (s *Store) ListAuditLogs(ctx context.Context, offset, limit int) ([]domain.AuditLog, int64, error) {
+// ListAuditLogs pages the global audit trail. search is a substring match on
+// actor email, action, resource type or resource id.
+func (s *Store) ListAuditLogs(ctx context.Context, offset, limit int, search string) ([]domain.AuditLog, int64, error) {
+	search = strings.ToLower(strings.TrimSpace(search))
+	where := ""
+	args := []any{}
+	if search != "" {
+		args = append(args, search)
+		where = fmt.Sprintf(`where position($%[1]d in lower(coalesce(actor_email, ''))) > 0
+		   or position($%[1]d in lower(action)) > 0
+		   or position($%[1]d in lower(coalesce(resource_type, ''))) > 0
+		   or position($%[1]d in lower(coalesce(resource_id, ''))) > 0`, len(args))
+	}
 	var total int64
-	if err := s.db.QueryRow(ctx, `select count(*) from audit_logs`).Scan(&total); err != nil {
+	if err := s.db.QueryRow(ctx, `select count(*) from audit_logs `+where, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count audit logs: %w", err)
 	}
+	args = append(args, limit, offset)
 	rows, err := s.db.Query(ctx, `
 		select `+auditLogColumns+`
 		from audit_logs
+		`+where+`
 		order by created_at desc, id desc
-		limit $1 offset $2`, limit, offset)
+		limit $`+strconv.Itoa(len(args)-1)+` offset $`+strconv.Itoa(len(args)), args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list audit logs: %w", err)
 	}
@@ -579,16 +594,37 @@ func (s *Store) AppendSecurityEvent(ctx context.Context, input domain.NewSecurit
 	return nil
 }
 
-func (s *Store) ListSecurityEvents(ctx context.Context, offset, limit int) ([]domain.SecurityEvent, int64, error) {
+// ListSecurityEvents pages security events. search is a substring match on
+// actor email or event kind; severity limits rows to one level (info,
+// warning, critical).
+func (s *Store) ListSecurityEvents(ctx context.Context, offset, limit int, search, severityFilter string) ([]domain.SecurityEvent, int64, error) {
+	search = strings.ToLower(strings.TrimSpace(search))
+	where := []string{}
+	args := []any{}
+	if search != "" {
+		args = append(args, search)
+		where = append(where, fmt.Sprintf("(position($%d in lower(coalesce(actor_email, ''))) > 0 or position($%d in lower(kind)) > 0)", len(args), len(args)))
+	}
+	switch strings.ToLower(strings.TrimSpace(severityFilter)) {
+	case "info", "warning", "critical":
+		args = append(args, strings.ToLower(severityFilter))
+		where = append(where, fmt.Sprintf("severity = $%d", len(args)))
+	}
+	whereClause := ""
+	if len(where) > 0 {
+		whereClause = "where " + strings.Join(where, " and ")
+	}
 	var total int64
-	if err := s.db.QueryRow(ctx, `select count(*) from security_events`).Scan(&total); err != nil {
+	if err := s.db.QueryRow(ctx, `select count(*) from security_events `+whereClause, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count security events: %w", err)
 	}
+	args = append(args, limit, offset)
 	rows, err := s.db.Query(ctx, `
 		select id::text, kind, severity, coalesce(admin_account_id::text, ''), actor_email, ip_sha256, user_agent, metadata::text, created_at
 		from security_events
+		`+whereClause+`
 		order by created_at desc, id desc
-		limit $1 offset $2`, limit, offset)
+		limit $`+strconv.Itoa(len(args)-1)+` offset $`+strconv.Itoa(len(args)), args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list security events: %w", err)
 	}

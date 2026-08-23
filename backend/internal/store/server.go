@@ -12,7 +12,7 @@ import (
 
 const serverUserColumns = `id::text, email, status, notes, ban_reason, banned_at, ban_expires_at, created_at, updated_at`
 
-const serverLicenseColumns = `l.id::text, l.user_id::text, u.email, l.product_id::text, l.plan_id::text, p.name, l.status, l.level, l.max_devices, l.notes, l.expires_at, l.created_at, l.updated_at`
+const serverLicenseColumns = `l.id::text, l.user_id::text, u.email, l.product_id::text, coalesce(l.plan_id::text, ''), p.name, l.status, l.level, l.max_devices, l.notes, l.expires_at, l.created_at, l.updated_at`
 
 // ListServerUsers pages the end users of one application newest-first using a
 // UUIDv7 cursor (id < after). limit+1 rows are fetched to report has_more.

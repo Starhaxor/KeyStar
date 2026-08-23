@@ -12,7 +12,7 @@ import (
 
 // licenseColumns selects the license row plus its resolved product name. Every
 // query using these columns must join products on p.id = l.product_id.
-const licenseColumns = `l.id::text, l.application_id::text, l.license_hmac, l.user_id::text, l.product_id::text, l.plan_id::text, p.name, l.status, l.level, l.max_devices, l.notes, l.expires_at, l.created_at, l.updated_at`
+const licenseColumns = `l.id::text, l.application_id::text, l.license_hmac, l.user_id::text, l.product_id::text, coalesce(l.plan_id::text, ''), p.name, l.status, l.level, l.max_devices, l.notes, l.expires_at, l.created_at, l.updated_at`
 
 func (s *Store) CreateLicense(ctx context.Context, applicationID string, input domain.NewLicense) (*domain.License, error) {
 	license, err := scanLicense(s.db.QueryRow(ctx, `

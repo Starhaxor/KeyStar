@@ -110,7 +110,7 @@ type AdminConsoleStore interface {
 	SetUserPassword(ctx context.Context, applicationID, userID, passwordHash string) error
 	CreateUser(ctx context.Context, applicationID string, input domain.NewUser) (*domain.User, error)
 	RevokeUserSessions(ctx context.Context, applicationID, userID string) (int64, error)
-	ListConsoleLicenses(ctx context.Context, applicationID string, offset, limit int) ([]domain.ConsoleLicense, int64, error)
+	ListConsoleLicenses(ctx context.Context, applicationID string, offset, limit int, search, status string) ([]domain.ConsoleLicense, int64, error)
 	ResolveProductPlan(ctx context.Context, applicationID, name string) (string, string, error)
 	CreateLicense(ctx context.Context, applicationID string, input domain.NewLicense) (*domain.License, error)
 	FindLicenseByID(ctx context.Context, applicationID, licenseID string) (*domain.License, error)
@@ -120,16 +120,16 @@ type AdminConsoleStore interface {
 	CreateVariable(ctx context.Context, applicationID, key, value, description string) (*domain.Variable, error)
 	UpdateVariable(ctx context.Context, applicationID, variableID, value, description string) error
 	DeleteVariable(ctx context.Context, applicationID, variableID string) error
-	ListConsoleDevices(ctx context.Context, applicationID string, offset, limit int) ([]domain.ConsoleDevice, int64, error)
+	ListConsoleDevices(ctx context.Context, applicationID string, offset, limit int, search, status string) ([]domain.ConsoleDevice, int64, error)
 	FindConsoleDeviceByID(ctx context.Context, applicationID, deviceID string) (*domain.ConsoleDeviceDetail, error)
 	AdminRevokeDevice(ctx context.Context, applicationID, deviceID string) error
 	AdminResetDevice(ctx context.Context, applicationID, deviceID string) error
-	ListConsoleSessions(ctx context.Context, applicationID string, offset, limit int) ([]domain.ConsoleSession, int64, error)
+	ListConsoleSessions(ctx context.Context, applicationID string, offset, limit int, search, status string) ([]domain.ConsoleSession, int64, error)
 	AdminRevokeAuthSession(ctx context.Context, applicationID, sessionID string) error
 	CreateCredential(ctx context.Context, input domain.NewApplicationCredential) (*domain.ApplicationCredential, error)
 	ListCredentials(ctx context.Context, applicationID string) ([]domain.ApplicationCredential, error)
 	RevokeCredential(ctx context.Context, applicationID, credentialID string) error
-	ListAuditLogs(ctx context.Context, offset, limit int) ([]domain.AuditLog, int64, error)
+	ListAuditLogs(ctx context.Context, offset, limit int, search string) ([]domain.AuditLog, int64, error)
 	ListAdminActivity(ctx context.Context, adminID string, limit int) ([]domain.AuditLog, error)
 	AppendAuditLog(ctx context.Context, input domain.NewAuditLog) error
 	ListAdminAccounts(ctx context.Context) ([]domain.AdminAccount, error)
@@ -146,7 +146,7 @@ type AdminConsoleStore interface {
 	CreateRole(ctx context.Context, input domain.NewRole) (*domain.Role, error)
 	UpdateRole(ctx context.Context, roleID, description string, permissions []string) error
 	DeleteRole(ctx context.Context, roleID string) error
-	ListSecurityEvents(ctx context.Context, offset, limit int) ([]domain.SecurityEvent, int64, error)
+	ListSecurityEvents(ctx context.Context, offset, limit int, search, severity string) ([]domain.SecurityEvent, int64, error)
 	AppendSecurityEvent(ctx context.Context, input domain.NewSecurityEvent) error
 	ListProducts(ctx context.Context, applicationID string) ([]domain.Product, error)
 	FindProductByID(ctx context.Context, applicationID, productID string) (*domain.Product, error)
@@ -158,6 +158,11 @@ type AdminConsoleStore interface {
 	FindWebhookByID(ctx context.Context, applicationID, webhookID string) (*domain.Webhook, error)
 	UpdateWebhook(ctx context.Context, applicationID, webhookID string, url *string, status *domain.WebhookStatus, events *[]string) error
 	DeleteWebhook(ctx context.Context, applicationID, webhookID string) error
+	// Delivery outbox access for the console and the background worker.
+	ListWebhookDeliveries(ctx context.Context, applicationID, webhookID string, offset, limit int) ([]domain.WebhookDelivery, int64, error)
+	RetryWebhookDelivery(ctx context.Context, applicationID, webhookID, deliveryID string) error
+	FindWebhookForDelivery(ctx context.Context, webhookID string) (*domain.Webhook, error)
+	EnqueueWebhookEvent(ctx context.Context, webhookID, eventType string, payload json.RawMessage) error
 	ListApplications(ctx context.Context) ([]domain.Application, error)
 	CreateApplication(ctx context.Context, input domain.NewApplication) (*domain.Application, error)
 	ListOrganizations(ctx context.Context) ([]domain.Organization, error)

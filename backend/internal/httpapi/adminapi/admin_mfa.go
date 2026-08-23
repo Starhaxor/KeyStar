@@ -569,7 +569,8 @@ type securityEventJSON struct {
 
 func (router *Router) handleAdminSecurityEvents(writer http.ResponseWriter, request *http.Request) {
 	page, pageSize, offset := parseAdminPagination(request)
-	events, total, err := router.Admin.Console.ListSecurityEvents(request.Context(), offset, pageSize)
+	query := request.URL.Query()
+	events, total, err := router.Admin.Console.ListSecurityEvents(request.Context(), offset, pageSize, query.Get("search"), query.Get("severity"))
 	if err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
