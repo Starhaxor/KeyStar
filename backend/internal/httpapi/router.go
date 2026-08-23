@@ -24,6 +24,9 @@ type RouterConfig struct {
 	TrustedProxies      []netip.Prefix
 	Logger              *log.Logger
 	RateLimitMaxKeys    int
+	// CredentialRateLimit caps requests per credential per minute across the
+	// client and server namespaces. Zero selects the default (120).
+	CredentialRateLimit int
 	Now                 func() time.Time
 	Admin               AdminConfig
 	// DefaultApplicationID is the tenant boundary applied to client requests
@@ -62,6 +65,7 @@ type Router struct {
 	trustedProxies           []netip.Prefix
 	loginLimiter             *ipRateLimiter
 	sessionLimiter           *ipRateLimiter
+	credentialLimiter        *ipRateLimiter
 	Admin                    AdminConfig
 	adminLimiter             *ipRateLimiter
 	now                      func() time.Time
@@ -105,6 +109,20 @@ func (router *Router) DefaultApplicationID() string {
 // limiter.
 func (router *Router) AllowAdminRate(key string) bool {
 	return router.adminLimiter.allow(key)
+}
+
+// credentialRateLimit normalizes the configured per-credential limit.
+func credentialRateLimit(configured int) int {
+	if configured <= 0 {
+		return 120
+	}
+	return configured
+}
+
+// AllowCredentialRate gates client/server endpoints with the per-credential
+// limiter. retryAfter is meaningful only when allowed is false.
+func (router *Router) AllowCredentialRate(key string) (allowed bool, retryAfter int) {
+	return router.credentialLimiter.allowWithRetry(key)
 }
 
 // MountAdmin attaches the /v1/admin namespace handler.
@@ -151,6 +169,7 @@ func NewRouter(config RouterConfig) *Router {
 		sessionLimiter:           newIPRateLimiter(10, time.Minute, config.RateLimitMaxKeys, config.Now),
 		Admin:                    config.Admin,
 		adminLimiter:             newIPRateLimiter(10, time.Minute, config.RateLimitMaxKeys, config.Now),
+		credentialLimiter:        newIPRateLimiter(credentialRateLimit(config.CredentialRateLimit), time.Minute, config.RateLimitMaxKeys, config.Now),
 		now:                      now,
 		defaultApplicationID:     config.DefaultApplicationID,
 		applications:             config.Applications,

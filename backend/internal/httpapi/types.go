@@ -129,6 +129,8 @@ type AdminConsoleStore interface {
 	CreateCredential(ctx context.Context, input domain.NewApplicationCredential) (*domain.ApplicationCredential, error)
 	ListCredentials(ctx context.Context, applicationID string) ([]domain.ApplicationCredential, error)
 	RevokeCredential(ctx context.Context, applicationID, credentialID string) error
+	FindCredentialByID(ctx context.Context, applicationID, credentialID string) (*domain.ApplicationCredential, error)
+	ExpireCredentialAt(ctx context.Context, applicationID, credentialID string, expiresAt time.Time) error
 	ListAuditLogs(ctx context.Context, offset, limit int, search string) ([]domain.AuditLog, int64, error)
 	ListAdminActivity(ctx context.Context, adminID string, limit int) ([]domain.AuditLog, error)
 	AppendAuditLog(ctx context.Context, input domain.NewAuditLog) error

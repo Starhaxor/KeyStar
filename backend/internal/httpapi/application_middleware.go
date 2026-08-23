@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/starloader/backend/internal/credential"
@@ -116,6 +117,14 @@ func (router *Router) requireCredentialMode(requiredType domain.CredentialType, 
 					WriteError(writer, request, http.StatusForbidden, "INSUFFICIENT_SCOPE", "insufficient scope")
 					return
 				}
+			}
+			// Per-credential throttling protects the backend from a leaked or
+			// runaway key without penalising other credentials of the same
+			// application.
+			if allowed, retryAfter := router.AllowCredentialRate(principal.ApplicationID + ":" + applicationCredential.ID); !allowed {
+				writer.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+				WriteError(writer, request, http.StatusTooManyRequests, "RATE_LIMITED", "rate limit exceeded")
+				return
 			}
 			principal.CredentialID = applicationCredential.ID
 			principal.CredentialType = string(applicationCredential.CredentialType)

@@ -103,6 +103,13 @@ func newIPRateLimiter(limit int, window time.Duration, maxKeys int, now func() t
 }
 
 func (limiter *ipRateLimiter) allow(key string) bool {
+	allowed, _ := limiter.allowWithRetry(key)
+	return allowed
+}
+
+// allowWithRetry reports whether the key may proceed and, when denied, how
+// many seconds the caller should advertise through Retry-After.
+func (limiter *ipRateLimiter) allowWithRetry(key string) (bool, int) {
 	limiter.mu.Lock()
 	defer limiter.mu.Unlock()
 
@@ -118,17 +125,21 @@ func (limiter *ipRateLimiter) allow(key string) bool {
 	}
 	if !exists {
 		if len(limiter.buckets) >= limiter.maxKeys {
-			return false
+			return false, int(limiter.window.Seconds())
 		}
 		limiter.buckets[key] = rateBucket{attempts: 1, expiresAt: now.Add(limiter.window)}
-		return true
+		return true, 0
 	}
 	if bucket.attempts >= limiter.limit {
-		return false
+		retry := int(bucket.expiresAt.Sub(now).Seconds())
+		if retry < 1 {
+			retry = 1
+		}
+		return false, retry
 	}
 	bucket.attempts++
 	limiter.buckets[key] = bucket
-	return true
+	return true, 0
 }
 
 func (limiter *ipRateLimiter) evictExpired(now time.Time) {

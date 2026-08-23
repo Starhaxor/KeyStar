@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -644,6 +645,35 @@ func (s *Store) ListSecurityEvents(ctx context.Context, offset, limit int, searc
 		return nil, 0, fmt.Errorf("list security events: %w", err)
 	}
 	return events, total, nil
+}
+
+// DeleteAuditLogsBefore removes audit entries older than the cutoff as part
+// of the retention job. Returns the number of deleted rows.
+func (s *Store) DeleteAuditLogsBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	var deleted int64
+	err := s.db.QueryRow(ctx, `
+		with removed as (
+			delete from audit_logs where created_at < $1 returning 1
+		)
+		select count(*) from removed`, cutoff).Scan(&deleted)
+	if err != nil {
+		return 0, fmt.Errorf("delete old audit logs: %w", err)
+	}
+	return deleted, nil
+}
+
+// DeleteSecurityEventsBefore removes security events older than the cutoff.
+func (s *Store) DeleteSecurityEventsBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	var deleted int64
+	err := s.db.QueryRow(ctx, `
+		with removed as (
+			delete from security_events where created_at < $1 returning 1
+		)
+		select count(*) from removed`, cutoff).Scan(&deleted)
+	if err != nil {
+		return 0, fmt.Errorf("delete old security events: %w", err)
+	}
+	return deleted, nil
 }
 
 func scanAdminAccount(row pgx.Row) (*domain.AdminAccount, error) {

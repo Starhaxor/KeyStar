@@ -15,6 +15,7 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -211,6 +212,8 @@ func runServer() error {
 		LoginTimeout:             configuration.LoginTimeout,
 		TrustedProxies:           trustedProxies,
 		Logger:                   log.Default(),
+		RateLimitMaxKeys:         envInt("RATE_LIMIT_MAX_KEYS", 0),
+		CredentialRateLimit:      envInt("CREDENTIAL_RATE_LIMIT", 0),
 		HealthCheck:              pool.Ping,
 		Admin:                    adminConfig,
 		DefaultApplicationID:     defaultApplication.ID,
@@ -241,7 +244,11 @@ func runServer() error {
 	})
 	go runWebhookWorker(applicationCtx, webhookDispatcher, log.Default())
 
-	// Start periodic cleanup of expired refresh sessions.
+	// Start periodic cleanup of expired refresh sessions plus audit and
+	// security-event retention. Retention is disabled (keep forever) unless a
+	// day count is configured through the environment.
+	auditRetentionDays := envInt("AUDIT_RETENTION_DAYS", 0)
+	securityRetentionDays := envInt("SECURITY_EVENT_RETENTION_DAYS", 0)
 	go func() {
 		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
@@ -250,14 +257,30 @@ func runServer() error {
 			case <-applicationCtx.Done():
 				return
 			case <-ticker.C:
-				cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				cleanupCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 				deleted, err := repository.DeleteExpiredRefreshSessions(cleanupCtx)
-				cancel()
 				if err != nil {
 					log.Printf("refresh session cleanup error: %v", err)
 				} else if deleted > 0 {
 					log.Printf("refresh session cleanup: deleted %d expired sessions", deleted)
 				}
+				if auditRetentionDays > 0 {
+					cutoff := time.Now().UTC().AddDate(0, 0, -auditRetentionDays)
+					if deleted, err := repository.DeleteAuditLogsBefore(cleanupCtx, cutoff); err != nil {
+						log.Printf("audit log retention error: %v", err)
+					} else if deleted > 0 {
+						log.Printf("audit log retention: deleted %d entries older than %dd", deleted, auditRetentionDays)
+					}
+				}
+				if securityRetentionDays > 0 {
+					cutoff := time.Now().UTC().AddDate(0, 0, -securityRetentionDays)
+					if deleted, err := repository.DeleteSecurityEventsBefore(cleanupCtx, cutoff); err != nil {
+						log.Printf("security event retention error: %v", err)
+					} else if deleted > 0 {
+						log.Printf("security event retention: deleted %d events older than %dd", deleted, securityRetentionDays)
+					}
+				}
+				cancel()
 			}
 		}
 	}()
@@ -267,6 +290,20 @@ func runServer() error {
 		return fmt.Errorf("server stopped: %w", err)
 	}
 	return nil
+}
+
+// envInt reads an integer environment variable, falling back to the default
+// when unset or malformed.
+func envInt(name string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return value
 }
 
 func runMigration(action string) error {

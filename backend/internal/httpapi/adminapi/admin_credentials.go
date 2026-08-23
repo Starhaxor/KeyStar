@@ -3,6 +3,7 @@ package adminapi
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -155,6 +156,87 @@ func (router *Router) handleAdminCredentialRevoke(writer http.ResponseWriter, re
 	httpapi.WriteJSON(writer, http.StatusOK, struct {
 		OK bool `json:"ok"`
 	}{OK: true})
+}
+
+// handleAdminCredentialRotate issues a replacement key with the same name,
+// type, environment and scopes as the original. The old key keeps working
+// for the requested grace window (hours) and then expires automatically;
+// a grace of zero revokes it immediately.
+func (router *Router) handleAdminCredentialRotate(writer http.ResponseWriter, request *http.Request, account *domain.AdminAccount, credentialID string) {
+	var body struct {
+		GraceHours *int `json:"grace_hours"`
+	}
+	if err := httpapi.DecodeJSONBody(writer, request, &body); err != nil {
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		return
+	}
+	graceHours := 24
+	if body.GraceHours != nil {
+		graceHours = *body.GraceHours
+	}
+	if graceHours < 0 || graceHours > 720 {
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "grace_hours must be between 0 and 720")
+		return
+	}
+	existing, err := router.Admin.Console.FindCredentialByID(request.Context(), router.AdminApplicationID(request), credentialID)
+	if err != nil {
+		router.writeCredentialError(writer, request, err)
+		return
+	}
+	if existing.Status != domain.CredentialStatusActive {
+		httpapi.WriteError(writer, request, http.StatusConflict, "CREDENTIAL_NOT_ACTIVE", "only an active credential can be rotated")
+		return
+	}
+
+	generated, err := credential.Generate(string(existing.CredentialType), string(existing.Environment), nil)
+	if err != nil {
+		httpapi.WriteError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
+		return
+	}
+	replacement, err := router.Admin.Console.CreateCredential(request.Context(), domain.NewApplicationCredential{
+		ApplicationID:  router.AdminApplicationID(request),
+		Environment:    existing.Environment,
+		CredentialType: existing.CredentialType,
+		Name:           existing.Name,
+		KeyPrefix:      generated.Prefix,
+		KeyHash:        generated.Hash,
+		Scopes:         append([]string(nil), existing.Scopes...),
+	})
+	if err != nil {
+		router.writeCredentialError(writer, request, err)
+		return
+	}
+
+	var oldExpiresAt *time.Time
+	if graceHours == 0 {
+		if err := router.Admin.Console.RevokeCredential(request.Context(), router.AdminApplicationID(request), credentialID); err != nil {
+			router.writeCredentialError(writer, request, err)
+			return
+		}
+	} else {
+		expiry := time.Now().UTC().Add(time.Duration(graceHours) * time.Hour)
+		if err := router.Admin.Console.ExpireCredentialAt(request.Context(), router.AdminApplicationID(request), credentialID, expiry); err != nil {
+			router.writeCredentialError(writer, request, err)
+			return
+		}
+		oldExpiresAt = &expiry
+	}
+
+	router.AuditAdmin(request, account, "CREDENTIAL_ROTATED", "credential", credentialID, map[string]string{
+		"replacement_id": replacement.ID,
+		"grace_hours":    strconv.Itoa(graceHours),
+	})
+	httpapi.WriteJSON(writer, http.StatusOK, struct {
+		OK           bool           `json:"ok"`
+		Credential   credentialJSON `json:"credential"`
+		Key          string         `json:"key"` // shown exactly once
+		OldExpiresAt *string        `json:"old_expires_at"`
+	}{
+		OK:           true,
+		Credential:   mapCredential(*replacement),
+		Key:          generated.Key,
+		OldExpiresAt: httpapi.FormatOptionalTime(oldExpiresAt),
+	})
 }
 
 func (router *Router) writeCredentialError(writer http.ResponseWriter, request *http.Request, err error) {

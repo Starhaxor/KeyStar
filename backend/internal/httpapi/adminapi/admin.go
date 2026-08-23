@@ -250,6 +250,11 @@ func (router *Router) routeAdmin(writer http.ResponseWriter, request *http.Reque
 			return
 		}
 		router.handleAdminCredentialRevoke(writer, request, account, segments[1])
+	case len(segments) == 3 && segments[0] == "credentials" && segments[2] == "rotate" && request.Method == http.MethodPost:
+		if !router.RequirePermission(writer, request, account, domain.PermCredentialsWrite) {
+			return
+		}
+		router.handleAdminCredentialRotate(writer, request, account, segments[1])
 	default:
 		httpapi.WriteError(writer, request, http.StatusNotFound, "INVALID_REQUEST", "not found")
 	}

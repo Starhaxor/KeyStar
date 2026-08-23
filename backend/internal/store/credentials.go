@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -86,6 +87,37 @@ func (s *Store) RevokeCredential(ctx context.Context, applicationID, credentialI
 	}
 	if err != nil {
 		return fmt.Errorf("revoke credential: %w", err)
+	}
+	return nil
+}
+
+// FindCredentialByID resolves one application credential by ID.
+func (s *Store) FindCredentialByID(ctx context.Context, applicationID, credentialID string) (*domain.ApplicationCredential, error) {
+	credential, err := scanCredential(s.db.QueryRow(ctx,
+		`select `+credentialColumns+` from application_credentials where application_id = $1::uuid and id = $2::uuid`,
+		applicationID, credentialID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrCredentialNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find credential by id: %w", err)
+	}
+	return credential, nil
+}
+
+// ExpireCredentialAt schedules a grace-period expiry for an active
+// credential, keeping it valid until that instant (rotation window).
+func (s *Store) ExpireCredentialAt(ctx context.Context, applicationID, credentialID string, expiresAt time.Time) error {
+	err := s.db.QueryRow(ctx, `
+		update application_credentials
+		set expires_at = $3
+		where id = $1::uuid and application_id = $2::uuid and status = 'active'
+		returning id`, credentialID, applicationID, expiresAt).Scan(new(string))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ErrCredentialNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("expire credential: %w", err)
 	}
 	return nil
 }
