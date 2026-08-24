@@ -73,6 +73,18 @@ void testDefaultWindowsTransportIsAvailable() {
 
     printf("  PASS testDefaultWindowsTransportIsAvailable\n");
 }
+
+void testDefaultWindowsTransportReportsUnsupportedUrl() {
+    auto transport = keystar::createDefaultTransport();
+    const auto response = transport->send({.url = "ftp://localhost/"});
+
+    if (response.status_code != -1 ||
+        response.body != R"({"code":"TRANSPORT_ERROR","message":"WinHTTP request failed"})") {
+        throw std::runtime_error("default Windows transport did not return TRANSPORT_ERROR");
+    }
+
+    printf("  PASS testDefaultWindowsTransportReportsUnsupportedUrl\n");
+}
 #endif
 
 }  // namespace
@@ -83,6 +95,7 @@ void run_transport_tests() {
     testHttpResponseOk();
 #ifdef _WIN32
     testDefaultWindowsTransportIsAvailable();
+    testDefaultWindowsTransportReportsUnsupportedUrl();
 #endif
     printf("  All transport tests passed.\n");
 }

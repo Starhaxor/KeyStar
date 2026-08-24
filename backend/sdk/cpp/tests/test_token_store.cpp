@@ -109,6 +109,9 @@ void testDpapiStoreRoundTripsASession() {
     if (!store->clear()) {
         throw std::runtime_error("DPAPI store did not clear the session");
     }
+    if (store->load()) {
+        throw std::runtime_error("DPAPI store still returned a cleared session");
+    }
 
     printf("  PASS testDpapiStoreRoundTripsASession\n");
 }
