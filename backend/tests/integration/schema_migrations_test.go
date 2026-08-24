@@ -3,11 +3,41 @@ package integration_test
 import (
 	"bytes"
 	"context"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/starloader/backend/internal/store"
 )
+
+func TestIntegrationDatabaseMustUseDedicatedName(t *testing.T) {
+	databaseURL := os.Getenv("TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_DATABASE_URL is not set")
+	}
+	if err := validateIntegrationDatabaseURL(databaseURL); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestIntegrationDatabaseURLRejectsNonDedicatedDatabases(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		databaseURL string
+		wantError   bool
+	}{
+		{name: "development database", databaseURL: "postgres://user:password@localhost:5432/keystar?sslmode=disable", wantError: true},
+		{name: "another database", databaseURL: "postgres://user:password@localhost:5432/customer_data?sslmode=disable", wantError: true},
+		{name: "dedicated database", databaseURL: "postgres://keystar_test:keystar_test@localhost:5432/keystar_test?sslmode=disable", wantError: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateIntegrationDatabaseURL(tt.databaseURL)
+			if (err != nil) != tt.wantError {
+				t.Fatalf("validateIntegrationDatabaseURL() error = %v, want error = %t", err, tt.wantError)
+			}
+		})
+	}
+}
 
 func TestSchemaRejectsInvalidStatusesAndUnprotectedValues(t *testing.T) {
 	ctx := context.Background()

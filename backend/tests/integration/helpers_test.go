@@ -3,7 +3,10 @@ package integration_test
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +22,9 @@ func openTestPool(t *testing.T, ctx context.Context) *pgxpool.Pool {
 	if databaseURL == "" {
 		t.Fatal("TEST_DATABASE_URL must be set for PostgreSQL integration tests")
 	}
+	if err := validateIntegrationDatabaseURL(databaseURL); err != nil {
+		t.Fatal(err)
+	}
 	pool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
 		t.Fatalf("pgxpool.New() error = %v", err)
@@ -28,6 +34,18 @@ func openTestPool(t *testing.T, ctx context.Context) *pgxpool.Pool {
 		t.Fatalf("database ping failed: %v", err)
 	}
 	return pool
+}
+
+func validateIntegrationDatabaseURL(databaseURL string) error {
+	parsed, err := url.Parse(databaseURL)
+	if err != nil {
+		return fmt.Errorf("parse TEST_DATABASE_URL: %w", err)
+	}
+	databaseName := strings.TrimPrefix(parsed.Path, "/")
+	if databaseName != "keystar_test" {
+		return fmt.Errorf("integration database = %q, want dedicated database %q", databaseName, "keystar_test")
+	}
+	return nil
 }
 
 func resetAndMigrate(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {

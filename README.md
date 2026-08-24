@@ -426,13 +426,34 @@ go test ./internal/...
 go build ./cmd/server
 ```
 
-To run integration tests, provide an isolated PostgreSQL database through
-`TEST_DATABASE_URL`:
+### PostgreSQL integration tests
+
+The integration suite resets its database schema. Start the dedicated local
+PostgreSQL 15 service from the repository root, then use the platform runner;
+each runner waits for the service health check, sets the test-only connection
+environment, and preserves the database when a test fails for inspection.
 
 ```powershell
-$env:TEST_DATABASE_URL = "postgres://postgres:postgres@localhost:5432/keystar_test?sslmode=disable"
-go test ./tests/...
+docker compose up -d db
+.\scripts\test-integration.ps1
 ```
+
+```sh
+docker compose up -d db
+./scripts/test-integration.sh
+```
+
+To reset the local test database completely, remove its named volume and start
+the service again:
+
+```powershell
+docker compose down -v
+docker compose up -d db
+```
+
+Run the integration runner again after the service is healthy. Do not point
+`TEST_DATABASE_URL` at a development database; the suite accepts only the
+dedicated `keystar_test` database.
 
 ### Administration console
 
