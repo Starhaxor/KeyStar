@@ -31,3 +31,13 @@ Every successful lifecycle mutation records the entity ID and non-secret `before
 ## Commit
 
 `feat(api): expose audited lifecycle actions`
+
+## Fix round
+
+- Restored `WriteConsoleError` to its pre-lifecycle behavior so existing create/list handlers retain their established response contracts.
+- Moved lifecycle-only safe mappings into `writeLifecycleError`, used exclusively by the new application/product/plan lifecycle handlers.
+- Added handler coverage for `catalog.write` denial, non-default selected-application context for product and plan mutations, cross-application product/plan rejection, CSRF rejection before a service call, and successful audit records (entity ID, action, `before`/`after`) for all six lifecycle actions.
+- RED: `TestAdminApplicationCreatePreservesLegacyErrorContract` received `409 APPLICATION_ALREADY_EXISTS` from the shared mapper, instead of the legacy `500 SERVER_ERROR` contract.
+- GREEN: the focused lifecycle suite, `go test ./internal/httpapi/adminapi ./internal/service -count=1`, and `go test ./internal/... -count=1` all passed after narrowing the mapper.
+
+Fix-round commit: `fix(api): preserve lifecycle error boundaries`

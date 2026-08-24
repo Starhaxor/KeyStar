@@ -2,6 +2,7 @@ package adminapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -69,10 +70,32 @@ func (router *Router) applicationLifecycleConsole(writer http.ResponseWriter, re
 	return console, ok
 }
 
+func (router *Router) writeLifecycleError(writer http.ResponseWriter, request *http.Request, err error) {
+	var conflict *domain.ConflictError
+	switch {
+	case errors.As(err, &conflict):
+		httpapi.WriteError(writer, request, http.StatusConflict, conflict.Code(), conflict.Error())
+	case errors.Is(err, domain.ErrApplicationNotFound):
+		httpapi.WriteError(writer, request, http.StatusNotFound, "APPLICATION_NOT_FOUND", "application not found")
+	case errors.Is(err, domain.ErrProductNotFound):
+		httpapi.WriteError(writer, request, http.StatusNotFound, "PRODUCT_NOT_FOUND", "product not found")
+	case errors.Is(err, domain.ErrPlanNotFound):
+		httpapi.WriteError(writer, request, http.StatusNotFound, "PLAN_NOT_FOUND", "plan not found")
+	case errors.Is(err, domain.ErrApplicationExists):
+		httpapi.WriteError(writer, request, http.StatusConflict, "APPLICATION_ALREADY_EXISTS", "an application with this slug already exists")
+	case errors.Is(err, domain.ErrInvalidApplicationUpdate), errors.Is(err, domain.ErrInvalidApplicationTransition):
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_APPLICATION", "invalid application lifecycle request")
+	case errors.Is(err, domain.ErrInvalidCatalogStatus):
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_CATALOG", "invalid catalog lifecycle request")
+	default:
+		httpapi.WriteError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
+	}
+}
+
 func (router *Router) findAdminApplication(writer http.ResponseWriter, request *http.Request, console applicationLifecycleConsole, applicationID string) (*domain.Application, bool) {
 	applications, err := console.ListApplications(request.Context())
 	if err != nil {
-		router.WriteConsoleError(writer, request, err)
+		router.writeLifecycleError(writer, request, err)
 		return nil, false
 	}
 	for index := range applications {
@@ -80,7 +103,7 @@ func (router *Router) findAdminApplication(writer http.ResponseWriter, request *
 			return &applications[index], true
 		}
 	}
-	router.WriteConsoleError(writer, request, domain.ErrApplicationNotFound)
+	router.writeLifecycleError(writer, request, domain.ErrApplicationNotFound)
 	return nil, false
 }
 
@@ -103,7 +126,7 @@ func (router *Router) handleAdminApplicationUpdate(writer http.ResponseWriter, r
 	}
 	application, err := console.UpdateApplication(request.Context(), applicationID, domain.UpdateApplication{Name: body.Name, Slug: body.Slug})
 	if err != nil {
-		router.WriteConsoleError(writer, request, err)
+		router.writeLifecycleError(writer, request, err)
 		return
 	}
 	router.AuditAdmin(request, account, "APPLICATION_UPDATED", "application", application.ID, map[string]any{"before": applicationAuditState(before), "after": applicationAuditState(application)})
@@ -128,7 +151,7 @@ func (router *Router) handleAdminApplicationTransition(writer http.ResponseWrite
 	}
 	application, err := console.TransitionApplication(request.Context(), applicationID, body.Status)
 	if err != nil {
-		router.WriteConsoleError(writer, request, err)
+		router.writeLifecycleError(writer, request, err)
 		return
 	}
 	router.AuditAdmin(request, account, "APPLICATION_TRANSITIONED", "application", application.ID, map[string]any{"before": applicationAuditState(before), "after": applicationAuditState(application)})

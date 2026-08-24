@@ -75,7 +75,7 @@ func (router *Router) catalogLifecycleConsole(writer http.ResponseWriter, reques
 func (router *Router) findAdminPlan(writer http.ResponseWriter, request *http.Request, console catalogLifecycleConsole, productID, planID string) (*domain.Plan, bool) {
 	plans, err := console.ListPlans(request.Context(), productID)
 	if err != nil {
-		router.WriteConsoleError(writer, request, err)
+		router.writeLifecycleError(writer, request, err)
 		return nil, false
 	}
 	for index := range plans {
@@ -83,7 +83,7 @@ func (router *Router) findAdminPlan(writer http.ResponseWriter, request *http.Re
 			return &plans[index], true
 		}
 	}
-	router.WriteConsoleError(writer, request, domain.ErrPlanNotFound)
+	router.writeLifecycleError(writer, request, domain.ErrPlanNotFound)
 	return nil, false
 }
 
@@ -104,12 +104,12 @@ func (router *Router) handleAdminProductUpdate(writer http.ResponseWriter, reque
 	applicationID := router.AdminApplicationID(request)
 	before, err := console.FindProductByID(request.Context(), applicationID, productID)
 	if err != nil {
-		router.WriteConsoleError(writer, request, err)
+		router.writeLifecycleError(writer, request, err)
 		return
 	}
 	product, err := console.UpdateProduct(request.Context(), applicationID, productID, domain.UpdateProduct{Name: body.Name, Slug: body.Slug, Status: body.Status})
 	if err != nil {
-		router.WriteConsoleError(writer, request, err)
+		router.writeLifecycleError(writer, request, err)
 		return
 	}
 	router.AuditAdmin(request, account, "PRODUCT_UPDATED", "product", product.ID, map[string]any{"before": productAuditState(before), "after": productAuditState(product)})
@@ -124,12 +124,12 @@ func (router *Router) handleAdminProductArchive(writer http.ResponseWriter, requ
 	applicationID := router.AdminApplicationID(request)
 	before, err := console.FindProductByID(request.Context(), applicationID, productID)
 	if err != nil {
-		router.WriteConsoleError(writer, request, err)
+		router.writeLifecycleError(writer, request, err)
 		return
 	}
 	product, err := console.ArchiveProduct(request.Context(), applicationID, productID)
 	if err != nil {
-		router.WriteConsoleError(writer, request, err)
+		router.writeLifecycleError(writer, request, err)
 		return
 	}
 	router.AuditAdmin(request, account, "PRODUCT_ARCHIVED", "product", product.ID, map[string]any{"before": productAuditState(before), "after": productAuditState(product)})
@@ -154,7 +154,7 @@ func (router *Router) handleAdminPlanUpdate(writer http.ResponseWriter, request 
 	}
 	applicationID := router.AdminApplicationID(request)
 	if _, err := console.FindProductByID(request.Context(), applicationID, productID); err != nil {
-		router.WriteConsoleError(writer, request, err)
+		router.writeLifecycleError(writer, request, err)
 		return
 	}
 	before, ok := router.findAdminPlan(writer, request, console, productID, planID)
@@ -163,7 +163,7 @@ func (router *Router) handleAdminPlanUpdate(writer http.ResponseWriter, request 
 	}
 	plan, err := console.UpdatePlan(request.Context(), applicationID, productID, planID, domain.UpdatePlan{Name: body.Name, Code: body.Code, Level: body.Level, MaxDevices: body.MaxDevices, Status: body.Status})
 	if err != nil {
-		router.WriteConsoleError(writer, request, err)
+		router.writeLifecycleError(writer, request, err)
 		return
 	}
 	router.AuditAdmin(request, account, "PLAN_UPDATED", "plan", plan.ID, map[string]any{"before": planAuditState(before), "after": planAuditState(plan)})
@@ -177,7 +177,7 @@ func (router *Router) handleAdminPlanArchive(writer http.ResponseWriter, request
 	}
 	applicationID := router.AdminApplicationID(request)
 	if _, err := console.FindProductByID(request.Context(), applicationID, productID); err != nil {
-		router.WriteConsoleError(writer, request, err)
+		router.writeLifecycleError(writer, request, err)
 		return
 	}
 	before, ok := router.findAdminPlan(writer, request, console, productID, planID)
@@ -186,7 +186,7 @@ func (router *Router) handleAdminPlanArchive(writer http.ResponseWriter, request
 	}
 	plan, err := console.ArchivePlan(request.Context(), applicationID, productID, planID)
 	if err != nil {
-		router.WriteConsoleError(writer, request, err)
+		router.writeLifecycleError(writer, request, err)
 		return
 	}
 	router.AuditAdmin(request, account, "PLAN_ARCHIVED", "plan", plan.ID, map[string]any{"before": planAuditState(before), "after": planAuditState(plan)})
