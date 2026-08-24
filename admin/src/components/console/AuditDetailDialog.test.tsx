@@ -34,18 +34,17 @@ const entry: AuditEntry = {
   user_agent: "test agent",
   metadata: {
     status: "disabled",
+    email: "audited@example.com",
+    before: { name: "Desktop client", status: "active" },
     api_token: "must-not-be-rendered",
     nested: { fingerprint: "must-not-be-rendered" },
+    details: "database connection failed: ECONNREFUSED internal-db:5432",
     failure: {
       error: "raw server error: query failed",
       stack: "at internal/service.go:42",
       exception: "database exception",
     },
-    attempts: [
-      "safe value",
-      { detail: "Error: stack trace leaked" },
-      { nested: { exception: "array exception leaked" } },
-    ],
+    attempts: [{ detail: "Error: stack trace leaked" }],
   },
   created_at: "2026-08-24T12:00:00Z",
 };
@@ -72,9 +71,12 @@ describe("AuditDetailDialog", () => {
     expect(dialog?.textContent).toContain("user-123");
     expect(dialog?.textContent).toContain("status");
     expect(dialog?.textContent).toContain("disabled");
-    expect(dialog?.textContent).toContain("safe value");
+    expect(dialog?.textContent).toContain("audited@example.com");
+    expect(dialog?.textContent).toContain("Desktop client");
     expect(dialog?.textContent).toContain("[redacted]");
     expect(dialog?.textContent).not.toContain("must-not-be-rendered");
+    expect(dialog?.textContent).not.toContain("database connection failed");
+    expect(dialog?.textContent).not.toContain("internal-db:5432");
     expect(dialog?.textContent).not.toContain("raw server error");
     expect(dialog?.textContent).not.toContain("internal/service.go");
     expect(dialog?.textContent).not.toContain("database exception");

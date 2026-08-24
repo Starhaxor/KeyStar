@@ -13,13 +13,28 @@ interface AuditDetailDialogProps {
 }
 
 const unsafeMetadataKey = /(token|secret|password|fingerprint|hash|authorization|cookie|api[_-]?key|credential|private[_-]?key|error|stack|exception|trace|message|failure|cause|debug|diagnostic)/i;
-const unsafeText = /(bearer\s+|-----BEGIN |\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.|\b(?:error|exception|stack trace|traceback|panic)\b|\bat\s+.+\.(?:go|ts|tsx|js|java|py):\d+)/i;
+const safeScalarKeys = new Set([
+  "code", "count", "devices", "email", "environment", "environment_mode",
+  "extend", "grace_hours", "level", "max_devices", "name", "replacement_id",
+  "revoked", "role", "slug", "status", "type", "user_email",
+]);
+const safeObjectKeys = new Set(["before", "after"]);
+const unsafeText = /(bearer\s+|-----BEGIN |\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.|\b(?:error|exception|stack trace|traceback|panic|connection failed|connection refused|econnrefused|database)\b|\bat\s+.+\.(?:go|ts|tsx|js|java|py):\d+)/i;
 const encodedSecret = /(?:[a-f\d]{32,}|[A-Za-z\d+/_-]{48,}={0,2})/i;
 const maxTextLength = 240;
 const maxCollectionItems = 30;
 
 function isSafeText(value: string) {
   return value.length <= maxTextLength && !/[\r\n\t]/.test(value) && !unsafeText.test(value) && !encodedSecret.test(value);
+}
+
+function isSafeScalarValue(key: string, value: string) {
+  if (!isSafeText(value)) return false;
+  if (key === "email" || key === "user_email") return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  if (["count", "devices", "grace_hours", "level", "max_devices", "revoked"].includes(key)) return /^\d+$/.test(value);
+  if (key === "extend") return /^\d+\s+(?:hour|day|week|month|year)s?$/.test(value);
+  if (key === "replacement_id") return /^[\da-f]{8}-[\da-f-]{27,}$/i.test(value);
+  return /^[\p{L}\p{N}][\p{L}\p{N} ._/-]{0,120}$/u.test(value);
 }
 
 function isPlainRecord(value: object): value is Record<string, unknown> {
@@ -29,9 +44,10 @@ function isPlainRecord(value: object): value is Record<string, unknown> {
 
 function SafeMetadataValue({ value, metadataKey, visited }: { value: unknown; metadataKey?: string; visited: WeakSet<object> }) {
   if (metadataKey && unsafeMetadataKey.test(metadataKey)) return <span>[redacted]</span>;
+  if (metadataKey && !safeScalarKeys.has(metadataKey) && !safeObjectKeys.has(metadataKey)) return <span>[redacted]</span>;
   if (value === null || value === undefined) return <span>—</span>;
   if (typeof value === "string") {
-    return <span>{isSafeText(value) ? value : "[redacted]"}</span>;
+    return <span>{metadataKey && isSafeScalarValue(metadataKey, value) ? value : "[redacted]"}</span>;
   }
   if (typeof value === "number") {
     return <span>{Number.isFinite(value) ? String(value) : "[redacted]"}</span>;
@@ -40,6 +56,7 @@ function SafeMetadataValue({ value, metadataKey, visited }: { value: unknown; me
     return <span>{String(value)}</span>;
   }
   if (Array.isArray(value)) {
+    if (!metadataKey || !safeObjectKeys.has(metadataKey)) return <span>[redacted]</span>;
     if (visited.has(value)) return <span>[redacted]</span>;
     visited.add(value);
     return (
@@ -50,6 +67,7 @@ function SafeMetadataValue({ value, metadataKey, visited }: { value: unknown; me
     );
   }
   if (typeof value === "object" && isPlainRecord(value)) {
+    if (metadataKey && !safeObjectKeys.has(metadataKey)) return <span>[redacted]</span>;
     if (visited.has(value)) return <span>[redacted]</span>;
     visited.add(value);
     return (

@@ -26,3 +26,9 @@
 - Added test coverage for nested and array-based raw error suppression, promotion label associations and explicit confirmation before the promotion callback, and read-only user-list permission gating.
 - The promotion form now gives Email and Role stable `id`, `name`, and `label[for]` associations, with an explicit submit action.
 - Final verification: `npm test` passed (27 files, 86 tests), `npm run lint` passed, and `npm run build` passed. Focused E2E was skipped because ports 8080 and 3000 were occupied by pre-existing processes.
+
+## P1 disclosure follow-up
+
+- Replaced the generic metadata rendering fallback with an explicit allowlist of documented audit scalar keys and `before`/`after` state objects. Every allowed string is format-checked; unrecognized metadata is redacted.
+- Added a regression for `details: "database connection failed: ECONNREFUSED internal-db:5432"`; its raw network and host information is not rendered, while safe `status`, `email`, and `before` state values remain visible.
+- Final verification: `npm test` passed (27 files, 86 tests), `npm run lint` passed, and `npm run build` passed.
