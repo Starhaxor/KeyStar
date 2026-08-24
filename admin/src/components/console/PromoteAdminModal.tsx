@@ -115,8 +115,10 @@ export default function PromoteAdminModal({
             </p>
           </div>
           <div>
-            <Label>Email</Label>
+            <Label htmlFor="promote-admin-email">Email</Label>
             <input
+              id="promote-admin-email"
+              name="email"
               type="email"
               value={userEmail}
               readOnly
@@ -125,8 +127,10 @@ export default function PromoteAdminModal({
             />
           </div>
           <div>
-            <Label>Role</Label>
+            <Label htmlFor="promote-admin-role">Role</Label>
             <select
+              id="promote-admin-role"
+              name="role"
               className={fieldClasses}
               value={role}
               onChange={(e) => setRole(e.target.value)}
@@ -148,7 +152,7 @@ export default function PromoteAdminModal({
             >
               Cancel
             </button>
-            <Button variant="info" size="sm" disabled={busy}>
+            <Button type="submit" variant="info" size="sm" disabled={busy}>
               {busy ? "Creating..." : "Create admin"}
             </Button>
           </div>

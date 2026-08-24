@@ -36,6 +36,16 @@ const entry: AuditEntry = {
     status: "disabled",
     api_token: "must-not-be-rendered",
     nested: { fingerprint: "must-not-be-rendered" },
+    failure: {
+      error: "raw server error: query failed",
+      stack: "at internal/service.go:42",
+      exception: "database exception",
+    },
+    attempts: [
+      "safe value",
+      { detail: "Error: stack trace leaked" },
+      { nested: { exception: "array exception leaked" } },
+    ],
   },
   created_at: "2026-08-24T12:00:00Z",
 };
@@ -62,8 +72,14 @@ describe("AuditDetailDialog", () => {
     expect(dialog?.textContent).toContain("user-123");
     expect(dialog?.textContent).toContain("status");
     expect(dialog?.textContent).toContain("disabled");
+    expect(dialog?.textContent).toContain("safe value");
     expect(dialog?.textContent).toContain("[redacted]");
     expect(dialog?.textContent).not.toContain("must-not-be-rendered");
+    expect(dialog?.textContent).not.toContain("raw server error");
+    expect(dialog?.textContent).not.toContain("internal/service.go");
+    expect(dialog?.textContent).not.toContain("database exception");
+    expect(dialog?.textContent).not.toContain("stack trace leaked");
+    expect(dialog?.textContent).not.toContain("array exception leaked");
     expect(dialog?.querySelector('a[href="/users/user-123"]')).not.toBeNull();
     expect(dialog?.querySelector('button[aria-label="Copy resource ID"]')).not.toBeNull();
   });

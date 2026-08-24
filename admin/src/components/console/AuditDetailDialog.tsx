@@ -12,30 +12,55 @@ interface AuditDetailDialogProps {
   onClose: () => void;
 }
 
-const sensitiveMetadataKey = /(token|secret|password|fingerprint|hash|authorization|cookie|api[_-]?key|credential|private[_-]?key)/i;
+const unsafeMetadataKey = /(token|secret|password|fingerprint|hash|authorization|cookie|api[_-]?key|credential|private[_-]?key|error|stack|exception|trace|message|failure|cause|debug|diagnostic)/i;
+const unsafeText = /(bearer\s+|-----BEGIN |\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.|\b(?:error|exception|stack trace|traceback|panic)\b|\bat\s+.+\.(?:go|ts|tsx|js|java|py):\d+)/i;
+const encodedSecret = /(?:[a-f\d]{32,}|[A-Za-z\d+/_-]{48,}={0,2})/i;
+const maxTextLength = 240;
+const maxCollectionItems = 30;
 
-function SafeMetadataValue({ value, metadataKey }: { value: unknown; metadataKey?: string }) {
-  if (metadataKey && sensitiveMetadataKey.test(metadataKey)) return <span>[redacted]</span>;
+function isSafeText(value: string) {
+  return value.length <= maxTextLength && !/[\r\n\t]/.test(value) && !unsafeText.test(value) && !encodedSecret.test(value);
+}
+
+function isPlainRecord(value: object): value is Record<string, unknown> {
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function SafeMetadataValue({ value, metadataKey, visited }: { value: unknown; metadataKey?: string; visited: WeakSet<object> }) {
+  if (metadataKey && unsafeMetadataKey.test(metadataKey)) return <span>[redacted]</span>;
   if (value === null || value === undefined) return <span>—</span>;
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+  if (typeof value === "string") {
+    return <span>{isSafeText(value) ? value : "[redacted]"}</span>;
+  }
+  if (typeof value === "number") {
+    return <span>{Number.isFinite(value) ? String(value) : "[redacted]"}</span>;
+  }
+  if (typeof value === "boolean") {
     return <span>{String(value)}</span>;
   }
   if (Array.isArray(value)) {
+    if (visited.has(value)) return <span>[redacted]</span>;
+    visited.add(value);
     return (
       <ul className="list-inside list-disc space-y-1">
-        {value.map((item, index) => <li key={index}><SafeMetadataValue value={item} /></li>)}
+        {value.slice(0, maxCollectionItems).map((item, index) => <li key={index}><SafeMetadataValue value={item} visited={visited} /></li>)}
+        {value.length > maxCollectionItems && <li>[additional values omitted]</li>}
       </ul>
     );
   }
-  if (typeof value === "object") {
+  if (typeof value === "object" && isPlainRecord(value)) {
+    if (visited.has(value)) return <span>[redacted]</span>;
+    visited.add(value);
     return (
       <dl className="space-y-2 border-l border-gray-200 pl-3 dark:border-gray-700">
-        {Object.entries(value).map(([key, nestedValue]) => (
+        {Object.entries(value).slice(0, maxCollectionItems).map(([key, nestedValue]) => (
           <div key={key} className="grid gap-1 sm:grid-cols-[9rem_1fr] sm:gap-3">
             <dt className="font-mono text-xs text-gray-500 dark:text-gray-400">{key}</dt>
-            <dd className="break-all"><SafeMetadataValue value={nestedValue} metadataKey={key} /></dd>
+            <dd className="break-all"><SafeMetadataValue value={nestedValue} metadataKey={key} visited={visited} /></dd>
           </div>
         ))}
+        {Object.keys(value).length > maxCollectionItems && <div>[additional values omitted]</div>}
       </dl>
     );
   }
@@ -57,6 +82,7 @@ export default function AuditDetailDialog({ entry, isOpen, onClose }: AuditDetai
 
   const resourceId = entry.resource_id;
   const userHref = entry.resource_type === "user" && entry.resource_id ? `/users/${entry.resource_id}` : null;
+  const visitedMetadata = new WeakSet<object>();
 
   async function copyResourceId() {
     if (!resourceId) return;
@@ -95,7 +121,7 @@ export default function AuditDetailDialog({ entry, isOpen, onClose }: AuditDetai
         <div>
           <h4 className="text-sm font-semibold text-gray-800 dark:text-white/90">Metadata</h4>
           <div className="mt-2 rounded-lg bg-gray-50 p-4 text-sm text-gray-700 dark:bg-white/[0.03] dark:text-gray-300">
-            {Object.keys(entry.metadata ?? {}).length > 0 ? <SafeMetadataValue value={entry.metadata} /> : "No metadata recorded."}
+            {Object.keys(entry.metadata ?? {}).length > 0 ? <SafeMetadataValue value={entry.metadata} visited={visitedMetadata} /> : "No metadata recorded."}
           </div>
         </div>
       </div>

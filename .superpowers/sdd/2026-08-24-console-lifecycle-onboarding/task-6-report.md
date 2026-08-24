@@ -19,3 +19,10 @@
 
 - New dialog tests initially failed because the components did not exist, then passed after implementation.
 - The production build initially exposed a TypeScript closure-narrowing error in the audit copy handler; the resource ID is now captured after the null guard, and the final build passes.
+
+## Review fix round
+
+- Audit metadata now applies recursive key and value safety rules: secret/error/stack/exception keys, error-shaped text, encoded secret-like text, unsupported objects, oversized collections, and circular values are redacted or omitted. Safe primitive metadata remains readable.
+- Added test coverage for nested and array-based raw error suppression, promotion label associations and explicit confirmation before the promotion callback, and read-only user-list permission gating.
+- The promotion form now gives Email and Role stable `id`, `name`, and `label[for]` associations, with an explicit submit action.
+- Final verification: `npm test` passed (27 files, 86 tests), `npm run lint` passed, and `npm run build` passed. Focused E2E was skipped because ports 8080 and 3000 were occupied by pre-existing processes.
