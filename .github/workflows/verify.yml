@@ -53,6 +53,42 @@ jobs:
       - run: npm run lint
       - run: npm run build
 
+  admin-e2e:
+    needs: [backend, admin]
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: postgres:15
+        env:
+          POSTGRES_DB: keystar_test
+          POSTGRES_USER: keystar_test
+          POSTGRES_PASSWORD: keystar_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U keystar_test -d keystar_test"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+    env:
+      TEST_DATABASE_URL: postgres://keystar_test:keystar_test@127.0.0.1:5432/keystar_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: admin/package-lock.json
+      - run: npm ci
+        working-directory: admin
+      - run: npx playwright install --with-deps chromium
+        working-directory: admin
+      - run: npm run e2e
+        working-directory: admin
+
   sdk-windows:
     runs-on: windows-latest
     steps:

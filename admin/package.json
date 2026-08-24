@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "e2e": "playwright test --reporter=list",
+    "e2e:install": "playwright install chromium"
   },
   "dependencies": {
     "@fullcalendar/core": "^6.1.19",
@@ -35,6 +37,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.1",
+    "@playwright/test": "^1.62.1",
     "@svgr/webpack": "^8.1.0",
     "@types/node": "^20.19.25",
     "@types/react": "^19.2.1",
