@@ -10,8 +10,10 @@ type ApplicationStatus string
 const (
 	ApplicationStatusActive      ApplicationStatus = "active"
 	ApplicationStatusMaintenance ApplicationStatus = "maintenance"
-	ApplicationStatusSuspended   ApplicationStatus = "suspended"
 	ApplicationStatusDisabled    ApplicationStatus = "disabled"
+	// ApplicationStatusSuspended remains for compatibility with records from
+	// before migration 000016. New lifecycle transitions reject it.
+	ApplicationStatusSuspended ApplicationStatus = "suspended"
 )
 
 type OrganizationStatus string
@@ -52,9 +54,40 @@ type NewApplication struct {
 	Slug           string
 }
 
+// UpdateApplication carries optional editable application fields.
+type UpdateApplication struct {
+	Name *string
+	Slug *string
+}
+
+// ConflictError is safe to map directly to an API conflict response without
+// leaking persistence details.
+type ConflictError struct {
+	ConflictCode string
+	Message      string
+}
+
+func (e *ConflictError) Error() string { return e.Message }
+
+func (e *ConflictError) Code() string { return e.ConflictCode }
+
 var (
-	ErrApplicationNotFound  = &NotFoundError{Entity: "application"}
-	ErrOrganizationNotFound = &NotFoundError{Entity: "organization"}
-	ErrApplicationExists    = errors.New("an application with this slug already exists")
-	ErrOrganizationExists   = errors.New("an organization with this slug already exists")
+	ErrApplicationNotFound          = &NotFoundError{Entity: "application"}
+	ErrOrganizationNotFound         = &NotFoundError{Entity: "organization"}
+	ErrApplicationExists            = errors.New("an application with this slug already exists")
+	ErrOrganizationExists           = errors.New("an organization with this slug already exists")
+	ErrInvalidApplicationUpdate     = errors.New("application name and slug must not be empty")
+	ErrInvalidApplicationTransition = errors.New("application status must be active, maintenance or disabled")
+	ErrApplicationInUse             = &ConflictError{ConflictCode: "APPLICATION_IN_USE", Message: "application has active dependent records"}
 )
+
+// ValidateApplicationTransition limits lifecycle transitions to operational
+// states supported by the application boundary.
+func ValidateApplicationTransition(status ApplicationStatus) error {
+	switch status {
+	case ApplicationStatusActive, ApplicationStatusMaintenance, ApplicationStatusDisabled:
+		return nil
+	default:
+		return ErrInvalidApplicationTransition
+	}
+}

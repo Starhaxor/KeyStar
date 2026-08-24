@@ -18,13 +18,21 @@ func (s *Store) CreateLicense(ctx context.Context, applicationID string, input d
 	license, err := scanLicense(s.db.QueryRow(ctx, `
 		with inserted as (
 			insert into licenses (application_id, license_hmac, user_id, product_id, plan_id, max_devices, expires_at)
-			values ($1, $2, $3, $4, $5, $6, $7)
+			select $1::uuid, $2, $3::uuid, p.id, pl.id, $6, $7
+			from products p
+			join plans pl on pl.id = $5::uuid and pl.product_id = p.id
+			where p.id = $4::uuid and p.application_id = $1::uuid
+				and p.status = 'active' and pl.status = 'active'
+			for key share of p, pl
 			returning id, application_id, license_hmac, user_id, product_id, plan_id, status, level, max_devices, notes, expires_at, created_at, updated_at
 		)
 		select `+licenseColumns+`
 		from inserted l
 		join products p on p.id = l.product_id`,
 		applicationID, input.LicenseHMAC, input.UserID, input.ProductID, input.PlanID, input.MaxDevices, input.ExpiresAt))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrCatalogRecordInactive
+	}
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.ConstraintName == "licenses_user_product_unique" {

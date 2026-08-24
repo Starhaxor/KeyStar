@@ -76,6 +76,104 @@ func (s *Store) ListApplications(ctx context.Context) ([]domain.Application, err
 	return applications, nil
 }
 
+// UpdateApplication updates editable application metadata without changing its
+// lifecycle state. Lifecycle transitions use TransitionApplication so unsafe
+// disable operations cannot be hidden inside a general update.
+func (s *Store) UpdateApplication(ctx context.Context, applicationID string, input domain.UpdateApplication) (*domain.Application, error) {
+	setClauses := make([]string, 0, 3)
+	args := make([]any, 0, 3)
+	if input.Name != nil {
+		name := strings.TrimSpace(*input.Name)
+		if name == "" {
+			return nil, domain.ErrInvalidApplicationUpdate
+		}
+		args = append(args, name)
+		setClauses = append(setClauses, fmt.Sprintf("name = $%d", len(args)))
+	}
+	if input.Slug != nil {
+		slug := normalizeSlug(*input.Slug)
+		if slug == "" {
+			return nil, domain.ErrInvalidApplicationUpdate
+		}
+		args = append(args, slug)
+		setClauses = append(setClauses, fmt.Sprintf("slug = $%d", len(args)))
+	}
+	if len(setClauses) == 0 {
+		return s.FindApplicationByID(ctx, applicationID)
+	}
+	setClauses = append(setClauses, "updated_at = now()")
+	args = append(args, applicationID)
+	application, err := scanApplication(s.db.QueryRow(ctx, `update applications set `+strings.Join(setClauses, ", ")+` where id = $`+fmt.Sprint(len(args))+`::uuid returning `+applicationColumns, args...))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrApplicationNotFound
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.ConstraintName == "applications_slug_unique" {
+		return nil, domain.ErrApplicationExists
+	}
+	if err != nil {
+		return nil, fmt.Errorf("update application: %w", err)
+	}
+	return application, nil
+}
+
+// TransitionApplication changes the operational state of an application. A
+// disable is rejected while active application-scoped resources exist, so the
+// transition cannot silently strand active users, licenses, or credentials.
+func (s *Store) TransitionApplication(ctx context.Context, applicationID string, status domain.ApplicationStatus) (*domain.Application, error) {
+	if err := domain.ValidateApplicationTransition(status); err != nil {
+		return nil, err
+	}
+	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("begin application transition: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	application, err := scanApplication(tx.QueryRow(ctx, `select `+applicationColumns+` from applications where id = $1::uuid for update`, applicationID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrApplicationNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lock application for transition: %w", err)
+	}
+	if status == domain.ApplicationStatusDisabled {
+		var inUse bool
+		if err := tx.QueryRow(ctx, `
+			select exists (
+				select 1 from users where application_id = $1::uuid and status = 'active'
+				union all select 1 from licenses where application_id = $1::uuid and status = 'active'
+				union all select 1 from devices where application_id = $1::uuid and status = 'active'
+				union all select 1 from auth_sessions where application_id = $1::uuid and status in ('pending', 'verified')
+				union all select 1 from refresh_sessions where application_id = $1::uuid and status = 'active'
+				union all select 1 from application_credentials where application_id = $1::uuid and status = 'active'
+				union all select 1 from webhooks where application_id = $1::uuid and status = 'active'
+				union all select 1 from products where application_id = $1::uuid and status = 'active'
+				union all select 1 from plans join products on products.id = plans.product_id
+					where products.application_id = $1::uuid and plans.status = 'active'
+			)`, applicationID).Scan(&inUse); err != nil {
+			return nil, fmt.Errorf("check application dependencies: %w", err)
+		}
+		if inUse {
+			return nil, domain.ErrApplicationInUse
+		}
+	}
+	if application.Status == status {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit unchanged application transition: %w", err)
+		}
+		return application, nil
+	}
+	application, err = scanApplication(tx.QueryRow(ctx, `update applications set status = $2, updated_at = now() where id = $1::uuid returning `+applicationColumns, applicationID, status))
+	if err != nil {
+		return nil, fmt.Errorf("transition application: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit application transition: %w", err)
+	}
+	return application, nil
+}
+
 // FindDefaultApplication resolves the default tenant application. It is used
 // by legacy flows and the admin console until per-application dashboards land.
 func (s *Store) FindDefaultApplication(ctx context.Context) (*domain.Application, error) {

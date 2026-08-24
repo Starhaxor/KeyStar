@@ -14,10 +14,9 @@ const productColumns = `id::text, application_id::text, name, slug, status, crea
 
 const planColumns = `id::text, product_id::text, name, code, level, max_devices, default_duration_seconds, status, created_at, updated_at`
 
-// ResolveProductPlan finds or creates the product identified by its display
-// name within one application and returns its (product_id, plan_id) pair. The
-// default plan (code 'default') is created alongside a new product so every
-// license created through the legacy product-name API is bound to a plan.
+// ResolveProductPlan finds or creates an active product identified by its
+// display name within one application. Existing inactive or archived catalog
+// records are historical and must not be silently reactivated for issuance.
 func (s *Store) ResolveProductPlan(ctx context.Context, applicationID, name string) (string, string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -31,9 +30,21 @@ func (s *Store) ResolveProductPlan(ctx context.Context, applicationID, name stri
 	err := s.db.QueryRow(ctx, `
 		insert into products (application_id, name, slug)
 		values ($1, $2, $3)
-		on conflict (application_id, slug) do update set slug = excluded.slug
+		on conflict (application_id, slug) do nothing
 		returning id::text`, applicationID, name, slug).Scan(&productID)
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
+		var status domain.CatalogStatus
+		err = s.db.QueryRow(ctx, `select id::text, status from products where application_id = $1::uuid and slug = $2`, applicationID, slug).Scan(&productID, &status)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", "", domain.ErrProductNotFound
+		}
+		if err != nil {
+			return "", "", fmt.Errorf("find resolved product: %w", err)
+		}
+		if status != domain.CatalogStatusActive {
+			return "", "", domain.ErrCatalogRecordInactive
+		}
+	} else if err != nil {
 		return "", "", fmt.Errorf("resolve product: %w", err)
 	}
 	planID, err := s.findOrCreateDefaultPlan(ctx, productID)
@@ -43,8 +54,8 @@ func (s *Store) ResolveProductPlan(ctx context.Context, applicationID, name stri
 	return productID, planID, nil
 }
 
-// findOrCreateDefaultPlan returns the 'default' plan of a product, creating it
-// when the product has no plans yet.
+// findOrCreateDefaultPlan returns the active 'default' plan of a product,
+// creating it only for a newly active catalog product.
 func (s *Store) findOrCreateDefaultPlan(ctx context.Context, productID string) (string, error) {
 	var planID string
 	err := s.db.QueryRow(ctx, `
@@ -53,8 +64,13 @@ func (s *Store) findOrCreateDefaultPlan(ctx context.Context, productID string) (
 		on conflict (product_id, code) do nothing
 		returning id::text`, productID).Scan(&planID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		// The default plan already exists; read it back.
-		err = s.db.QueryRow(ctx, `select id::text from plans where product_id = $1 and code = 'default'`, productID).Scan(&planID)
+		// The default plan already exists; archived and inactive plans remain
+		// historical records rather than being recreated.
+		var status domain.CatalogStatus
+		err = s.db.QueryRow(ctx, `select id::text, status from plans where product_id = $1 and code = 'default'`, productID).Scan(&planID, &status)
+		if err == nil && status != domain.CatalogStatusActive {
+			return "", domain.ErrCatalogRecordInactive
+		}
 	}
 	if err != nil {
 		return "", fmt.Errorf("resolve default plan: %w", err)
@@ -74,8 +90,18 @@ func (s *Store) CreateProduct(ctx context.Context, applicationID string, input d
 	product, err := scanProduct(s.db.QueryRow(ctx, `
 		insert into products (application_id, name, slug)
 		values ($1, $2, $3)
-		on conflict (application_id, slug) do update set name = excluded.name
+		on conflict (application_id, slug) do nothing
 		returning `+productColumns, applicationID, name, slug))
+	if errors.Is(err, pgx.ErrNoRows) {
+		existing, findErr := s.FindProductBySlug(ctx, applicationID, slug)
+		if findErr != nil {
+			return nil, findErr
+		}
+		if existing.Status != domain.CatalogStatusActive {
+			return nil, domain.ErrCatalogRecordInactive
+		}
+		return existing, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("create product: %w", err)
 	}
@@ -130,9 +156,23 @@ func (s *Store) ListProducts(ctx context.Context, applicationID string) ([]domai
 func (s *Store) CreatePlan(ctx context.Context, input domain.NewPlan) (*domain.Plan, error) {
 	plan, err := scanPlan(s.db.QueryRow(ctx, `
 		insert into plans (product_id, name, code, level, max_devices)
-		values ($1, $2, $3, $4, $5)
+		select id, $2, $3, $4, $5
+		from products
+		where id = $1::uuid and status = 'active'
+		for key share
 		returning `+planColumns,
 		input.ProductID, input.Name, input.Code, input.Level, input.MaxDevices))
+	if errors.Is(err, pgx.ErrNoRows) {
+		var status domain.CatalogStatus
+		findErr := s.db.QueryRow(ctx, `select status from products where id = $1::uuid`, input.ProductID).Scan(&status)
+		if errors.Is(findErr, pgx.ErrNoRows) {
+			return nil, domain.ErrProductNotFound
+		}
+		if findErr != nil {
+			return nil, fmt.Errorf("find product for plan: %w", findErr)
+		}
+		return nil, domain.ErrCatalogRecordInactive
+	}
 	if err != nil {
 		return nil, fmt.Errorf("create plan: %w", err)
 	}
@@ -169,6 +209,210 @@ func (s *Store) ListPlans(ctx context.Context, productID string) ([]domain.Plan,
 		return nil, fmt.Errorf("list plans: %w", err)
 	}
 	return plans, nil
+}
+
+// UpdateProduct updates editable fields of a product scoped to its owning
+// application. Archived products remain read-only historical records.
+func (s *Store) UpdateProduct(ctx context.Context, applicationID, productID string, input domain.UpdateProduct) (*domain.Product, error) {
+	setClauses := make([]string, 0, 4)
+	args := make([]any, 0, 4)
+	if input.Name != nil {
+		name := strings.TrimSpace(*input.Name)
+		if name == "" {
+			return nil, domain.ErrProductInvalidName
+		}
+		args = append(args, name)
+		setClauses = append(setClauses, fmt.Sprintf("name = $%d", len(args)))
+	}
+	if input.Slug != nil {
+		slug := domain.ProductSlug(*input.Slug)
+		if slug == "" {
+			return nil, domain.ErrProductInvalidName
+		}
+		args = append(args, slug)
+		setClauses = append(setClauses, fmt.Sprintf("slug = $%d", len(args)))
+	}
+	if input.Status != nil {
+		if err := domain.ValidateCatalogUpdateStatus(*input.Status); err != nil {
+			return nil, err
+		}
+		args = append(args, *input.Status)
+		setClauses = append(setClauses, fmt.Sprintf("status = $%d", len(args)))
+	}
+	if len(setClauses) == 0 {
+		return s.FindProductByID(ctx, applicationID, productID)
+	}
+	setClauses = append(setClauses, "updated_at = now()")
+	args = append(args, productID, applicationID)
+	product, err := scanProduct(s.db.QueryRow(ctx, `update products set `+strings.Join(setClauses, ", ")+` where id = $`+fmt.Sprint(len(args)-1)+`::uuid and application_id = $`+fmt.Sprint(len(args))+`::uuid and status <> 'archived' returning `+productColumns, args...))
+	if errors.Is(err, pgx.ErrNoRows) {
+		existing, findErr := s.FindProductByID(ctx, applicationID, productID)
+		if findErr != nil {
+			return nil, findErr
+		}
+		if existing.Status == domain.CatalogStatusArchived {
+			return nil, domain.ErrCatalogRecordInactive
+		}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("update product: %w", err)
+	}
+	return product, nil
+}
+
+// ArchiveProduct retains a historical product row and rejects the archive
+// while active licenses or plans still depend on it.
+func (s *Store) ArchiveProduct(ctx context.Context, applicationID, productID string) (*domain.Product, error) {
+	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("begin product archive: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	product, err := scanProduct(tx.QueryRow(ctx, `select `+productColumns+` from products where id = $1::uuid and application_id = $2::uuid for update`, productID, applicationID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrProductNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lock product for archive: %w", err)
+	}
+	if product.Status == domain.CatalogStatusArchived {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit unchanged product archive: %w", err)
+		}
+		return product, nil
+	}
+	var inUse bool
+	if err := tx.QueryRow(ctx, `select exists (
+		select 1 from licenses where product_id = $1::uuid and status = 'active'
+		union all select 1 from plans where product_id = $1::uuid and status = 'active'
+	)`, productID).Scan(&inUse); err != nil {
+		return nil, fmt.Errorf("check product archive dependencies: %w", err)
+	}
+	if inUse {
+		return nil, domain.ErrCatalogRecordInUse
+	}
+	product, err = scanProduct(tx.QueryRow(ctx, `update products set status = 'archived', updated_at = now() where id = $1::uuid and application_id = $2::uuid returning `+productColumns, productID, applicationID))
+	if err != nil {
+		return nil, fmt.Errorf("archive product: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit product archive: %w", err)
+	}
+	return product, nil
+}
+
+// UpdatePlan updates a plan only through the product's application boundary.
+func (s *Store) UpdatePlan(ctx context.Context, applicationID, productID, planID string, input domain.UpdatePlan) (*domain.Plan, error) {
+	setClauses := make([]string, 0, 6)
+	args := make([]any, 0, 6)
+	if input.Name != nil {
+		name := strings.TrimSpace(*input.Name)
+		if name == "" {
+			return nil, domain.ErrProductInvalidName
+		}
+		args = append(args, name)
+		setClauses = append(setClauses, fmt.Sprintf("name = $%d", len(args)))
+	}
+	if input.Code != nil {
+		code := strings.ToLower(strings.TrimSpace(*input.Code))
+		if code == "" {
+			return nil, domain.ErrProductInvalidName
+		}
+		args = append(args, code)
+		setClauses = append(setClauses, fmt.Sprintf("code = $%d", len(args)))
+	}
+	if input.Level != nil {
+		args = append(args, *input.Level)
+		setClauses = append(setClauses, fmt.Sprintf("level = $%d", len(args)))
+	}
+	if input.MaxDevices != nil {
+		if *input.MaxDevices < 1 {
+			return nil, domain.ErrProductInvalidName
+		}
+		args = append(args, *input.MaxDevices)
+		setClauses = append(setClauses, fmt.Sprintf("max_devices = $%d", len(args)))
+	}
+	if input.Status != nil {
+		if err := domain.ValidateCatalogUpdateStatus(*input.Status); err != nil {
+			return nil, err
+		}
+		args = append(args, *input.Status)
+		setClauses = append(setClauses, fmt.Sprintf("status = $%d", len(args)))
+	}
+	if len(setClauses) == 0 {
+		return s.findPlanByIDForProduct(ctx, applicationID, productID, planID)
+	}
+	setClauses = append(setClauses, "updated_at = now()")
+	args = append(args, planID, productID, applicationID)
+	plan, err := scanPlan(s.db.QueryRow(ctx, `update plans as pl set `+strings.Join(setClauses, ", ")+`
+		from products p where pl.id = $`+fmt.Sprint(len(args)-2)+`::uuid and pl.product_id = $`+fmt.Sprint(len(args)-1)+`::uuid and p.id = pl.product_id and p.application_id = $`+fmt.Sprint(len(args))+`::uuid and pl.status <> 'archived'
+		returning pl.id::text, pl.product_id::text, pl.name, pl.code, pl.level, pl.max_devices, pl.default_duration_seconds, pl.status, pl.created_at, pl.updated_at`, args...))
+	if errors.Is(err, pgx.ErrNoRows) {
+		existing, findErr := s.findPlanByIDForProduct(ctx, applicationID, productID, planID)
+		if findErr != nil {
+			return nil, findErr
+		}
+		if existing.Status == domain.CatalogStatusArchived {
+			return nil, domain.ErrCatalogRecordInactive
+		}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("update plan: %w", err)
+	}
+	return plan, nil
+}
+
+// ArchivePlan retains the plan for existing licenses and rejects the archive
+// while an active license still references it.
+func (s *Store) ArchivePlan(ctx context.Context, applicationID, productID, planID string) (*domain.Plan, error) {
+	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("begin plan archive: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	plan, err := scanPlan(tx.QueryRow(ctx, `select pl.id::text, pl.product_id::text, pl.name, pl.code, pl.level, pl.max_devices, pl.default_duration_seconds, pl.status, pl.created_at, pl.updated_at
+		from plans pl join products p on p.id = pl.product_id
+		where pl.id = $1::uuid and pl.product_id = $2::uuid and p.application_id = $3::uuid for update of pl`, planID, productID, applicationID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrPlanNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lock plan for archive: %w", err)
+	}
+	if plan.Status == domain.CatalogStatusArchived {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit unchanged plan archive: %w", err)
+		}
+		return plan, nil
+	}
+	var inUse bool
+	if err := tx.QueryRow(ctx, `select exists(select 1 from licenses where plan_id = $1::uuid and status = 'active')`, planID).Scan(&inUse); err != nil {
+		return nil, fmt.Errorf("check plan archive dependencies: %w", err)
+	}
+	if inUse {
+		return nil, domain.ErrCatalogRecordInUse
+	}
+	plan, err = scanPlan(tx.QueryRow(ctx, `update plans set status = 'archived', updated_at = now() where id = $1::uuid and product_id = $2::uuid returning `+planColumns, planID, productID))
+	if err != nil {
+		return nil, fmt.Errorf("archive plan: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit plan archive: %w", err)
+	}
+	return plan, nil
+}
+
+func (s *Store) findPlanByIDForProduct(ctx context.Context, applicationID, productID, planID string) (*domain.Plan, error) {
+	plan, err := scanPlan(s.db.QueryRow(ctx, `select pl.id::text, pl.product_id::text, pl.name, pl.code, pl.level, pl.max_devices, pl.default_duration_seconds, pl.status, pl.created_at, pl.updated_at
+		from plans pl join products p on p.id = pl.product_id
+		where pl.id = $1::uuid and pl.product_id = $2::uuid and p.application_id = $3::uuid`, planID, productID, applicationID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrPlanNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find plan by id: %w", err)
+	}
+	return plan, nil
 }
 
 func scanProduct(row pgx.Row) (*domain.Product, error) {
