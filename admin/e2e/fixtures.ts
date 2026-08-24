@@ -25,6 +25,14 @@ type ApplicationFixture = {
   authSessionId: string;
 };
 
+type OnboardingFixture = {
+  organizationName: string;
+  applicationName: string;
+  applicationSlug: string;
+  userEmail: string;
+  userPassword: string;
+};
+
 export type E2EFixture = {
   admin: AdminFixture & { totpSecret: string };
   unenrolledAdmin: AdminFixture;
@@ -36,6 +44,7 @@ export type E2EFixture = {
 
 type TestFixtures = {
   authenticatedPage: Page;
+  onboarding: OnboardingFixture;
 };
 
 type WorkerFixtures = {
@@ -136,6 +145,19 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
       e2eFixture.applications.alpha.id,
     );
     await provide(page);
+  },
+
+  // This is data for a browser-created application, not a second database
+  // seed. The worker fixture remains the only process that can reset or seed
+  // the guarded keystar_test database.
+  onboarding: async ({}, provide) => {
+    await provide({
+      organizationName: "e2e organization",
+      applicationName: "E2E Onboarding",
+      applicationSlug: "e2e-onboarding",
+      userEmail: "onboarding-user@keystar.test",
+      userPassword: "E2E-Onboarding-Password!2026",
+    });
   },
 });
 

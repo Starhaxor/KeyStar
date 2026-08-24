@@ -496,6 +496,19 @@ npm run e2e:install
 npm run e2e
 ```
 
+To verify the lifecycle and resumable-onboarding journey alone, run:
+
+```powershell
+cd admin
+npx playwright test e2e/lifecycle-onboarding.spec.ts
+```
+
+This command uses only `TEST_DATABASE_URL` and the fixture refuses any
+database other than `keystar_test`. Docker Desktop must be available so the
+test configuration can start the disposable PostgreSQL service. Ensure ports
+`5432`, `8080`, and `3000` are free first: they are used respectively by the
+database, backend, and admin web server started for the browser suite.
+
 ### Complete local Release A gate
 
 Run this sequence from a clean working tree after setting the backend

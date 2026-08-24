@@ -3,6 +3,7 @@ package integration_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -249,6 +250,91 @@ func TestServerAPIEndToEnd(t *testing.T) {
 	}
 	tenantBDetail := serverAPIRequest(t, router, http.MethodGet, "/v1/server/users/"+createdUser.Data.ID, "Bearer "+tenantBKey.Key, appB.ID, "")
 	assertIntegrationError(t, tenantBDetail, http.StatusNotFound, "USER_NOT_FOUND")
+}
+
+func TestServerAPILifecycleKeepsLicenseIssuanceScopedToActiveCatalog(t *testing.T) {
+	// A server credential may issue only into its own application, using an
+	// active product and plan. Once a license exists, the plan cannot be
+	// archived because that would strand the active entitlement.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	t.Cleanup(cancel)
+	pool := openTestPool(t, ctx)
+	resetAndMigrate(t, ctx, pool)
+	repository := store.New(pool)
+	applicationID := defaultApplicationIDForTest(t, repository)
+
+	secret, err := credential.Generate("secret", "live", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.CreateCredential(ctx, domain.NewApplicationCredential{
+		ApplicationID: applicationID, Environment: domain.CredentialEnvironmentLive,
+		CredentialType: domain.CredentialSecret, Name: "Lifecycle Ops",
+		KeyPrefix: secret.Prefix, KeyHash: secret.Hash,
+		Scopes: []string{"users.write", "licenses.write"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	router := httpapi.NewRouter(httpapi.RouterConfig{
+		Login:                service.NewLoginService(repository, "StarLoader"),
+		DeviceVerification:   newIntegrationDeviceService(t, repository, time.Now().UTC().Truncate(time.Second)),
+		DefaultApplicationID: applicationID,
+		Applications:         repository,
+		Credentials:          credential.NewVerifier(repository),
+		Server:               httpapi.ServerConfig{LicenseHMACKey: []byte("integration-license-hmac"), Product: "StarLoader"},
+		ServerStore:          repository,
+	})
+	router.MountServer(serverapi.New(router))
+	authorization := "Bearer " + secret.Key
+
+	createdUser := serverAPIRequest(t, router, http.MethodPost, "/v1/server/users", authorization, "", `{"email":"lifecycle-user@example.com","password":"lifecycle-pass-123"}`)
+	if createdUser.Code != http.StatusCreated {
+		t.Fatalf("create user status = %d, body = %s", createdUser.Code, createdUser.Body.String())
+	}
+	var user struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(createdUser.Body.Bytes(), &user); err != nil || user.Data.ID == "" {
+		t.Fatalf("create user response = %s, err = %v", createdUser.Body.String(), err)
+	}
+
+	issued := serverAPIRequest(t, router, http.MethodPost, "/v1/server/licenses", authorization, "", `{"user_id":"`+user.Data.ID+`","product":"Lifecycle Product","duration_days":7,"max_devices":1}`)
+	if issued.Code != http.StatusCreated || !strings.Contains(issued.Body.String(), `"product":"Lifecycle Product"`) {
+		t.Fatalf("active catalog issuance status = %d, body = %s", issued.Code, issued.Body.String())
+	}
+	productID, planID, err := repository.ResolveProductPlan(ctx, applicationID, "Lifecycle Product")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.ArchivePlan(ctx, applicationID, productID, planID); !errors.Is(err, domain.ErrCatalogRecordInUse) {
+		t.Fatalf("archive plan error = %v, want %v", err, domain.ErrCatalogRecordInUse)
+	}
+
+	organization, err := repository.CreateOrganization(ctx, "lifecycle other tenant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherApplication, err := repository.CreateApplication(ctx, domain.NewApplication{
+		OrganizationID: organization.ID, Name: "Lifecycle Other Tenant", Slug: "lifecycle-other-tenant",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherSecret, err := credential.Generate("secret", "live", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.CreateCredential(ctx, domain.NewApplicationCredential{
+		ApplicationID: otherApplication.ID, Environment: domain.CredentialEnvironmentLive,
+		CredentialType: domain.CredentialSecret, Name: "Other Lifecycle Ops",
+		KeyPrefix: otherSecret.Prefix, KeyHash: otherSecret.Hash,
+		Scopes: []string{"licenses.write"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assertIntegrationError(t, serverAPIRequest(t, router, http.MethodPost, "/v1/server/licenses", "Bearer "+otherSecret.Key, otherApplication.ID, `{"user_id":"`+user.Data.ID+`","product":"Lifecycle Product","duration_days":7,"max_devices":1}`), http.StatusNotFound, "USER_NOT_FOUND")
 }
 
 func TestServerDevicePolicyEndToEnd(t *testing.T) {
