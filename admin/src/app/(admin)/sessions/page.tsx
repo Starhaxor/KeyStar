@@ -5,6 +5,7 @@ import ConsoleSection, {
 } from "@/components/console/ConsoleSection";
 import EmptyState from "@/components/console/EmptyState";
 import ConfirmModal from "@/components/console/ConfirmModal";
+import SessionDetailDialog from "@/components/console/SessionDetailDialog";
 import RowActions, { type RowAction } from "@/components/console/RowActions";
 import StatusBadge from "@/components/console/StatusBadge";
 import { TableSkeleton } from "@/components/common/Skeleton";
@@ -13,6 +14,7 @@ import Pagination from "@/components/tables/Pagination";
 import SortableHeader from "@/components/tables/SortableHeader";
 import { useTableSort } from "@/hooks/useTableSort";
 import { useToast } from "@/context/ToastContext";
+import { useAdminIdentity } from "@/context/AdminIdentityContext";
 import { api, fetchAllPages, formatDateTime } from "@/lib/api";
 import type { ConsoleSession, PageResult } from "@/lib/types";
 import { TimeIcon } from "@/icons";
@@ -20,6 +22,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 export default function SessionsPage() {
   const toast = useToast();
+  const { hasPermission } = useAdminIdentity();
   const [result, setResult] = useState<PageResult<ConsoleSession> | null>(null);
   const [page, setPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
@@ -31,6 +34,8 @@ export default function SessionsPage() {
   const [revokeTarget, setRevokeTarget] = useState<ConsoleSession | null>(null);
   const [revokeBusy, setRevokeBusy] = useState(false);
   const [revokeError, setRevokeError] = useState<string | null>(null);
+  const [detailTarget, setDetailTarget] = useState<ConsoleSession | null>(null);
+  const canWriteSessions = hasPermission("sessions.write");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -202,6 +207,13 @@ export default function SessionsPage() {
                 {sortedItems.map((session) => {
                   const actions: RowAction[] = [
                     {
+                      label: "Details",
+                      tone: "info",
+                      onClick: () => setDetailTarget(session),
+                    },
+                  ];
+                  if (canWriteSessions) {
+                    actions.push({
                       label: "Revoke",
                       danger: true,
                       disabled: session.status === "revoked",
@@ -209,8 +221,8 @@ export default function SessionsPage() {
                         setRevokeError(null);
                         setRevokeTarget(session);
                       },
-                    },
-                  ];
+                    });
+                  }
                   return (
                   <tr
                     key={session.id}
@@ -270,6 +282,11 @@ export default function SessionsPage() {
         error={revokeError}
         onConfirm={handleRevoke}
         onClose={() => setRevokeTarget(null)}
+      />
+      <SessionDetailDialog
+        session={detailTarget}
+        isOpen={detailTarget !== null}
+        onClose={() => setDetailTarget(null)}
       />
     </div>
   );

@@ -384,7 +384,7 @@ export default function UserDetailPage({
                 size="sm"
                 onClick={() => setPromoteOpen(true)}
               >
-                Promote to admin
+                Make administrator
               </Button>
             )}
             {canWriteLicenses && (
@@ -429,7 +429,7 @@ export default function UserDetailPage({
                 Reset devices
               </Button>
             )}
-            {user.status === "banned" ? (
+            {canWriteUsers && (user.status === "banned" ? (
               <Button variant="success" size="sm" onClick={handleUnban} disabled={busy}>
                 Unban user
               </Button>
@@ -456,7 +456,7 @@ export default function UserDetailPage({
                   {nextStatus === "disabled" ? "Disable user" : "Enable user"}
                 </Button>
               </>
-            )}
+            ))}
           </>
         }
       />

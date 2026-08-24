@@ -15,6 +15,7 @@ import { Modal } from "@/components/ui/modal";
 import { TableSkeleton } from "@/components/common/Skeleton";
 import TimeAgo from "@/components/common/TimeAgo";
 import ConfirmModal from "@/components/console/ConfirmModal";
+import PromoteAdminModal from "@/components/console/PromoteAdminModal";
 import ResetPasswordModal from "@/components/console/ResetPasswordModal";
 import ExportCsvButton from "@/components/common/ExportCsvButton";
 import { useAdminIdentity } from "@/context/AdminIdentityContext";
@@ -56,6 +57,7 @@ function UsersContent() {
   const [revokeError, setRevokeError] = useState<string | null>(null);
 
   const [resetTarget, setResetTarget] = useState<ConsoleUser | null>(null);
+  const [promoteTarget, setPromoteTarget] = useState<ConsoleUser | null>(null);
 
   // Bulk selection
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -66,6 +68,7 @@ function UsersContent() {
   const [bulkError, setBulkError] = useState<string | null>(null);
 
   const canWrite = hasPermission("users.write");
+  const canWriteAdmins = hasPermission("admins.write");
 
   useEffect(() => {
     setPage(1);
@@ -442,11 +445,18 @@ function UsersContent() {
                 {sortedItems.map((user) => {
                   const actions: RowAction[] = [
                     {
-                      label: "View profile",
+                      label: "Detail",
                       href: `/users/${user.id}`,
                       tone: "info",
                     },
                   ];
+                  if (canWriteAdmins) {
+                    actions.push({
+                      label: "Make administrator",
+                      tone: "info",
+                      onClick: () => setPromoteTarget(user),
+                    });
+                  }
                   if (canWrite) {
                     if (user.status === "banned") {
                       actions.push({
@@ -667,6 +677,18 @@ function UsersContent() {
           await load();
           toast.success("Password reset", resetTarget.email);
           return { tempPassword: response.temp_password ?? null };
+        }}
+      />
+
+      <PromoteAdminModal
+        open={promoteTarget !== null}
+        userEmail={promoteTarget?.email ?? ""}
+        onClose={() => setPromoteTarget(null)}
+        onPromote={async (role) => {
+          if (!promoteTarget) return { tempPassword: "" };
+          const response = await api.promoteToAdmin(promoteTarget.id, role);
+          toast.success("Admin account created", promoteTarget.email);
+          return { tempPassword: response.temp_password };
         }}
       />
 

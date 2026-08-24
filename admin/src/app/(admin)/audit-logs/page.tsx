@@ -1,5 +1,7 @@
 "use client";
 import ActionBadge from "@/components/console/ActionBadge";
+import AuditDetailDialog from "@/components/console/AuditDetailDialog";
+import RowActions, { type RowAction } from "@/components/console/RowActions";
 import ConsoleSection, {
   ErrorNote,
   PageTitle,
@@ -14,6 +16,7 @@ import { useTableSort } from "@/hooks/useTableSort";
 import { api, formatDateTime } from "@/lib/api";
 import type { AuditEntry, PageResult } from "@/lib/types";
 import { ListIcon } from "@/icons";
+import Link from "next/link";
 import React, { useCallback, useEffect, useState } from "react";
 
 export default function AuditLogsPage() {
@@ -23,6 +26,7 @@ export default function AuditLogsPage() {
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [detailTarget, setDetailTarget] = useState<AuditEntry | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -99,7 +103,7 @@ export default function AuditLogsPage() {
         }
       >
         {loading && !error ? (
-          <TableSkeleton rows={6} cols={5} />
+          <TableSkeleton rows={6} cols={6} />
         ) : error ? (
           <ErrorNote message={error} />
         ) : !result || items.length === 0 ? (
@@ -126,6 +130,7 @@ export default function AuditLogsPage() {
                   <SortableHeader label="Admin" sortKey="admin" sort={sort} onToggle={toggleSort} />
                   <th className="px-5 py-3 font-medium">Resource</th>
                   <th className="px-5 py-3 font-medium">Details</th>
+                  <th className="px-5 py-3 font-medium text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -146,15 +151,20 @@ export default function AuditLogsPage() {
                     <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">
                       {entry.resource_type}
                       {entry.resource_id ? (
-                        <span className="ml-1.5 font-mono text-xs text-gray-400">
-                          {entry.resource_id.slice(0, 13)}…
-                        </span>
+                        entry.resource_type === "user" ? (
+                          <Link href={`/users/${entry.resource_id}`} className="ml-1.5 font-mono text-xs text-brand-500 hover:text-brand-600 dark:text-brand-400">
+                            {entry.resource_id.slice(0, 13)}…
+                          </Link>
+                        ) : <span className="ml-1.5 font-mono text-xs text-gray-400">{entry.resource_id.slice(0, 13)}…</span>
                       ) : null}
                     </td>
-                    <td className="max-w-xs truncate px-5 py-3.5 font-mono text-xs text-gray-400 dark:text-gray-500">
-                      {Object.keys(entry.metadata ?? {}).length > 0
-                        ? JSON.stringify(entry.metadata)
-                        : "—"}
+                    <td className="px-5 py-3.5 text-xs text-gray-400 dark:text-gray-500">
+                      {Object.keys(entry.metadata ?? {}).length > 0 ? "Metadata available" : "—"}
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <div className="flex justify-end">
+                        <RowActions actions={[{ label: "Details", tone: "info", onClick: () => setDetailTarget(entry) } satisfies RowAction]} />
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -172,6 +182,11 @@ export default function AuditLogsPage() {
           </>
         )}
       </ConsoleSection>
+      <AuditDetailDialog
+        entry={detailTarget}
+        isOpen={detailTarget !== null}
+        onClose={() => setDetailTarget(null)}
+      />
     </div>
   );
 }
