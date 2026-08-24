@@ -1550,10 +1550,7 @@ type auditEntryJSON struct {
 func mapAuditEntries(logs []domain.AuditLog) []auditEntryJSON {
 	items := make([]auditEntryJSON, 0, len(logs))
 	for _, entry := range logs {
-		metadata := entry.Metadata
-		if len(metadata) == 0 {
-			metadata = json.RawMessage("{}")
-		}
+		metadata := sanitizeAuditMetadata(entry.Metadata)
 		items = append(items, auditEntryJSON{
 			ID:             entry.ID,
 			AdminAccountID: entry.AdminAccountID,
@@ -1567,6 +1564,43 @@ func mapAuditEntries(logs []domain.AuditLog) []auditEntryJSON {
 		})
 	}
 	return items
+}
+
+var safeLifecycleAuditFields = map[string]struct{}{
+	"name": {}, "slug": {}, "status": {}, "environment_mode": {},
+	"code": {}, "level": {}, "max_devices": {},
+}
+
+// sanitizeAuditMetadata exposes only the before/after fields used by
+// application and catalog lifecycle audits. Persisted audit metadata can have
+// originated from older handlers, so it is treated as untrusted at the API
+// boundary even for audit.read callers.
+func sanitizeAuditMetadata(raw json.RawMessage) json.RawMessage {
+	var source map[string]json.RawMessage
+	if len(raw) == 0 || json.Unmarshal(raw, &source) != nil {
+		return json.RawMessage("{}")
+	}
+	safe := make(map[string]map[string]json.RawMessage, 2)
+	for _, side := range []string{"before", "after"} {
+		var state map[string]json.RawMessage
+		if json.Unmarshal(source[side], &state) != nil {
+			continue
+		}
+		filtered := make(map[string]json.RawMessage)
+		for field, value := range state {
+			if _, allowed := safeLifecycleAuditFields[field]; allowed {
+				filtered[field] = value
+			}
+		}
+		if len(filtered) != 0 {
+			safe[side] = filtered
+		}
+	}
+	encoded, err := json.Marshal(safe)
+	if err != nil {
+		return json.RawMessage("{}")
+	}
+	return encoded
 }
 
 func (router *Router) handleAdminAuditLogs(writer http.ResponseWriter, request *http.Request) {

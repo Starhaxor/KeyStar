@@ -119,12 +119,27 @@ func (router *Router) serveAdmin(writer http.ResponseWriter, request *http.Reque
 		httpapi.WriteError(writer, request, http.StatusForbidden, "MFA_ENROLLMENT_REQUIRED", "multi-factor authentication enrollment is required")
 		return
 	}
+	// Application lifecycle recovery cannot depend on the operational state of
+	// the default application: otherwise disabling that application would lock
+	// operators out of listing or restoring it. The exception remains limited
+	// to the platform-scoped list and named transition routes; every
+	// application-scoped admin operation still resolves an active tenant.
+	if isApplicationLifecycleRecoveryRoute(path, request.Method) {
+		router.routeAdmin(writer, request, session, account, path)
+		return
+	}
 	principal, applicationOK := router.ResolveApplication(writer, request)
 	if !applicationOK {
 		return
 	}
 	request = request.WithContext(withAdminApplicationID(request.Context(), principal.ApplicationID))
 	router.routeAdmin(writer, request, session, account, path)
+}
+
+func isApplicationLifecycleRecoveryRoute(path, method string) bool {
+	segments := splitAdminPath(path)
+	return (len(segments) == 1 && segments[0] == "applications" && method == http.MethodGet) ||
+		(len(segments) == 3 && segments[0] == "applications" && segments[2] == "transition" && method == http.MethodPost)
 }
 
 // adminEnrollmentExempt lists the routes an unenrolled administrator may

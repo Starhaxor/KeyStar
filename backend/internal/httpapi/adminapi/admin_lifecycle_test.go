@@ -138,9 +138,21 @@ func (f *fakeLifecycleConsole) CreateApplication(_ context.Context, _ domain.New
 }
 
 func newAdminLifecycleTestRouter(auth *fakeAdminAuth, console *fakeLifecycleConsole) *Router {
+	return newAdminLifecycleTestRouterWithResolver(auth, console, fakeAdminApplicationResolver{})
+}
+
+type lifecycleStatusResolver struct {
+	status domain.ApplicationStatus
+}
+
+func (resolver lifecycleStatusResolver) FindApplicationByID(_ context.Context, applicationID string) (*domain.Application, error) {
+	return &domain.Application{ID: applicationID, OrganizationID: "org-id", Status: resolver.status}, nil
+}
+
+func newAdminLifecycleTestRouterWithResolver(auth *fakeAdminAuth, console *fakeLifecycleConsole, resolver httpapi.ApplicationResolver) *Router {
 	core := httpapi.NewRouter(httpapi.RouterConfig{
 		DefaultApplicationID: "019c1111-1111-7111-8111-111111111111",
-		Applications:         fakeAdminApplicationResolver{},
+		Applications:         resolver,
 		Admin: httpapi.AdminConfig{
 			Auth: auth, Console: console, AllowedOrigins: []string{"http://localhost:3000"},
 			CSRFSecret: []byte("test-csrf-secret"), SessionTTL: time.Hour,
@@ -379,6 +391,68 @@ func TestAdminApplicationTransitionAuditsSuccess(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
 	assertLifecycleAudit(t, console, "APPLICATION_TRANSITIONED", "application-2")
+}
+
+func TestAdminApplicationListRemainsReachableWhenDefaultApplicationDisabled(t *testing.T) {
+	console := &fakeLifecycleConsole{application: &domain.Application{ID: "019c1111-1111-7111-8111-111111111111", Status: domain.ApplicationStatusDisabled}}
+	router := newAdminLifecycleTestRouterWithResolver(&fakeAdminAuth{token: "session-token", account: testOwnerAccount()}, console, lifecycleStatusResolver{status: domain.ApplicationStatusDisabled})
+	recorder := httptest.NewRecorder()
+
+	router.serveAdmin(recorder, lifecycleRequest(t, router, http.MethodGet, "/v1/admin/applications", ""))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestAdminApplicationTransitionCanRestoreDisabledDefaultApplication(t *testing.T) {
+	const defaultApplicationID = "019c1111-1111-7111-8111-111111111111"
+	console := &fakeLifecycleConsole{application: &domain.Application{ID: defaultApplicationID, Status: domain.ApplicationStatusDisabled}}
+	router := newAdminLifecycleTestRouterWithResolver(&fakeAdminAuth{token: "session-token", account: testOwnerAccount()}, console, lifecycleStatusResolver{status: domain.ApplicationStatusDisabled})
+	recorder := httptest.NewRecorder()
+
+	router.serveAdmin(recorder, lifecycleRequest(t, router, http.MethodPost, "/v1/admin/applications/"+defaultApplicationID+"/transition", `{"status":"active"}`))
+
+	if recorder.Code != http.StatusOK || console.transitionApplicationID != defaultApplicationID {
+		t.Fatalf("status = %d, transition application = %q, body = %s", recorder.Code, console.transitionApplicationID, recorder.Body.String())
+	}
+}
+
+func TestAdminDisabledDefaultStillBlocksCatalogMutation(t *testing.T) {
+	console := &fakeLifecycleConsole{product: &domain.Product{ID: "product-2", ApplicationID: "019c1111-1111-7111-8111-111111111111", Status: domain.CatalogStatusActive}}
+	router := newAdminLifecycleTestRouterWithResolver(&fakeAdminAuth{token: "session-token", account: testOwnerAccount()}, console, lifecycleStatusResolver{status: domain.ApplicationStatusDisabled})
+	recorder := httptest.NewRecorder()
+
+	router.serveAdmin(recorder, lifecycleRequest(t, router, http.MethodPost, "/v1/admin/products/product-2/archive", ""))
+
+	if recorder.Code != http.StatusForbidden || console.archiveProductCalls != 0 {
+		t.Fatalf("status = %d, archive calls = %d, body = %s", recorder.Code, console.archiveProductCalls, recorder.Body.String())
+	}
+}
+
+func TestAuditLogResponsesAllowOnlySafeLifecycleMetadata(t *testing.T) {
+	items := mapAuditEntries([]domain.AuditLog{{
+		Metadata: json.RawMessage(`{"before":{"name":"Portal","slug":"portal","status":"active","api_key":"secret"},"after":{"status":"disabled","max_devices":3,"token":"secret"},"password":"secret"}`),
+	}})
+	if len(items) != 1 {
+		t.Fatalf("items = %#v", items)
+	}
+	var metadata map[string]map[string]any
+	if err := json.Unmarshal(items[0].Metadata, &metadata); err != nil {
+		t.Fatalf("unmarshal metadata: %v", err)
+	}
+	if metadata["before"]["name"] != "Portal" || metadata["before"]["slug"] != "portal" || metadata["after"]["status"] != "disabled" || metadata["after"]["max_devices"] != float64(3) {
+		t.Fatalf("safe lifecycle metadata = %#v", metadata)
+	}
+	if _, exists := metadata["password"]; exists {
+		t.Fatalf("metadata leaked top-level secret: %#v", metadata)
+	}
+	if _, exists := metadata["before"]["api_key"]; exists {
+		t.Fatalf("metadata leaked before secret: %#v", metadata)
+	}
+	if _, exists := metadata["after"]["token"]; exists {
+		t.Fatalf("metadata leaked after secret: %#v", metadata)
+	}
 }
 
 func TestAdminProductPatchAuditsSuccess(t *testing.T) {

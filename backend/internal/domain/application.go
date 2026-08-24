@@ -79,6 +79,7 @@ var (
 	ErrInvalidApplicationUpdate     = errors.New("application name and slug must not be empty")
 	ErrInvalidApplicationTransition = errors.New("application status must be active, maintenance or disabled")
 	ErrApplicationInUse             = &ConflictError{ConflictCode: "APPLICATION_IN_USE", Message: "application has active dependent records"}
+	ErrApplicationInactive          = &ConflictError{ConflictCode: "APPLICATION_INACTIVE", Message: "application is not active"}
 )
 
 // ValidateApplicationTransition limits lifecycle transitions to operational

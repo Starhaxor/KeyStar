@@ -37,7 +37,7 @@ func TestUpdateProductToInactiveRejectsActiveDependencies(t *testing.T) {
 func TestUpdatePlanRejectsReactivationUnderArchivedProduct(t *testing.T) {
 	active := domain.CatalogStatusActive
 	tx := &lifecycleContractTx{rows: []pgx.Row{
-		contractRow{values: []any{domain.CatalogStatusArchived, domain.CatalogStatusInactive}},
+		contractRow{values: []any{domain.ApplicationStatusActive, domain.CatalogStatusArchived, domain.CatalogStatusInactive}},
 	}}
 	db := &lifecycleContractDB{
 		tx: tx,
@@ -54,7 +54,7 @@ func TestUpdatePlanRejectsReactivationUnderArchivedProduct(t *testing.T) {
 func TestUpdatePlanToInactiveRejectsActiveLicenses(t *testing.T) {
 	inactive := domain.CatalogStatusInactive
 	tx := &lifecycleContractTx{rows: []pgx.Row{
-		contractRow{values: []any{domain.CatalogStatusActive, domain.CatalogStatusActive}},
+		contractRow{values: []any{domain.ApplicationStatusActive, domain.CatalogStatusActive, domain.CatalogStatusActive}},
 		contractRow{values: []any{true}},
 	}}
 	db := &lifecycleContractDB{tx: tx}
@@ -101,6 +101,48 @@ func TestCreateLicenseRejectsIneligibleCatalogRows(t *testing.T) {
 				t.Fatal("CreateLicense must require active product and plan rows")
 			}
 		})
+	}
+}
+
+func TestResolveProductPlanRejectsProductArchivedDuringDefaultPlanCreation(t *testing.T) {
+	db := &lifecycleContractDB{rows: []pgx.Row{
+		contractRow{err: pgx.ErrNoRows},
+		contractRow{values: []any{"product-1", domain.CatalogStatusActive}},
+		contractRow{err: pgx.ErrNoRows},
+		contractRow{values: []any{domain.CatalogStatusArchived}},
+	}}
+
+	_, _, err := New(db).ResolveProductPlan(context.Background(), "application-1", "Product")
+	if !errors.Is(err, domain.ErrCatalogRecordInactive) {
+		t.Fatalf("ResolveProductPlan() error = %v, want %v", err, domain.ErrCatalogRecordInactive)
+	}
+	if len(db.queries) < 3 || !strings.Contains(db.queries[2].sql, "status = 'active'") || !strings.Contains(db.queries[2].sql, "for key share") {
+		t.Fatal("default plan creation must lock and require an active product")
+	}
+}
+
+func TestUpdateProductActivationRequiresActiveApplication(t *testing.T) {
+	active := domain.CatalogStatusActive
+	tx := &lifecycleContractTx{rows: []pgx.Row{contractRow{values: []any{domain.ApplicationStatusDisabled}}}}
+	db := &lifecycleContractDB{tx: tx, rows: []pgx.Row{productContractRow(domain.CatalogStatusActive)}}
+
+	_, err := New(db).UpdateProduct(context.Background(), "application-1", "product-1", domain.UpdateProduct{Status: &active})
+	if !errors.Is(err, domain.ErrApplicationInactive) {
+		t.Fatalf("UpdateProduct(active) error = %v, want %v", err, domain.ErrApplicationInactive)
+	}
+	if len(tx.queries) != 1 || !strings.Contains(tx.queries[0].sql, "applications") || !strings.Contains(tx.queries[0].sql, "for update") {
+		t.Fatal("product activation must lock its parent application")
+	}
+}
+
+func TestUpdatePlanActivationRequiresActiveApplication(t *testing.T) {
+	active := domain.CatalogStatusActive
+	tx := &lifecycleContractTx{rows: []pgx.Row{contractRow{values: []any{domain.ApplicationStatusDisabled, domain.CatalogStatusActive, domain.CatalogStatusInactive}}}}
+	db := &lifecycleContractDB{tx: tx}
+
+	_, err := New(db).UpdatePlan(context.Background(), "application-1", "product-1", "plan-1", domain.UpdatePlan{Status: &active})
+	if !errors.Is(err, domain.ErrApplicationInactive) {
+		t.Fatalf("UpdatePlan(active) error = %v, want %v", err, domain.ErrApplicationInactive)
 	}
 }
 

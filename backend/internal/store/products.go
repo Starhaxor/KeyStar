@@ -60,10 +60,24 @@ func (s *Store) findOrCreateDefaultPlan(ctx context.Context, productID string) (
 	var planID string
 	err := s.db.QueryRow(ctx, `
 		insert into plans (product_id, name, code, level, max_devices)
-		values ($1, 'Default', 'default', 1, 1)
+		select id, 'Default', 'default', 1, 1
+		from products
+		where id = $1::uuid and status = 'active'
+		for key share
 		on conflict (product_id, code) do nothing
 		returning id::text`, productID).Scan(&planID)
 	if errors.Is(err, pgx.ErrNoRows) {
+		var productStatus domain.CatalogStatus
+		productErr := s.db.QueryRow(ctx, `select status from products where id = $1::uuid`, productID).Scan(&productStatus)
+		if errors.Is(productErr, pgx.ErrNoRows) {
+			return "", domain.ErrProductNotFound
+		}
+		if productErr != nil {
+			return "", fmt.Errorf("find product for default plan: %w", productErr)
+		}
+		if productStatus != domain.CatalogStatusActive {
+			return "", domain.ErrCatalogRecordInactive
+		}
 		// The default plan already exists; archived and inactive plans remain
 		// historical records rather than being recreated.
 		var status domain.CatalogStatus
@@ -224,6 +238,9 @@ func (s *Store) UpdateProduct(ctx context.Context, applicationID, productID stri
 	if input.Status != nil && *input.Status == domain.CatalogStatusInactive {
 		return s.updateProductToInactive(ctx, applicationID, productID, setClauses, args)
 	}
+	if input.Status != nil && *input.Status == domain.CatalogStatusActive {
+		return s.updateProductToActive(ctx, applicationID, productID, setClauses, args)
+	}
 	setClauses = append(setClauses, "updated_at = now()")
 	args = append(args, productID, applicationID)
 	product, err := scanProduct(s.db.QueryRow(ctx, `update products set `+strings.Join(setClauses, ", ")+` where id = $`+fmt.Sprint(len(args)-1)+`::uuid and application_id = $`+fmt.Sprint(len(args))+`::uuid and status <> 'archived' returning `+productColumns, args...))
@@ -238,6 +255,40 @@ func (s *Store) UpdateProduct(ctx context.Context, applicationID, productID stri
 	}
 	if err != nil {
 		return nil, fmt.Errorf("update product: %w", err)
+	}
+	return product, nil
+}
+
+func (s *Store) updateProductToActive(ctx context.Context, applicationID, productID string, setClauses []string, args []any) (*domain.Product, error) {
+	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("begin product activation: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var applicationStatus domain.ApplicationStatus
+	err = tx.QueryRow(ctx, `select a.status from applications a
+		join products p on p.application_id = a.id
+		where p.id = $1::uuid and p.application_id = $2::uuid for update of a, p`, productID, applicationID).Scan(&applicationStatus)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrProductNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lock application for product activation: %w", err)
+	}
+	if applicationStatus != domain.ApplicationStatusActive {
+		return nil, domain.ErrApplicationInactive
+	}
+	setClauses = append(setClauses, "updated_at = now()")
+	args = append(args, productID, applicationID)
+	product, err := scanProduct(tx.QueryRow(ctx, `update products set `+strings.Join(setClauses, ", ")+` where id = $`+fmt.Sprint(len(args)-1)+`::uuid and application_id = $`+fmt.Sprint(len(args))+`::uuid and status <> 'archived' returning `+productColumns, args...))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrCatalogRecordInactive
+	}
+	if err != nil {
+		return nil, fmt.Errorf("activate product: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit product activation: %w", err)
 	}
 	return product, nil
 }
@@ -367,16 +418,21 @@ func (s *Store) UpdatePlan(ctx context.Context, applicationID, productID, planID
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	var applicationStatus domain.ApplicationStatus
 	var productStatus, planStatus domain.CatalogStatus
-	err = tx.QueryRow(ctx, `select p.status, pl.status
+	err = tx.QueryRow(ctx, `select a.status, p.status, pl.status
 		from plans pl join products p on p.id = pl.product_id
+		join applications a on a.id = p.application_id
 		where pl.id = $1::uuid and pl.product_id = $2::uuid and p.application_id = $3::uuid
-		for update of p, pl`, planID, productID, applicationID).Scan(&productStatus, &planStatus)
+		for update of a, p, pl`, planID, productID, applicationID).Scan(&applicationStatus, &productStatus, &planStatus)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return s.findPlanByIDForProduct(ctx, applicationID, productID, planID)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("lock plan for update: %w", err)
+	}
+	if applicationStatus != domain.ApplicationStatusActive {
+		return nil, domain.ErrApplicationInactive
 	}
 	if productStatus != domain.CatalogStatusActive || planStatus == domain.CatalogStatusArchived {
 		return nil, domain.ErrCatalogRecordInactive
