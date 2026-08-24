@@ -4,9 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"net/url"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -37,13 +35,12 @@ func openTestPool(t *testing.T, ctx context.Context) *pgxpool.Pool {
 }
 
 func validateIntegrationDatabaseURL(databaseURL string) error {
-	parsed, err := url.Parse(databaseURL)
+	config, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return fmt.Errorf("parse TEST_DATABASE_URL: %w", err)
 	}
-	databaseName := strings.TrimPrefix(parsed.Path, "/")
-	if databaseName != "keystar_test" {
-		return fmt.Errorf("integration database = %q, want dedicated database %q", databaseName, "keystar_test")
+	if config.ConnConfig.Database != "keystar_test" {
+		return fmt.Errorf("integration database = %q, want dedicated database %q", config.ConnConfig.Database, "keystar_test")
 	}
 	return nil
 }

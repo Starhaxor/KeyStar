@@ -28,6 +28,8 @@ func TestIntegrationDatabaseURLRejectsNonDedicatedDatabases(t *testing.T) {
 	}{
 		{name: "development database", databaseURL: "postgres://user:password@localhost:5432/keystar?sslmode=disable", wantError: true},
 		{name: "another database", databaseURL: "postgres://user:password@localhost:5432/customer_data?sslmode=disable", wantError: true},
+		{name: "dbname query override", databaseURL: "postgres://user:password@localhost:5432/keystar_test?dbname=keystar&sslmode=disable", wantError: true},
+		{name: "database query override", databaseURL: "postgres://user:password@localhost:5432/keystar_test?database=keystar&sslmode=disable", wantError: true},
 		{name: "dedicated database", databaseURL: "postgres://keystar_test:keystar_test@localhost:5432/keystar_test?sslmode=disable", wantError: false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
