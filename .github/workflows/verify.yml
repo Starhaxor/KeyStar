@@ -8,6 +8,36 @@ permissions:
   contents: read
 
 jobs:
+  documentation:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify README release-gate instructions
+        shell: pwsh
+        run: |
+          $readme = Get-Content -Raw README.md
+          $requiredCommands = @(
+            'docker compose up -d db',
+            'test-integration.ps1',
+            'npm run e2e',
+            'cmake -S backend/sdk/cpp'
+          )
+          $requiredEnvironment = @(
+            'DATABASE_URL',
+            'LICENSE_HMAC_KEY',
+            'HARDWARE_HMAC_KEY',
+            'ED25519_PRIVATE_KEY',
+            'LICENSE_ISSUER',
+            'LICENSE_AUDIENCE',
+            'PRODUCT',
+            'ADMIN_SESSION_SECRET',
+            'TEST_DATABASE_URL'
+          )
+          $missing = @($requiredCommands + $requiredEnvironment | Where-Object { -not $readme.Contains($_) })
+          if ($missing.Count -gt 0) {
+            throw "README missing required verification documentation: $($missing -join ', ')"
+          }
+
   backend:
     runs-on: ubuntu-latest
     services:

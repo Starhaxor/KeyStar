@@ -15,6 +15,34 @@ The work is deliberately split into independently shippable releases. A later re
 3. Establish an accessible console foundation. Inputs have programmatic labels, icon-only controls have names, overlays use a single accessible dialog primitive with focus capture/restore, toasts announce updates, motion honors user preferences, and each route has loading and error recovery.
 4. Add browser E2E coverage for authentication, MFA enrollment, application selection, user/license/device operations, and destructive-action confirmation.
 
+#### Release A handoff status (2026-08-24)
+
+Delivered implementation components:
+
+- Windows C++ SDK CMake/CTest boundary with the WinHTTP transport and DPAPI
+  token-store target, plus CI coverage on `windows-latest`.
+- Docker Compose PostgreSQL 15 topology, guarded Go integration runners, and
+  GitHub Actions backend/admin/SDK verification jobs.
+- Accessible console foundation: labelled fields and named controls,
+  focus-managed dialogs, toast announcements, reduced-motion support, and
+  loading/error recovery shells.
+- Playwright coverage for authentication/MFA, active-application isolation,
+  destructive-action confirmation, and dialog keyboard behavior.
+- A README-backed, CI-enforced local verification gate covering environment
+  prerequisites, integration tests, SDK CMake/CTest, frontend checks, and
+  browser E2E setup.
+
+Full Release A gate verification is blocked in the current local environment:
+Docker Desktop is unavailable, so `docker compose up -d db`, the PostgreSQL
+integration suite, and Compose-backed `npm run e2e` cannot complete. The
+release is therefore **not marked delivered or all-green**. The documented
+gate and CI remain the required completion evidence once a Docker-capable
+environment runs every command successfully.
+
+Release B and Release C remain intentionally deferred; no lifecycle,
+onboarding, self-service account, offline-lease, or additional SDK delivery is
+included in this handoff.
+
 ### Release B: Console completion
 
 1. Extend organizations and applications from create/list to an explicit lifecycle: edit names/slugs, set active/maintenance/disabled state, and archive only when the server proves the operation is safe. Application actions remain fully audited.
@@ -92,7 +120,11 @@ The default CI service is GitHub Actions. Docker Compose provides the same datab
 
 ## Acceptance criteria
 
-- A fresh checkout can start dependencies, run the complete quality gate, and build the C++ SDK on Windows without manual source edits.
+- Release A status: the fresh-checkout quality-gate commands and Windows SDK
+  CMake/CTest path are documented and enforced in CI, but the complete local
+  gate remains unverified until a Docker-capable environment successfully runs
+  the PostgreSQL integration and Playwright commands. Do not treat Release A
+  as delivered or all-green before that evidence exists.
 - An operator can create, edit, state-transition, and archive application/catalog records safely, with audit records.
 - A new application can complete onboarding and reach a verified test license without consulting source code.
 - Core console flows are keyboard accessible and protected by E2E tests.

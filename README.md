@@ -255,6 +255,10 @@ Official competitor references: [KeyAuth user and HWID management](https://docs.
 - PostgreSQL 15 or later
 - Node.js 20 or later
 - npm
+- Docker Desktop with Docker Compose v2 (required for the disposable
+  PostgreSQL integration and browser-test database)
+- CMake 3.20 or later and the Visual Studio 2022 C++ build tools on Windows
+  (required to build the supported Windows C++ SDK target)
 
 ### 1. Configure the backend
 
@@ -455,14 +459,75 @@ Run the integration runner again after the service is healthy. Do not point
 `TEST_DATABASE_URL` at a development database; the suite accepts only the
 dedicated `keystar_test` database.
 
+### C++ SDK (Windows)
+
+From the repository root, configure, build, and test the Windows SDK with the
+Visual Studio C++ toolchain:
+
+```powershell
+cmake -S backend/sdk/cpp -B build/sdk -DKEYSTAR_BUILD_TESTS=ON -G "Visual Studio 17 2022" -A x64
+cmake --build build/sdk --config Release
+ctest --test-dir build/sdk -C Release --output-on-failure
+```
+
+The Windows build uses WinHTTP for transport and DPAPI for token storage.
+Other platform storage targets remain explicitly unsupported until their
+separate SDK work is delivered.
+
 ### Administration console
 
 ```powershell
 cd admin
+npm ci
 npm test
 npm run lint
 npm run build
 ```
+
+### Browser end-to-end tests
+
+Install the pinned Playwright Chromium browser once, then run the browser
+suite from `admin`. The test configuration starts the dedicated Compose
+database locally and never falls back to `DATABASE_URL`.
+
+```powershell
+cd admin
+npm run e2e:install
+npm run e2e
+```
+
+### Complete local Release A gate
+
+Run this sequence from a clean working tree after setting the backend
+environment values listed above. The integration runner sets its own
+test-only `TEST_DATABASE_URL`; do not override it with a development database.
+
+```powershell
+docker compose up -d db
+.\scripts\test-integration.ps1
+
+cd backend
+go test ./...
+
+cd ..
+cmake -S backend/sdk/cpp -B build/sdk -DKEYSTAR_BUILD_TESTS=ON -G "Visual Studio 17 2022" -A x64
+cmake --build build/sdk --config Release
+ctest --test-dir build/sdk -C Release --output-on-failure
+
+cd admin
+npm test
+npm run lint
+npm run build
+npm run e2e
+```
+
+When the gate is finished, retain the database for failure inspection or stop
+it with `docker compose down`. Use `docker compose down -v` only when a full
+test-database reset is intended; it removes the named local PostgreSQL volume.
+
+The local commands above are the release evidence. A Release A handoff is not
+complete until every command, including the Docker-backed integration and
+browser suites, exits successfully in the target environment.
 
 ---
 
