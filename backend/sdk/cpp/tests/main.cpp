@@ -5,6 +5,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 
 // Forward declarations of test suites.
 void run_transport_tests();

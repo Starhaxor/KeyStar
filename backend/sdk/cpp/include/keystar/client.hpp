@@ -11,6 +11,12 @@
 
 namespace keystar {
 
+/// Create the platform's default HTTP transport.
+std::shared_ptr<Transport> createDefaultTransport();
+
+/// Create the platform's secure persistent token store.
+std::shared_ptr<TokenStore> createPlatformTokenStore(const std::string& appId);
+
 /// Client is the main entry point for the KeyStar C++ SDK. It manages
 /// authentication, device verification, token refresh and user profile
 /// retrieval.
@@ -58,7 +64,7 @@ public:
     bool logout();
 
     /// Returns true if a valid session exists (access token or refresh token).
-    bool isAuthenticated() const;
+    bool isAuthenticated() const noexcept;
 
     /// Access the current access token (empty if not authenticated).
     std::string accessToken() const;

@@ -213,6 +213,7 @@ bool Client::logout() {
 }
 
 bool Client::isAuthenticated() const noexcept {
+    std::lock_guard lock(mutex_);
     return !accessToken_.empty() || !refreshToken_.empty();
 }
 

@@ -2,6 +2,8 @@
 
 #include "keystar/token_store.hpp"
 
+#include <memory>
+
 // POSIX (Linux/macOS) token store implementation.
 //
 // macOS: Uses Security.framework Keychain (SecKeychainAddGenericPassword,

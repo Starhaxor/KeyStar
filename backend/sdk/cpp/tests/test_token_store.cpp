@@ -1,8 +1,9 @@
-#include "keystar/token_store.hpp"
+#include "keystar/client.hpp"
 
 #include <cassert>
 #include <cstdio>
 #include <memory>
+#include <stdexcept>
 
 namespace {
 
@@ -91,6 +92,28 @@ void testTokenStoreOverwrite() {
     printf("  PASS testTokenStoreOverwrite\n");
 }
 
+#ifdef _WIN32
+void testDpapiStoreRoundTripsASession() {
+    auto store = keystar::createPlatformTokenStore("keystar-sdk-test-unique-id");
+    keystar::StoredSession session{.refresh_token = "test-refresh", .user_id = "user"};
+
+    if (!store || !store->save(session)) {
+        throw std::runtime_error("DPAPI store did not save the session");
+    }
+
+    auto loaded = store->load();
+    if (!loaded || loaded->refresh_token != "test-refresh") {
+        throw std::runtime_error("DPAPI store did not load the saved session");
+    }
+
+    if (!store->clear()) {
+        throw std::runtime_error("DPAPI store did not clear the session");
+    }
+
+    printf("  PASS testDpapiStoreRoundTripsASession\n");
+}
+#endif
+
 }  // namespace
 
 void run_token_store_tests() {
@@ -99,5 +122,8 @@ void run_token_store_tests() {
     testTokenStoreLoadEmpty();
     testTokenStoreClear();
     testTokenStoreOverwrite();
+#ifdef _WIN32
+    testDpapiStoreRoundTripsASession();
+#endif
     printf("  All token store tests passed.\n");
 }

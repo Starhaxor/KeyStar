@@ -14,17 +14,20 @@ set(KESTARCH_SOURCES
     src/auth.cpp
     src/device_verify.cpp
     src/error.cpp
-    src/transport_curl.cpp
     src/json_parser.cpp
-    src/token_store.cpp
 )
 
 # Platform-specific sources
 if(WIN32)
-    list(APPEND KESTARCH_SOURCES src/platform/transport_winhttp.cpp)
-    list(APPEND KESTARCH_SOURCES src/platform/token_store_dpapi.cpp)
+    list(APPEND KESTARCH_SOURCES
+        src/platform/transport_winhttp.cpp
+        src/platform/token_store_dpapi.cpp
+    )
 else()
-    list(APPEND KESTARCH_SOURCES src/platform/token_store_posix.cpp)
+    list(APPEND KESTARCH_SOURCES
+        src/transport_curl.cpp
+        src/platform/token_store_posix.cpp
+    )
 endif()
 
 # ── Library ──────────────────────────────────────────────────────────────────
@@ -33,7 +36,7 @@ target_include_directories(keystar PUBLIC include)
 
 # Dependencies
 if(WIN32)
-    target_link_libraries(keystar PRIVATE winhttp crypt32)
+    target_link_libraries(keystar PRIVATE winhttp crypt32 advapi32)
 else()
     find_package(CURL REQUIRED)
     target_link_libraries(keystar PRIVATE CURL::libcurl)

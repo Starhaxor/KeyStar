@@ -1,7 +1,8 @@
-#include "keystar/transport.hpp"
+#include "keystar/client.hpp"
 
 #include <cassert>
 #include <cstdio>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -64,11 +65,24 @@ void testHttpResponseOk() {
     printf("  PASS testHttpResponseOk\n");
 }
 
+#ifdef _WIN32
+void testDefaultWindowsTransportIsAvailable() {
+    if (!keystar::createDefaultTransport()) {
+        throw std::runtime_error("default Windows transport is unavailable");
+    }
+
+    printf("  PASS testDefaultWindowsTransportIsAvailable\n");
+}
+#endif
+
 }  // namespace
 
 void run_transport_tests() {
     printf("Running transport tests...\n");
     testFakeTransportRecordsRequests();
     testHttpResponseOk();
+#ifdef _WIN32
+    testDefaultWindowsTransportIsAvailable();
+#endif
     printf("  All transport tests passed.\n");
 }
