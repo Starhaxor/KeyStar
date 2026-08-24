@@ -1,7 +1,7 @@
 "use client";
 
 import ConfirmModal from "@/components/console/ConfirmModal";
-import { EmptyNote, ErrorNote, LoadingNote, PageTitle } from "@/components/console/ConsoleSection";
+import { EmptyNote, ErrorNote, LoadingNote, PageTitle, TableCard } from "@/components/console/ConsoleSection";
 import TimeAgo from "@/components/common/TimeAgo";
 import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
@@ -91,14 +91,14 @@ export default function CredentialsPage() {
     <>
       <PageTitle title="API Credentials" description="Create and revoke application keys. Secret keys are shown only once." actions={<Button size="sm" onClick={() => setCreateOpen(true)}>Create credential</Button>} />
       {error && <div className="mb-4"><ErrorNote message={error} /></div>}
-      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
+      <TableCard>
         {loading ? <LoadingNote /> : items.length === 0 ? <EmptyNote message="No credentials have been created for this application." /> : (
           <table className="min-w-full text-left text-sm">
             <thead className="border-b border-gray-200 text-xs uppercase text-gray-500 dark:border-gray-800"><tr><th className="px-5 py-3">Name</th><th>Type</th><th>Prefix</th><th>Scopes</th><th>Status</th><th>Last used</th><th className="px-5 py-3 text-right">Action</th></tr></thead>
             <tbody>{items.map((item) => <tr key={item.id} className="border-b border-gray-100 dark:border-gray-800"><td className="px-5 py-4 font-medium">{item.name}<div className="text-xs text-gray-500">{item.environment}</div></td><td>{item.type}</td><td><code>{item.key_prefix}</code></td><td className="max-w-xs truncate">{item.scopes.join(", ")}</td><td>{item.status}</td><td className="whitespace-nowrap px-5 py-4 text-gray-500 dark:text-gray-400"><TimeAgo value={item.last_used_at} /></td><td className="px-5 text-right"><div className="flex justify-end gap-2">{item.status === "active" && (<><Button size="sm" variant="outline" onClick={() => { setGraceHours(24); setRotating(item); }}>Rotate</Button><Button size="sm" variant="outline" onClick={() => setRevoke(item)}>Revoke</Button></>)}</div></td></tr>)}</tbody>
           </table>
         )}
-      </div>
+      </TableCard>
 
       <Modal isOpen={createOpen} onClose={() => !busy && setCreateOpen(false)} className="max-w-2xl p-6">
         <h2 className="text-lg font-semibold">Create credential</h2>
@@ -107,7 +107,7 @@ export default function CredentialsPage() {
           <div className="grid grid-cols-2 gap-4"><label className="text-sm">Environment<select className={inputClass} value={environment} onChange={(event) => setEnvironment(event.target.value as "test" | "live")}><option value="live">Live</option><option value="test">Test</option></select></label><label className="text-sm">Key type<select className={inputClass} value={type} onChange={(event) => changeCredentialType(event.target.value as CredentialType)}><option value="publishable">Publishable</option><option value="secret">Secret</option></select></label></div>
           <section aria-labelledby="credential-scopes-heading">
             <div className="flex flex-wrap items-baseline justify-between gap-2"><div><h3 id="credential-scopes-heading" className="text-sm font-medium">Permissions</h3><p className="mt-1 text-xs text-gray-500">Select only the permissions this key needs.</p></div><span className="text-xs font-medium text-gray-500">{scopes.length} selected</span></div>
-            {type === "publishable" && <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-brand-700 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300"><span><strong>StarLoader desktop:</strong> User sign-in and Verify device are selected.</span><button type="button" onClick={() => setScopes(defaultScopesForCredentialType("publishable"))} className="font-semibold underline underline-offset-2">Reset to recommended</button></div>}
+            {type === "publishable" && <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-brand-700 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300"><span><strong>Desktop clients:</strong> User sign-in and Verify device are selected.</span><button type="button" onClick={() => setScopes(defaultScopesForCredentialType("publishable"))} className="font-semibold underline underline-offset-2">Reset to recommended</button></div>}
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
               {scopeOptionsForCredentialType(type).map((scope) => {
                 const selected = scopes.includes(scope.value);

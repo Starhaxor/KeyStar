@@ -28,7 +28,25 @@ export default function ConsoleSection({
         </div>
         {actions && <div className="flex items-center gap-2">{actions}</div>}
       </div>
-      <div className="max-w-full overflow-x-auto">{children}</div>
+      <div
+        data-testid="console-section-content"
+        className="max-w-full overflow-x-auto"
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+export function TableCard({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
+      <div
+        data-testid="table-card-content"
+        className="max-w-full overflow-x-auto"
+      >
+        {children}
+      </div>
     </div>
   );
 }
