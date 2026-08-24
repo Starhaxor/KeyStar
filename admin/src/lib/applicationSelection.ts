@@ -1,6 +1,6 @@
 type OrganizationChoice = { id: string; name?: string };
 type ApplicationChoice = { id: string; name: string; environment_mode: string };
-type ApplicationIDChoice = { id: string };
+type ApplicationIDChoice = { id: string; status?: string };
 
 export function initialOrganizationSelection(organizations: OrganizationChoice[]): string {
   return organizations.length === 1 ? organizations[0].id : "";
@@ -14,6 +14,7 @@ export function applicationSelectorOptions(applications: ApplicationChoice[]) {
 }
 
 export function nextSelectedApplicationID(currentID: string | null, applications: ApplicationIDChoice[]): string | null {
-  if (currentID && applications.some((application) => application.id === currentID)) return currentID;
-  return applications[0]?.id ?? null;
+  const activeApplications = applications.filter((application) => application.status === undefined || application.status === "active");
+  if (currentID && activeApplications.some((application) => application.id === currentID)) return currentID;
+  return activeApplications[0]?.id ?? null;
 }

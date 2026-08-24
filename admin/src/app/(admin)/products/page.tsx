@@ -9,6 +9,7 @@ import { reportClientError } from "@/lib/clientError";
 import type { Plan, Product } from "@/lib/types";
 import React, { useCallback, useEffect, useState } from "react";
 import ProductLifecycleSection from "./ProductLifecycleSection";
+import { catalogView } from "./catalogView";
 
 const inputClass = "h-10 w-full rounded-lg border border-gray-300 bg-transparent px-3 text-sm text-gray-800 dark:border-gray-700 dark:text-white/90";
 
@@ -56,14 +57,14 @@ export default function ProductsPage() {
     finally { setBusy(false); }
   }
 
-  const visibleProducts = products.filter((product) => showArchived ? product.status === "archived" : product.status !== "archived");
+  const visibleCatalog = catalogView(products, plans, showArchived);
 
   return <>
     <PageTitle title="Products & Plans" description="Catalog products and the license plans available for each one." actions={canWrite ? <Button size="sm" onClick={() => setProductOpen(true)}>Add product</Button> : undefined} />
     {error && <div className="mb-4"><ErrorNote message={error} onRetry={load} /></div>}
     <TableCard>
       {!loading && products.length > 0 && <div className="flex justify-end border-b border-gray-200 px-5 py-3 dark:border-gray-800"><Button type="button" size="sm" variant="outline" onClick={() => setShowArchived((current) => !current)}>{showArchived ? "Show active catalog" : "Show archived catalog"}</Button></div>}
-      {loading ? <LoadingNote /> : products.length === 0 ? <EmptyNote message="No catalog products yet. Create a product, then add at least one plan." /> : visibleProducts.length === 0 ? <EmptyNote message={showArchived ? "No archived catalog records." : "No active catalog records. Archived records are available in the historical view."} /> : visibleProducts.map((product) => <ProductLifecycleSection key={product.id} product={product} plans={(plans[product.id] ?? []).filter((plan) => showArchived ? plan.status === "archived" : plan.status !== "archived")} canWrite={canWrite} onRefresh={load} onAddPlan={setPlanProduct} />)}
+      {loading ? <LoadingNote /> : products.length === 0 ? <EmptyNote message="No catalog products yet. Create a product, then add at least one plan." /> : visibleCatalog.length === 0 ? <EmptyNote message={showArchived ? "No archived catalog records." : "No active catalog records. Archived records are available in the historical view."} /> : visibleCatalog.map(({ product, plans: productPlans }) => <ProductLifecycleSection key={product.id} product={product} plans={productPlans} canWrite={canWrite} onRefresh={load} onAddPlan={setPlanProduct} historical={showArchived} />)}
     </TableCard>
     <Modal isOpen={productOpen} onClose={() => !busy && setProductOpen(false)} className="max-w-md p-6"><h2 className="text-lg font-semibold">Create product</h2><div className="mt-4 space-y-4"><label className="block text-sm">Name<input className={inputClass} value={productName} onChange={(event) => setProductName(event.target.value)} /></label><label className="block text-sm">Slug <span className="text-gray-400">(optional)</span><input className={inputClass} value={slug} onChange={(event) => setSlug(event.target.value)} placeholder="desktop-client" /></label><div className="flex justify-end gap-2"><Button size="sm" variant="outline" disabled={busy} onClick={() => setProductOpen(false)}>Cancel</Button><Button size="sm" disabled={busy || !productName.trim()} onClick={createProduct}>Create</Button></div></div></Modal>
     <Modal isOpen={planProduct !== null} onClose={() => !busy && setPlanProduct(null)} className="max-w-md p-6"><h2 className="text-lg font-semibold">Create plan</h2><p className="mt-1 text-sm text-gray-500">{planProduct?.name}</p><div className="mt-4 space-y-4"><label className="block text-sm">Name<input className={inputClass} value={planName} onChange={(event) => setPlanName(event.target.value)} /></label><label className="block text-sm">Code<input className={inputClass} value={code} onChange={(event) => setCode(event.target.value)} placeholder="pro-monthly" /></label><div className="grid grid-cols-2 gap-3"><label className="block text-sm">Level<input className={inputClass} type="number" min="1" value={level} onChange={(event) => setLevel(Number(event.target.value))} /></label><label className="block text-sm">Max devices<input className={inputClass} type="number" min="1" value={maxDevices} onChange={(event) => setMaxDevices(Number(event.target.value))} /></label></div><div className="flex justify-end gap-2"><Button size="sm" variant="outline" disabled={busy} onClick={() => setPlanProduct(null)}>Cancel</Button><Button size="sm" disabled={busy || !planName.trim() || !code.trim() || maxDevices < 1} onClick={createPlan}>Create</Button></div></div></Modal>

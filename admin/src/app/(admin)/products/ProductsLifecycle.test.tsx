@@ -63,4 +63,38 @@ describe("ProductLifecycleSection", () => {
     expect(document.body.textContent).toContain("Unable to archive the product because it is still in use.");
     expect(document.body.textContent).not.toContain("internal table");
   });
+
+  it("confirms plan archive before requesting it", async () => {
+    const archive = vi.spyOn(api, "archivePlan").mockResolvedValue({ ok: true, plan: { ...plan, status: "archived" } });
+    render(<ProductLifecycleSection product={product} plans={[plan]} canWrite onRefresh={async () => undefined} onAddPlan={() => undefined} />);
+
+    await act(async () => button("Archive plan")?.click());
+    expect(archive).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+
+    await act(async () => button("Confirm archive")?.click());
+    expect(archive).toHaveBeenCalledWith("product-1", "plan-1");
+  });
+
+  it("does not expose catalog lifecycle controls without catalog.write", () => {
+    render(<ProductLifecycleSection product={product} plans={[plan]} canWrite={false} onRefresh={async () => undefined} onAddPlan={() => undefined} />);
+
+    expect(button("Edit product")).toBeUndefined();
+    expect(button("Archive product")).toBeUndefined();
+    expect(button("Edit plan")).toBeUndefined();
+    expect(button("Archive plan")).toBeUndefined();
+  });
+
+  it("renders historical parent and plan relationships as read-only", () => {
+    const archivedPlan = { ...plan, id: "plan-archived", name: "Archived plan", status: "archived" as const };
+    const archivedProduct = { ...product, id: "product-archived", name: "Former desktop", status: "archived" as const };
+    const activeHistoricalPlan = { ...plan, product_id: archivedProduct.id };
+    render(<><ProductLifecycleSection product={product} plans={[archivedPlan]} canWrite onRefresh={async () => undefined} onAddPlan={() => undefined} historical /><ProductLifecycleSection product={archivedProduct} plans={[activeHistoricalPlan]} canWrite onRefresh={async () => undefined} onAddPlan={() => undefined} historical /></>);
+
+    expect(document.body.textContent).toContain("Historical catalog relationship");
+    expect(document.body.textContent).toContain("Archived plan");
+    expect(document.body.textContent).toContain("Former desktop");
+    expect(button("Edit product")).toBeUndefined();
+    expect(button("Edit plan")).toBeUndefined();
+  });
 });

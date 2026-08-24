@@ -28,4 +28,18 @@ describe("initial organization selection", () => {
   it("selects the first available application when there is no valid selection", () => {
     expect(nextSelectedApplicationID(null, [{ id: "app-1" }, { id: "app-2" }])).toBe("app-1");
   });
+
+  it("switches away from a selected maintenance application to an active application", () => {
+    expect(nextSelectedApplicationID("app-2", [
+      { id: "app-1", status: "active" },
+      { id: "app-2", status: "maintenance" },
+    ])).toBe("app-1");
+  });
+
+  it("clears the selection when no active application remains", () => {
+    expect(nextSelectedApplicationID("app-2", [
+      { id: "app-1", status: "disabled" },
+      { id: "app-2", status: "maintenance" },
+    ])).toBeNull();
+  });
 });

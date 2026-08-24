@@ -27,8 +27,12 @@ export function ApplicationProvider({ children }: { children: React.ReactNode })
       setApplications(response.items);
       setSelectedApplicationID((currentID) => {
         const nextID = nextSelectedApplicationID(currentID, response.items);
-        if (nextID && nextID !== currentID) {
-          document.cookie = `${applicationCookieName}=${encodeURIComponent(nextID)}; Path=/; SameSite=Lax`;
+        if (nextID !== currentID) {
+          if (nextID) {
+            document.cookie = `${applicationCookieName}=${encodeURIComponent(nextID)}; Path=/; SameSite=Lax`;
+          } else {
+            document.cookie = `${applicationCookieName}=; Max-Age=0; Path=/; SameSite=Lax`;
+          }
         }
         return nextID;
       });

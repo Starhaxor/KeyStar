@@ -68,4 +68,11 @@ describe("ApplicationLifecycleControls", () => {
     expect(document.body.textContent).toContain("Unable to change application status. Try again.");
     expect(document.body.textContent).not.toContain("database detail");
   });
+
+  it("does not expose application lifecycle controls without applications.write", () => {
+    render(<ApplicationLifecycleControls application={application} canWrite={false} onRefresh={async () => undefined} />);
+
+    expect(button("Edit application")).toBeUndefined();
+    expect(button("Set maintenance")).toBeUndefined();
+  });
 });
