@@ -23,9 +23,28 @@ const focusableSelector = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(",");
 
+const dialogStack: symbol[] = [];
+let savedBodyOverflow: string | undefined;
+
+function isTopDialog(dialogId: symbol) {
+  return dialogStack[dialogStack.length - 1] === dialogId;
+}
+
+function isVisibleFocusableElement(element: HTMLElement) {
+  if (
+    element.hidden ||
+    element.closest('[aria-hidden="true"], [hidden], [inert], fieldset[disabled]')
+  ) {
+    return false;
+  }
+
+  const styles = window.getComputedStyle(element);
+  return styles.display !== "none" && styles.visibility !== "hidden" && styles.visibility !== "collapse";
+}
+
 function getFocusableElements(container: HTMLElement) {
   return Array.from(container.querySelectorAll<HTMLElement>(focusableSelector)).filter(
-    (element) => element.getAttribute("aria-hidden") !== "true"
+    isVisibleFocusableElement
   );
 }
 
@@ -41,37 +60,57 @@ export default function AccessibleDialog({
 }: AccessibleDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  const dialogId = useRef(Symbol("accessible-dialog")).current;
   const headingId = useId();
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!isOpen) return;
 
     previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    if (dialogStack.length === 0) {
+      savedBodyOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+    }
+    dialogStack.push(dialogId);
+
+    const handleDocumentKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && isTopDialog(dialogId)) {
+        event.preventDefault();
+        onCloseRef.current();
+      }
+    };
+    document.addEventListener("keydown", handleDocumentKeyDown);
 
     const dialog = dialogRef.current;
     const firstFocusable = dialog && getFocusableElements(dialog)[0];
     (firstFocusable ?? dialog)?.focus();
 
     return () => {
-      document.body.style.overflow = previousOverflow;
-      if (previousFocusRef.current?.isConnected) {
+      document.removeEventListener("keydown", handleDocumentKeyDown);
+      const stackIndex = dialogStack.indexOf(dialogId);
+      const wasTopDialog = isTopDialog(dialogId);
+      if (stackIndex >= 0) {
+        dialogStack.splice(stackIndex, 1);
+      }
+      if (dialogStack.length === 0) {
+        document.body.style.overflow = savedBodyOverflow ?? "";
+        savedBodyOverflow = undefined;
+      }
+      if (wasTopDialog && previousFocusRef.current?.isConnected) {
         previousFocusRef.current.focus();
       }
     };
-  }, [isOpen]);
+  }, [dialogId, isOpen]);
 
   if (!isOpen || typeof document === "undefined") return null;
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onClose();
-      return;
-    }
-
-    if (event.key !== "Tab") return;
+    if (event.key !== "Tab" || !isTopDialog(dialogId)) return;
 
     const dialog = dialogRef.current;
     if (!dialog) return;
@@ -102,6 +141,7 @@ export default function AccessibleDialog({
       className="fixed inset-0 z-99999 flex items-center justify-center bg-gray-400/50 p-4 backdrop-blur-[32px] transition-opacity motion-reduce:transition-none"
       onMouseDown={(event) => {
         if (!isFullscreen && event.target === event.currentTarget) {
+          if (!isTopDialog(dialogId)) return;
           (onBackdropClick ?? onClose)();
         }
       }}
