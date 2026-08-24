@@ -6,6 +6,7 @@ import TimeAgo from "@/components/common/TimeAgo";
 import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import { api } from "@/lib/api";
+import { reportClientError } from "@/lib/clientError";
 import {
   defaultScopesForCredentialType,
   scopeOptionsForCredentialType,
@@ -35,7 +36,7 @@ export default function CredentialsPage() {
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try { setItems((await api.credentials()).credentials); }
-    catch (err) { setError(err instanceof Error ? err.message : "Credentials could not be loaded"); }
+    catch (err) { setError(reportClientError(err, "Unable to load credentials. Try again.")); }
     finally { setLoading(false); }
   }, []);
 
@@ -49,7 +50,7 @@ export default function CredentialsPage() {
         scopes,
       });
       setSecret(result.key); setCreateOpen(false); setName(""); await load();
-    } catch (err) { setError(err instanceof Error ? err.message : "Credential could not be created"); }
+    } catch (err) { setError(reportClientError(err, "Unable to create the credential. Try again.")); }
     finally { setBusy(false); }
   }
 
@@ -68,7 +69,7 @@ export default function CredentialsPage() {
     if (!revoke) return;
     setBusy(true);
     try { await api.revokeCredential(revoke.id); setRevoke(null); await load(); }
-    catch (err) { setError(err instanceof Error ? err.message : "Credential could not be revoked"); }
+    catch (err) { setError(reportClientError(err, "Unable to revoke the credential. Try again.")); }
     finally { setBusy(false); }
   }
 
@@ -81,7 +82,7 @@ export default function CredentialsPage() {
       setSecret(result.key);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Credential could not be rotated");
+      setError(reportClientError(err, "Unable to rotate the credential. Try again."));
     } finally {
       setRotateBusy(false);
     }
@@ -90,7 +91,7 @@ export default function CredentialsPage() {
   return (
     <>
       <PageTitle title="API Credentials" description="Create and revoke application keys. Secret keys are shown only once." actions={<Button size="sm" onClick={() => setCreateOpen(true)}>Create credential</Button>} />
-      {error && <div className="mb-4"><ErrorNote message={error} /></div>}
+      {error && <div className="mb-4"><ErrorNote message={error} onRetry={load} /></div>}
       <TableCard>
         {loading ? <LoadingNote /> : items.length === 0 ? <EmptyNote message="No credentials have been created for this application." /> : (
           <table className="min-w-full text-left text-sm">

@@ -89,7 +89,7 @@ export default function OverviewPage() {
     <div>
       <PageTitle
         title="Overview"
-        description="Live snapshot of the StarLoader licensing system."
+        description="Live snapshot of the KeyStar licensing system."
         actions={
           <div className="flex items-center gap-3">
             <div

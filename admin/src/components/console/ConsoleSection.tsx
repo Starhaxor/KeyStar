@@ -93,8 +93,11 @@ export function EmptyNote({ message }: { message: string }) {
   );
 }
 
-export function ErrorNote({ message }: { message: string }) {
+export function ErrorNote({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
-    <p className="px-5 py-8 text-center text-sm text-error-500">{message}</p>
+    <div className="px-5 py-8 text-center text-sm text-error-500" role="alert">
+      <p>{message}</p>
+      {onRetry && <button type="button" className="mt-3 rounded-lg border border-error-300 px-3 py-1.5 text-sm font-medium hover:bg-error-50 dark:border-error-500/50 dark:hover:bg-error-500/10" onClick={onRetry}>Retry</button>}
+    </div>
   );
 }

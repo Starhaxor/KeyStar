@@ -5,6 +5,7 @@ import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import { useAdminIdentity } from "@/context/AdminIdentityContext";
 import { api } from "@/lib/api";
+import { reportClientError } from "@/lib/clientError";
 import { formatDuration } from "@/lib/time";
 import type { Plan, Product } from "@/lib/types";
 import React, { useCallback, useEffect, useState } from "react";
@@ -35,7 +36,7 @@ export default function ProductsPage() {
       setProducts(response.items);
       const entries = await Promise.all(response.items.map(async (product) => [product.id, (await api.plans(product.id)).items] as const));
       setPlans(Object.fromEntries(entries));
-    } catch (err) { setError(err instanceof Error ? err.message : "Catalog could not be loaded"); }
+    } catch (err) { setError(reportClientError(err, "Unable to load the catalog. Try again.")); }
     finally { setLoading(false); }
   }, []);
   useEffect(() => { void load(); }, [load]);
@@ -43,20 +44,20 @@ export default function ProductsPage() {
   async function createProduct() {
     setBusy(true); setError(null);
     try { await api.createProduct(productName.trim(), slug.trim()); setProductName(""); setSlug(""); setProductOpen(false); await load(); }
-    catch (err) { setError(err instanceof Error ? err.message : "Product could not be created"); }
+    catch (err) { setError(reportClientError(err, "Unable to create the product. Try again.")); }
     finally { setBusy(false); }
   }
   async function createPlan() {
     if (!planProduct) return;
     setBusy(true); setError(null);
     try { await api.createPlan(planProduct.id, { name: planName.trim(), code: code.trim(), level, max_devices: maxDevices }); setPlanName(""); setCode(""); setLevel(1); setMaxDevices(1); setPlanProduct(null); await load(); }
-    catch (err) { setError(err instanceof Error ? err.message : "Plan could not be created"); }
+    catch (err) { setError(reportClientError(err, "Unable to create the plan. Try again.")); }
     finally { setBusy(false); }
   }
 
   return <>
     <PageTitle title="Products & Plans" description="Catalog products and the license plans available for each one." actions={canWrite ? <Button size="sm" onClick={() => setProductOpen(true)}>Add product</Button> : undefined} />
-    {error && <div className="mb-4"><ErrorNote message={error} /></div>}
+    {error && <div className="mb-4"><ErrorNote message={error} onRetry={load} /></div>}
     <TableCard>
       {loading ? <LoadingNote /> : products.length === 0 ? <EmptyNote message="No catalog products yet. Create a product, then add at least one plan." /> : products.map((product) => <section key={product.id} className="border-b border-gray-200 p-5 last:border-0 dark:border-gray-800"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold">{product.name}</h2><p className="text-xs text-gray-500">{product.slug}</p></div>{canWrite && <Button size="sm" variant="outline" onClick={() => setPlanProduct(product)}>Add plan</Button>}</div><div className="mt-4 grid gap-3 md:grid-cols-3">{(plans[product.id] ?? []).map((plan) => <div key={plan.id} className="rounded-xl border border-gray-200 p-3 text-sm dark:border-gray-700"><strong>{plan.name}</strong><p className="mt-1 text-gray-500">{plan.code} · Level {plan.level} · {plan.max_devices} devices</p><p className="mt-1 text-gray-500">Default duration: {formatDuration(plan.default_duration_seconds) ?? "not set"}</p><p className="mt-2 text-xs text-gray-500">{plan.status}</p></div>)}{(plans[product.id] ?? []).length === 0 && <p className="text-sm text-gray-500">No plans yet.</p>}</div></section>)}
     </TableCard>

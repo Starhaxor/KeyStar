@@ -2,7 +2,7 @@ import React from "react";
 import { act } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
-import ConsoleSection, { TableCard } from "./ConsoleSection";
+import ConsoleSection, { ErrorNote, TableCard } from "./ConsoleSection";
 import AdminError from "../../app/(admin)/error";
 import FullWidthError from "../../app/(full-width-pages)/error";
 import {
@@ -123,5 +123,15 @@ describe("ConsoleSection", () => {
     act(() => cancel?.click());
     expect(cancellations).toBe(1);
     expect(submissions).toBe(0);
+  });
+
+  it("offers a retry for a recoverable safe error", () => {
+    let retries = 0;
+    render(<ErrorNote message="Unable to load applications. Try again." onRetry={() => { retries += 1; }} />);
+
+    const retry = Array.from(container?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Retry");
+    expect(retry).toBeDefined();
+    act(() => retry?.click());
+    expect(retries).toBe(1);
   });
 });

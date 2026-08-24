@@ -7,6 +7,7 @@ import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/context/ToastContext";
 import { api } from "@/lib/api";
+import { reportClientError } from "@/lib/clientError";
 import type { Webhook, WebhookDelivery, WebhookDeliveryStatus } from "@/lib/types";
 import React, { useCallback, useEffect, useState } from "react";
 
@@ -42,7 +43,7 @@ function DeliveriesModal({
       setDeliveries(response.items);
       setTotal(response.total);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Deliveries could not be loaded");
+      setError(reportClientError(err, "Unable to load delivery history. Try again."));
     }
   }, [webhook.id, page]);
 
@@ -58,7 +59,7 @@ function DeliveriesModal({
       await load();
       onRetryDone();
     } catch (err) {
-      toast.error("Retry failed", err instanceof Error ? err.message : "Unknown error");
+      toast.error("Retry failed", reportClientError(err, "Unable to retry the delivery. Try again."));
     } finally {
       setRetrying(null);
     }
@@ -70,7 +71,7 @@ function DeliveriesModal({
       <p className="mt-1 break-all text-sm text-gray-500 dark:text-gray-400">{webhook.url}</p>
       <div className="custom-scrollbar mt-4 max-h-96 overflow-y-auto">
         {error ? (
-          <ErrorNote message={error} />
+          <ErrorNote message={error} onRetry={load} />
         ) : deliveries === null ? (
           <LoadingNote />
         ) : deliveries.length === 0 ? (
@@ -146,7 +147,7 @@ export default function WebhooksPage() {
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try { setItems((await api.webhooks()).items); }
-    catch (err) { setError(err instanceof Error ? err.message : "Webhooks could not be loaded"); }
+    catch (err) { setError(reportClientError(err, "Unable to load webhooks. Try again.")); }
     finally { setLoading(false); }
   }, []);
   useEffect(() => { void load(); }, [load]);
@@ -155,20 +156,20 @@ export default function WebhooksPage() {
   async function create() {
     setBusy(true); setError(null);
     try { const result = await api.createWebhook({ url: url.trim(), events: selectedEvents() }); setSecret(result.secret); setURL(""); setCreateOpen(false); await load(); }
-    catch (err) { setError(err instanceof Error ? err.message : "Webhook could not be created"); }
+    catch (err) { setError(reportClientError(err, "Unable to create the webhook. Try again.")); }
     finally { setBusy(false); }
   }
   async function toggle(item: Webhook) {
     setBusy(true); setError(null);
     try { await api.updateWebhook(item.id, { status: item.status === "active" ? "disabled" : "active" }); await load(); }
-    catch (err) { setError(err instanceof Error ? err.message : "Webhook could not be updated"); }
+    catch (err) { setError(reportClientError(err, "Unable to update the webhook. Try again.")); }
     finally { setBusy(false); }
   }
   async function remove() {
     if (!removing) return;
     setBusy(true);
     try { await api.deleteWebhook(removing.id); setRemoving(null); await load(); }
-    catch (err) { setError(err instanceof Error ? err.message : "Webhook could not be deleted"); }
+    catch (err) { setError(reportClientError(err, "Unable to delete the webhook. Try again.")); }
     finally { setBusy(false); }
   }
 
@@ -178,7 +179,7 @@ export default function WebhooksPage() {
 
   return <>
     <PageTitle title="Webhooks" description="Send signed event notifications to your application services." actions={<Button size="sm" onClick={() => setCreateOpen(true)}>Add endpoint</Button>} />
-    {error && <div className="mb-4"><ErrorNote message={error} /></div>}
+    {error && <div className="mb-4"><ErrorNote message={error} onRetry={load} /></div>}
     <TableCard>
       {loading ? <LoadingNote /> : items.length === 0 ? <EmptyNote message="No webhook endpoints configured for this application." /> : <table className="min-w-full text-left text-sm"><thead className="border-b border-gray-200 text-xs uppercase text-gray-500 dark:border-gray-800"><tr><th className="px-5 py-3">Endpoint</th><th>Events</th><th>Status</th><th className="px-5 py-3 text-right">Actions</th></tr></thead><tbody>{items.map((item) => <tr key={item.id} className="border-b border-gray-100 dark:border-gray-800"><td className="max-w-md truncate px-5 py-4 font-mono text-xs">{item.url}</td><td className="max-w-sm truncate">{item.events.join(", ")}</td><td><span className={item.status === "active" ? "text-success-600" : "text-gray-500"}>{item.status}</span></td><td className="space-x-2 px-5 text-right"><Button size="sm" variant="outline" onClick={() => openDeliveries(item)}>Deliveries</Button>{item.status === "active" && <Button size="sm" variant="outline" disabled={busy} onClick={() => toggle(item)}>Disable</Button>}{item.status === "disabled" && <Button size="sm" variant="outline" disabled={busy} onClick={() => toggle(item)}>Enable</Button>}<Button size="sm" variant="outline" disabled={busy} onClick={() => setRemoving(item)}>Delete</Button></td></tr>)}</tbody></table>}
     </TableCard>

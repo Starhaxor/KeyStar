@@ -68,7 +68,7 @@ const AppHeader: React.FC = () => {
           </button>
 
           <span className="hidden text-sm font-medium text-gray-500 dark:text-gray-400 lg:block">
-            StarLoader Admin Console
+            KeyStar Admin Console
           </span>
           {!loading && applications.length > 1 && (
             <select aria-label="Selected application" value={selectedApplicationID ?? ""} onChange={(event) => selectApplication(event.target.value)} className="ml-3 hidden h-9 max-w-52 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 lg:block">
