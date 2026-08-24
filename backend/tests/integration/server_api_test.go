@@ -312,6 +312,18 @@ func TestServerAPILifecycleKeepsLicenseIssuanceScopedToActiveCatalog(t *testing.
 		t.Fatalf("archive plan error = %v, want %v", err, domain.ErrCatalogRecordInUse)
 	}
 
+	// User lookup must succeed before the server reaches the catalog resolver.
+	// An archived default plan therefore has to reject this HTTP issuance
+	// request as a catalog conflict, rather than being hidden by a user error.
+	archivedProductID, archivedPlanID, err := repository.ResolveProductPlan(ctx, applicationID, "Archived Lifecycle Product")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.ArchivePlan(ctx, applicationID, archivedProductID, archivedPlanID); err != nil {
+		t.Fatalf("archive unused plan: %v", err)
+	}
+	assertIntegrationError(t, serverAPIRequest(t, router, http.MethodPost, "/v1/server/licenses", authorization, "", `{"user_id":"`+user.Data.ID+`","product":"Archived Lifecycle Product","duration_days":7,"max_devices":1}`), http.StatusConflict, "CATALOG_RECORD_INACTIVE")
+
 	organization, err := repository.CreateOrganization(ctx, "lifecycle other tenant")
 	if err != nil {
 		t.Fatal(err)

@@ -199,7 +199,10 @@ func principalApplicationID(request *http.Request) string {
 }
 
 func (router *Router) writeServerError(writer http.ResponseWriter, request *http.Request, err error) {
+	var conflict *domain.ConflictError
 	switch {
+	case errors.As(err, &conflict):
+		httpapi.WriteError(writer, request, http.StatusConflict, conflict.Code(), conflict.Error())
 	case errors.Is(err, domain.ErrUserNotFound):
 		httpapi.WriteError(writer, request, http.StatusNotFound, "USER_NOT_FOUND", "user not found")
 	case errors.Is(err, domain.ErrUserAlreadyExists):

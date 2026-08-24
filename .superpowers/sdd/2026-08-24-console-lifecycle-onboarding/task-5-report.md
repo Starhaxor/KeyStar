@@ -45,3 +45,18 @@ behavior. No production behavior was changed for this test-only task.
 
 No Docker service, port owner, or database state was changed while recording
 these blocks.
+
+## P1 follow-up — catalog issuance rejection
+
+- Added an HTTP-level integration assertion that first creates a valid user,
+  archives a separate unused product plan, then attempts issuance for that
+  same valid user. This guarantees the handler reaches catalog resolution
+  rather than returning from user lookup.
+- The server API now maps typed catalog conflicts to the safe
+  `409 CATALOG_RECORD_INACTIVE` response, instead of exposing the condition
+  as a generic 500 response.
+- PASS: `cd backend; go test ./internal/httpapi/serverapi -count=1`.
+- BLOCKED again: the focused integration command cannot authenticate to the
+  locally reachable `keystar_test` PostgreSQL instance (`SQLSTATE 28P01`), so
+  the database-backed assertion awaits a Docker-capable or correctly
+  provisioned test database.
