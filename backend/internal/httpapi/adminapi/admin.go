@@ -122,7 +122,7 @@ func (router *Router) serveAdmin(writer http.ResponseWriter, request *http.Reque
 	// Application lifecycle recovery cannot depend on the operational state of
 	// the default application: otherwise disabling that application would lock
 	// operators out of listing or restoring it. The exception remains limited
-	// to the platform-scoped list and named transition routes; every
+	// to the platform-scoped identity, list and named transition routes; every
 	// application-scoped admin operation still resolves an active tenant.
 	if isApplicationLifecycleRecoveryRoute(path, request.Method) {
 		router.routeAdmin(writer, request, session, account, path)
@@ -138,7 +138,9 @@ func (router *Router) serveAdmin(writer http.ResponseWriter, request *http.Reque
 
 func isApplicationLifecycleRecoveryRoute(path, method string) bool {
 	segments := splitAdminPath(path)
-	return (len(segments) == 1 && segments[0] == "applications" && method == http.MethodGet) ||
+	return (len(segments) == 1 && segments[0] == "me" && method == http.MethodGet) ||
+		(len(segments) == 1 && segments[0] == "applications" && method == http.MethodGet) ||
+		(len(segments) == 2 && segments[0] == "applications" && segments[1] == "organizations" && method == http.MethodGet) ||
 		(len(segments) == 3 && segments[0] == "applications" && segments[2] == "transition" && method == http.MethodPost)
 }
 

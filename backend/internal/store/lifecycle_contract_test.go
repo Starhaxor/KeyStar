@@ -105,18 +105,20 @@ func TestCreateLicenseRejectsIneligibleCatalogRows(t *testing.T) {
 }
 
 func TestResolveProductPlanRejectsProductArchivedDuringDefaultPlanCreation(t *testing.T) {
-	db := &lifecycleContractDB{rows: []pgx.Row{
+	tx := &lifecycleContractTx{rows: []pgx.Row{
+		contractRow{values: []any{domain.ApplicationStatusActive}},
 		contractRow{err: pgx.ErrNoRows},
 		contractRow{values: []any{"product-1", domain.CatalogStatusActive}},
 		contractRow{err: pgx.ErrNoRows},
 		contractRow{values: []any{domain.CatalogStatusArchived}},
 	}}
+	db := &lifecycleContractDB{tx: tx}
 
 	_, _, err := New(db).ResolveProductPlan(context.Background(), "application-1", "Product")
 	if !errors.Is(err, domain.ErrCatalogRecordInactive) {
 		t.Fatalf("ResolveProductPlan() error = %v, want %v", err, domain.ErrCatalogRecordInactive)
 	}
-	if len(db.queries) < 3 || !strings.Contains(db.queries[2].sql, "status = 'active'") || !strings.Contains(db.queries[2].sql, "for key share") {
+	if len(tx.queries) < 4 || !strings.Contains(tx.queries[3].sql, "status = 'active'") || !strings.Contains(tx.queries[3].sql, "for key share") {
 		t.Fatal("default plan creation must lock and require an active product")
 	}
 }
@@ -143,6 +145,36 @@ func TestUpdatePlanActivationRequiresActiveApplication(t *testing.T) {
 	_, err := New(db).UpdatePlan(context.Background(), "application-1", "product-1", "plan-1", domain.UpdatePlan{Status: &active})
 	if !errors.Is(err, domain.ErrApplicationInactive) {
 		t.Fatalf("UpdatePlan(active) error = %v, want %v", err, domain.ErrApplicationInactive)
+	}
+}
+
+func TestCreateProductRequiresActiveApplication(t *testing.T) {
+	db := &lifecycleContractDB{tx: &lifecycleContractTx{rows: []pgx.Row{
+		contractRow{values: []any{domain.ApplicationStatusDisabled}},
+	}}}
+
+	_, err := New(db).CreateProduct(context.Background(), "application-1", domain.NewProduct{Name: "Product"})
+	if !errors.Is(err, domain.ErrApplicationInactive) {
+		t.Fatalf("CreateProduct() error = %v, want %v", err, domain.ErrApplicationInactive)
+	}
+	queries := db.tx.(*lifecycleContractTx).queries
+	if len(queries) != 1 || !strings.Contains(queries[0].sql, "applications") || !strings.Contains(queries[0].sql, "for update") {
+		t.Fatal("CreateProduct must lock and require its parent application")
+	}
+}
+
+func TestResolveProductPlanRequiresActiveApplication(t *testing.T) {
+	db := &lifecycleContractDB{tx: &lifecycleContractTx{rows: []pgx.Row{
+		contractRow{values: []any{domain.ApplicationStatusDisabled}},
+	}}}
+
+	_, _, err := New(db).ResolveProductPlan(context.Background(), "application-1", "Product")
+	if !errors.Is(err, domain.ErrApplicationInactive) {
+		t.Fatalf("ResolveProductPlan() error = %v, want %v", err, domain.ErrApplicationInactive)
+	}
+	queries := db.tx.(*lifecycleContractTx).queries
+	if len(queries) != 1 || !strings.Contains(queries[0].sql, "applications") || !strings.Contains(queries[0].sql, "for update") {
+		t.Fatal("ResolveProductPlan must lock and require its parent application")
 	}
 }
 

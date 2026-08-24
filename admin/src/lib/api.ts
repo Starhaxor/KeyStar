@@ -256,7 +256,7 @@ export const api = {
     return request<{ ok: boolean; application: Application }>(`/v1/admin/applications/${applicationId}`, { method: "PATCH", body: input });
   },
   transitionApplication(applicationId: string, status: "active" | "maintenance" | "disabled") {
-    return request<{ ok: boolean; application: Application }>(`/v1/admin/applications/${applicationId}/transition`, { method: "POST", body: { status } });
+    return request<{ ok: boolean; application: Application }>(`/v1/admin/applications/${applicationId}/transition`, { method: "POST", body: { status }, skipApplicationHeader: true });
   },
   products() {
     return request<{ ok: boolean; items: Product[] }>("/v1/admin/products");
@@ -393,7 +393,7 @@ export const api = {
     });
   },
   me() {
-    return request<{ ok: boolean } & AdminIdentity>("/v1/admin/me");
+    return request<{ ok: boolean } & AdminIdentity>("/v1/admin/me", { skipApplicationHeader: true });
   },
   myActivity() {
     return request<{ ok: boolean; items: AuditEntry[] }>("/v1/admin/me/activity");

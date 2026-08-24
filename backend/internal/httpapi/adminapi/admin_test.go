@@ -313,7 +313,7 @@ func TestAdminMeRequiresSessionCookie(t *testing.T) {
 	}
 }
 
-func TestAdminRejectsInvalidSelectedApplication(t *testing.T) {
+func TestAdminRecoveryIdentityIgnoresSelectedApplication(t *testing.T) {
 	auth := &fakeAdminAuth{token: "session-token", account: testOwnerAccount()}
 	router, _ := newAdminTestRouter(t, auth)
 
@@ -323,14 +323,16 @@ func TestAdminRejectsInvalidSelectedApplication(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusBadRequest {
+	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
-	var body struct {
-		Code string `json:"code"`
-	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil || body.Code != "INVALID_APPLICATION" {
-		t.Fatalf("body = %s, err = %v", recorder.Body.String(), err)
+	request = httptest.NewRequest(http.MethodGet, "/v1/admin/overview", nil)
+	request.Header.Set("X-KeyStar-App", "not-a-uuid")
+	request.AddCookie(&http.Cookie{Name: httpapi.AdminSessionCookieName, Value: "session-token"})
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("application-scoped status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
 }
 

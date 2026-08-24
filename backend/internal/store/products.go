@@ -14,6 +14,28 @@ const productColumns = `id::text, application_id::text, name, slug, status, crea
 
 const planColumns = `id::text, product_id::text, name, code, level, max_devices, default_duration_seconds, status, created_at, updated_at`
 
+type rowQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// lockActiveApplication shares the application row lock used by lifecycle
+// transitions. Catalog creation must not race a disable and leave new active
+// rows beneath a non-active application.
+func lockActiveApplication(ctx context.Context, query rowQuerier, applicationID string) error {
+	var status domain.ApplicationStatus
+	err := query.QueryRow(ctx, `select status from applications where id = $1::uuid for update`, applicationID).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ErrApplicationNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("lock application for catalog creation: %w", err)
+	}
+	if status != domain.ApplicationStatusActive {
+		return domain.ErrApplicationInactive
+	}
+	return nil
+}
+
 // ResolveProductPlan finds or creates an active product identified by its
 // display name within one application. Existing inactive or archived catalog
 // records are historical and must not be silently reactivated for issuance.
@@ -26,15 +48,23 @@ func (s *Store) ResolveProductPlan(ctx context.Context, applicationID, name stri
 	if slug == "" {
 		return "", "", domain.ErrProductInvalidName
 	}
+	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return "", "", fmt.Errorf("begin product resolution: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockActiveApplication(ctx, tx, applicationID); err != nil {
+		return "", "", err
+	}
 	var productID string
-	err := s.db.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		insert into products (application_id, name, slug)
 		values ($1, $2, $3)
 		on conflict (application_id, slug) do nothing
 		returning id::text`, applicationID, name, slug).Scan(&productID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		var status domain.CatalogStatus
-		err = s.db.QueryRow(ctx, `select id::text, status from products where application_id = $1::uuid and slug = $2`, applicationID, slug).Scan(&productID, &status)
+		err = tx.QueryRow(ctx, `select id::text, status from products where application_id = $1::uuid and slug = $2`, applicationID, slug).Scan(&productID, &status)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", "", domain.ErrProductNotFound
 		}
@@ -47,18 +77,21 @@ func (s *Store) ResolveProductPlan(ctx context.Context, applicationID, name stri
 	} else if err != nil {
 		return "", "", fmt.Errorf("resolve product: %w", err)
 	}
-	planID, err := s.findOrCreateDefaultPlan(ctx, productID)
+	planID, err := s.findOrCreateDefaultPlan(ctx, tx, productID)
 	if err != nil {
 		return "", "", err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", "", fmt.Errorf("commit product resolution: %w", err)
 	}
 	return productID, planID, nil
 }
 
 // findOrCreateDefaultPlan returns the active 'default' plan of a product,
 // creating it only for a newly active catalog product.
-func (s *Store) findOrCreateDefaultPlan(ctx context.Context, productID string) (string, error) {
+func (s *Store) findOrCreateDefaultPlan(ctx context.Context, query rowQuerier, productID string) (string, error) {
 	var planID string
-	err := s.db.QueryRow(ctx, `
+	err := query.QueryRow(ctx, `
 		insert into plans (product_id, name, code, level, max_devices)
 		select id, 'Default', 'default', 1, 1
 		from products
@@ -68,7 +101,7 @@ func (s *Store) findOrCreateDefaultPlan(ctx context.Context, productID string) (
 		returning id::text`, productID).Scan(&planID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		var productStatus domain.CatalogStatus
-		productErr := s.db.QueryRow(ctx, `select status from products where id = $1::uuid`, productID).Scan(&productStatus)
+		productErr := query.QueryRow(ctx, `select status from products where id = $1::uuid`, productID).Scan(&productStatus)
 		if errors.Is(productErr, pgx.ErrNoRows) {
 			return "", domain.ErrProductNotFound
 		}
@@ -81,7 +114,7 @@ func (s *Store) findOrCreateDefaultPlan(ctx context.Context, productID string) (
 		// The default plan already exists; archived and inactive plans remain
 		// historical records rather than being recreated.
 		var status domain.CatalogStatus
-		err = s.db.QueryRow(ctx, `select id::text, status from plans where product_id = $1 and code = 'default'`, productID).Scan(&planID, &status)
+		err = query.QueryRow(ctx, `select id::text, status from plans where product_id = $1 and code = 'default'`, productID).Scan(&planID, &status)
 		if err == nil && status != domain.CatalogStatusActive {
 			return "", domain.ErrCatalogRecordInactive
 		}
@@ -101,23 +134,41 @@ func (s *Store) CreateProduct(ctx context.Context, applicationID string, input d
 	if name == "" || slug == "" {
 		return nil, domain.ErrProductInvalidName
 	}
-	product, err := scanProduct(s.db.QueryRow(ctx, `
+	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("begin product creation: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockActiveApplication(ctx, tx, applicationID); err != nil {
+		return nil, err
+	}
+	product, err := scanProduct(tx.QueryRow(ctx, `
 		insert into products (application_id, name, slug)
 		values ($1, $2, $3)
 		on conflict (application_id, slug) do nothing
 		returning `+productColumns, applicationID, name, slug))
 	if errors.Is(err, pgx.ErrNoRows) {
-		existing, findErr := s.FindProductBySlug(ctx, applicationID, slug)
+		existing, findErr := scanProduct(tx.QueryRow(ctx,
+			`select `+productColumns+` from products where slug = $2 and application_id = $1::uuid`, applicationID, slug))
+		if errors.Is(findErr, pgx.ErrNoRows) {
+			return nil, domain.ErrProductNotFound
+		}
 		if findErr != nil {
-			return nil, findErr
+			return nil, fmt.Errorf("find created product: %w", findErr)
 		}
 		if existing.Status != domain.CatalogStatusActive {
 			return nil, domain.ErrCatalogRecordInactive
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit existing product: %w", err)
 		}
 		return existing, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("create product: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit product creation: %w", err)
 	}
 	return product, nil
 }

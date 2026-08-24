@@ -51,6 +51,10 @@ func (f *fakeLifecycleConsole) ListApplications(context.Context) ([]domain.Appli
 	return []domain.Application{*f.application}, nil
 }
 
+func (*fakeLifecycleConsole) ListOrganizations(context.Context) ([]domain.Organization, error) {
+	return []domain.Organization{{ID: "org-1", Name: "Default", Slug: "default"}}, nil
+}
+
 func (f *fakeLifecycleConsole) UpdateApplication(_ context.Context, _ string, input domain.UpdateApplication) (*domain.Application, error) {
 	f.updateApplicationCalls++
 	updated := *f.application
@@ -405,6 +409,20 @@ func TestAdminApplicationListRemainsReachableWhenDefaultApplicationDisabled(t *t
 	}
 }
 
+func TestAdminRecoveryReadsBypassDisabledDefaultApplicationResolution(t *testing.T) {
+	console := &fakeLifecycleConsole{application: &domain.Application{ID: "019c1111-1111-7111-8111-111111111111", Status: domain.ApplicationStatusDisabled}}
+	router := newAdminLifecycleTestRouterWithResolver(&fakeAdminAuth{token: "session-token", account: testOwnerAccount()}, console, lifecycleStatusResolver{status: domain.ApplicationStatusDisabled})
+	for _, path := range []string{"/v1/admin/me", "/v1/admin/applications", "/v1/admin/applications/organizations"} {
+		t.Run(path, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			router.serveAdmin(recorder, lifecycleRequest(t, router, http.MethodGet, path, ""))
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+}
+
 func TestAdminApplicationTransitionCanRestoreDisabledDefaultApplication(t *testing.T) {
 	const defaultApplicationID = "019c1111-1111-7111-8111-111111111111"
 	console := &fakeLifecycleConsole{application: &domain.Application{ID: defaultApplicationID, Status: domain.ApplicationStatusDisabled}}
@@ -430,28 +448,39 @@ func TestAdminDisabledDefaultStillBlocksCatalogMutation(t *testing.T) {
 	}
 }
 
-func TestAuditLogResponsesAllowOnlySafeLifecycleMetadata(t *testing.T) {
+func TestAuditLogResponsesSanitizeMetadataValuesAndKeepSafeScalars(t *testing.T) {
 	items := mapAuditEntries([]domain.AuditLog{{
-		Metadata: json.RawMessage(`{"before":{"name":"Portal","slug":"portal","status":"active","api_key":"secret"},"after":{"status":"disabled","max_devices":3,"token":"secret"},"password":"secret"}`),
+		Metadata: json.RawMessage(`{"email":"owner@example.test","role":"owner","devices":2,"revoked":1,"user_email":"user@example.test","before":{"name":"Portal","slug":"portal","status":"active","api_key":"secret","code":{"leak":"secret"}},"after":{"status":"disabled","max_devices":3,"token":"secret","name":"Bearer secret"},"password":"secret"}`),
 	}})
 	if len(items) != 1 {
 		t.Fatalf("items = %#v", items)
 	}
-	var metadata map[string]map[string]any
+	var metadata map[string]any
 	if err := json.Unmarshal(items[0].Metadata, &metadata); err != nil {
 		t.Fatalf("unmarshal metadata: %v", err)
 	}
-	if metadata["before"]["name"] != "Portal" || metadata["before"]["slug"] != "portal" || metadata["after"]["status"] != "disabled" || metadata["after"]["max_devices"] != float64(3) {
+	before := metadata["before"].(map[string]any)
+	after := metadata["after"].(map[string]any)
+	if before["name"] != "Portal" || before["slug"] != "portal" || after["status"] != "disabled" || after["max_devices"] != float64(3) {
 		t.Fatalf("safe lifecycle metadata = %#v", metadata)
+	}
+	if metadata["email"] != "owner@example.test" || metadata["role"] != "owner" || metadata["devices"] != float64(2) || metadata["revoked"] != float64(1) || metadata["user_email"] != "user@example.test" {
+		t.Fatalf("safe scalar metadata = %#v", metadata)
 	}
 	if _, exists := metadata["password"]; exists {
 		t.Fatalf("metadata leaked top-level secret: %#v", metadata)
 	}
-	if _, exists := metadata["before"]["api_key"]; exists {
+	if _, exists := before["api_key"]; exists {
 		t.Fatalf("metadata leaked before secret: %#v", metadata)
 	}
-	if _, exists := metadata["after"]["token"]; exists {
+	if _, exists := before["code"]; exists {
+		t.Fatalf("metadata leaked structured code value: %#v", metadata)
+	}
+	if _, exists := after["token"]; exists {
 		t.Fatalf("metadata leaked after secret: %#v", metadata)
+	}
+	if _, exists := after["name"]; exists {
+		t.Fatalf("metadata leaked unsafe formatted name: %#v", metadata)
 	}
 }
 

@@ -38,6 +38,22 @@ describe("admin API client", () => {
     }));
   });
 
+  it("omits stale application context from lifecycle recovery calls", async () => {
+    document.cookie = "keystar_application_id=disabled-app; Path=/";
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true, items: [] }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.me();
+    await api.organizations();
+    await api.transitionApplication("disabled-app", "active");
+
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(init).toEqual(expect.objectContaining({
+        headers: expect.not.objectContaining({ "X-KeyStar-App": expect.anything() }),
+      }));
+    }
+  });
+
   it("loads onboarding progress for the explicit initialized application", async () => {
     document.cookie = "keystar_application_id=stale-app; Path=/";
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } }));

@@ -1566,34 +1566,43 @@ func mapAuditEntries(logs []domain.AuditLog) []auditEntryJSON {
 	return items
 }
 
-var safeLifecycleAuditFields = map[string]struct{}{
-	"name": {}, "slug": {}, "status": {}, "environment_mode": {},
-	"code": {}, "level": {}, "max_devices": {},
+var safeAuditScalarFields = map[string]struct{}{
+	"code": {}, "count": {}, "devices": {}, "email": {}, "environment": {}, "environment_mode": {},
+	"extend": {}, "grace_hours": {}, "level": {}, "max_devices": {}, "name": {}, "replacement_id": {},
+	"revoked": {}, "role": {}, "slug": {}, "status": {}, "type": {}, "user_email": {},
 }
 
-// sanitizeAuditMetadata exposes only the before/after fields used by
-// application and catalog lifecycle audits. Persisted audit metadata can have
-// originated from older handlers, so it is treated as untrusted at the API
-// boundary even for audit.read callers.
+var (
+	safeAuditEmail     = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
+	safeAuditDigits    = regexp.MustCompile(`^[0-9]+$`)
+	safeAuditExtend    = regexp.MustCompile(`^[0-9]+\s+(?:hour|day|week|month|year)s?$`)
+	safeAuditSlug      = regexp.MustCompile(`^[a-z\d]+(?:-[a-z\d]+)*$`)
+	safeAuditCode      = regexp.MustCompile(`^[A-Za-z\d]+(?:[-_][A-Za-z\d]+)*$`)
+	safeAuditName      = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,120}$`)
+	safeAuditUUID      = regexp.MustCompile(`^[\da-f]{8}-[\da-f-]{27,}$`)
+	unsafeAuditText    = regexp.MustCompile(`(?i)(bearer\s+|-----BEGIN |\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.|\b(?:error|exception|stack trace|traceback|panic|connection|timeout|network|socket|host|internal(?:[-_ ]?db)?|refused|unavailable|deadline exceeded|econnrefused|database)\b|\bat\s+.+\.(?:go|ts|tsx|js|java|py):\d+)`)
+	encodedAuditSecret = regexp.MustCompile(`(?i)(?:[a-f\d]{32,}|[A-Za-z\d+/_-]{48,}={0,2})`)
+)
+
+// sanitizeAuditMetadata exposes only documented scalar audit fields and
+// before/after maps of those fields. Persisted audit metadata is untrusted at
+// the API boundary: keys alone are insufficient because allowlisted values may
+// themselves contain nested objects or credentials.
 func sanitizeAuditMetadata(raw json.RawMessage) json.RawMessage {
 	var source map[string]json.RawMessage
 	if len(raw) == 0 || json.Unmarshal(raw, &source) != nil {
 		return json.RawMessage("{}")
 	}
-	safe := make(map[string]map[string]json.RawMessage, 2)
-	for _, side := range []string{"before", "after"} {
-		var state map[string]json.RawMessage
-		if json.Unmarshal(source[side], &state) != nil {
+	safe := make(map[string]any)
+	for field, value := range source {
+		if field == "before" || field == "after" {
+			if state := sanitizeAuditState(value); len(state) != 0 {
+				safe[field] = state
+			}
 			continue
 		}
-		filtered := make(map[string]json.RawMessage)
-		for field, value := range state {
-			if _, allowed := safeLifecycleAuditFields[field]; allowed {
-				filtered[field] = value
-			}
-		}
-		if len(filtered) != 0 {
-			safe[side] = filtered
+		if safeValue, ok := sanitizeAuditScalar(field, value); ok {
+			safe[field] = safeValue
 		}
 	}
 	encoded, err := json.Marshal(safe)
@@ -1601,6 +1610,76 @@ func sanitizeAuditMetadata(raw json.RawMessage) json.RawMessage {
 		return json.RawMessage("{}")
 	}
 	return encoded
+}
+
+func sanitizeAuditState(raw json.RawMessage) map[string]any {
+	var source map[string]json.RawMessage
+	if json.Unmarshal(raw, &source) != nil {
+		return nil
+	}
+	safe := make(map[string]any)
+	for field, value := range source {
+		if safeValue, ok := sanitizeAuditScalar(field, value); ok {
+			safe[field] = safeValue
+		}
+	}
+	return safe
+}
+
+func sanitizeAuditScalar(field string, raw json.RawMessage) (any, bool) {
+	if _, allowed := safeAuditScalarFields[field]; !allowed {
+		return nil, false
+	}
+	trimmed := strings.TrimSpace(string(raw))
+	if isAuditNumericField(field) && safeAuditDigits.MatchString(trimmed) {
+		return json.Number(trimmed), true
+	}
+	var value string
+	if json.Unmarshal(raw, &value) != nil || !isSafeAuditText(value) {
+		return nil, false
+	}
+	if isAuditNumericField(field) {
+		return value, safeAuditDigits.MatchString(value)
+	}
+	switch field {
+	case "email", "user_email":
+		return value, safeAuditEmail.MatchString(value)
+	case "extend":
+		return value, safeAuditExtend.MatchString(value)
+	case "replacement_id":
+		return value, safeAuditUUID.MatchString(value)
+	case "status":
+		return value, map[string]bool{"active": true, "archived": true, "banned": true, "delivered": true, "delivering": true, "disabled": true, "expired": true, "failed": true, "inactive": true, "lifted": true, "maintenance": true, "pending": true, "revoked": true, "suspended": true, "verified": true}[value]
+	case "environment":
+		return value, value == "live" || value == "test"
+	case "environment_mode":
+		return value, value == "separate" || value == "shared"
+	case "type":
+		return value, value == "publishable" || value == "secret"
+	case "role":
+		return value, value == "owner" || value == "viewer"
+	case "slug":
+		return value, safeAuditSlug.MatchString(value)
+	case "code":
+		return value, safeAuditCode.MatchString(value)
+	case "name":
+		return value, safeAuditName.MatchString(value)
+	default:
+		return value, true
+	}
+}
+
+func isAuditNumericField(field string) bool {
+	switch field {
+	case "count", "devices", "grace_hours", "level", "max_devices", "revoked":
+		return true
+	default:
+		return false
+	}
+}
+
+func isSafeAuditText(value string) bool {
+	return len(value) <= 240 && !strings.ContainsAny(value, "\r\n\t") && !unsafeAuditText.MatchString(value) && !encodedAuditSecret.MatchString(value)
 }
 
 func (router *Router) handleAdminAuditLogs(writer http.ResponseWriter, request *http.Request) {
