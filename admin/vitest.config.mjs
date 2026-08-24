@@ -7,5 +7,8 @@ export default defineConfig({
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
   },
-  test: { environment: "jsdom", include: ["src/**/*.test.{ts,tsx}"] },
+  test: {
+    environment: "jsdom",
+    include: ["src/**/*.test.{ts,tsx}", "e2e/**/*.test.ts"],
+  },
 });

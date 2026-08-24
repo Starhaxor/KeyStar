@@ -29,6 +29,7 @@ const backendCommand = isCI
 
 export default defineConfig({
   testDir: "./e2e",
+  testMatch: "**/*.spec.ts",
   fullyParallel: false,
   forbidOnly: isCI,
   retries: isCI ? 1 : 0,

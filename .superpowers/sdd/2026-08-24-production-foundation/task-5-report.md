@@ -68,3 +68,18 @@
 - `cd admin; npm run e2e`
   - Not executable to browser assertions on this machine because Docker Desktop is not running. Playwright configuration started and then failed while bringing up PostgreSQL with: `failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine`.
   - This is a local external prerequisite limitation, not a skipped browser installation. CI supplies a healthy PostgreSQL 15 service and runs the same Playwright command after the existing backend/admin jobs.
+
+## Review follow-up
+
+- The reset path already ran `store.MigrateUp`, and migration 000004 creates the required `starloader` application before the backend starts. The reset command now also calls `FindDefaultApplication` as an explicit postcondition and fails before `serve` if the seeded application is missing or has the wrong slug.
+- Worker teardown now encloses the seed command, JSON parsing, and test execution. A partial seed failure or malformed fixture JSON therefore still invokes the guarded `reset` command instead of leaving partial records behind.
+- Added focused red/green evidence:
+  - `go test ./cmd/e2e-fixture -run TestVerifyRequiredDefaultApplication -count=1` was red with `undefined: verifyRequiredDefaultApplication`, then passed after the reset postcondition was implemented.
+  - `npx vitest run e2e/fixture-lifecycle.test.ts` was red because `fixture-lifecycle` did not exist, then passed 2/2 tests proving cleanup after seed and JSON-parse failures.
+- Fresh follow-up verification:
+  - `go test ./cmd/e2e-fixture -count=1`: pass.
+  - `npm test`: pass, 17 files and 58 tests.
+  - `npm run lint`: pass.
+  - `npx tsc --noEmit`: pass.
+  - `npm run build`: pass, including production type checking and 23 generated static pages.
+  - `npm run e2e`: still blocked before browser assertions by the unavailable Docker Desktop engine pipe, with the same exact error recorded above.

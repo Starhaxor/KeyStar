@@ -117,6 +117,24 @@ func resetDatabase(ctx context.Context, pool *pgxpool.Pool) error {
 	if err := store.MigrateUp(ctx, pool); err != nil {
 		return fmt.Errorf("migrate dedicated E2E database: %w", err)
 	}
+	return verifyRequiredDefaultApplication(ctx, store.New(pool))
+}
+
+type defaultApplicationFinder interface {
+	FindDefaultApplication(context.Context) (*domain.Application, error)
+}
+
+// verifyRequiredDefaultApplication makes the backend startup prerequisite an
+// explicit reset postcondition. Migration 000004 creates this application;
+// reset must fail before the backend starts if that contract ever regresses.
+func verifyRequiredDefaultApplication(ctx context.Context, finder defaultApplicationFinder) error {
+	application, err := finder.FindDefaultApplication(ctx)
+	if err != nil {
+		return fmt.Errorf("verify required default application: %w", err)
+	}
+	if application == nil || application.Slug != "starloader" {
+		return errors.New("verify required default application: starloader application is missing")
+	}
 	return nil
 }
 

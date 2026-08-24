@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
 import { expect, test as base, type Page } from "@playwright/test";
+import { withProvisionedFixture } from "./fixture-lifecycle";
 
 const execFileAsync = promisify(execFile);
 const backendDirectory = path.resolve(__dirname, "../../backend");
@@ -106,13 +107,13 @@ export async function signIn(page: Page, admin: AdminFixture) {
 export const test = base.extend<TestFixtures, WorkerFixtures>({
   e2eFixture: [
     async ({}, provide) => {
-      const serializedFixture = await runDatabaseFixture("seed");
-      const fixture = JSON.parse(serializedFixture) as E2EFixture;
-      try {
-        await provide(fixture);
-      } finally {
-        await runDatabaseFixture("reset");
-      }
+      await withProvisionedFixture<E2EFixture>(
+        () => runDatabaseFixture("seed"),
+        async () => {
+          await runDatabaseFixture("reset");
+        },
+        provide,
+      );
     },
     { scope: "worker" },
   ],

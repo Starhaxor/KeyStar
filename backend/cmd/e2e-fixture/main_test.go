@@ -1,6 +1,59 @@
 package main
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	"github.com/starloader/backend/internal/domain"
+)
+
+type fakeDefaultApplicationFinder struct {
+	application *domain.Application
+	err         error
+}
+
+func (finder fakeDefaultApplicationFinder) FindDefaultApplication(context.Context) (*domain.Application, error) {
+	return finder.application, finder.err
+}
+
+func TestVerifyRequiredDefaultApplication(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		finder    fakeDefaultApplicationFinder
+		wantError bool
+	}{
+		{
+			name:   "migration seeded required application",
+			finder: fakeDefaultApplicationFinder{application: &domain.Application{Slug: "starloader"}},
+		},
+		{
+			name:      "required application missing",
+			finder:    fakeDefaultApplicationFinder{err: domain.ErrApplicationNotFound},
+			wantError: true,
+		},
+		{
+			name:      "wrong default application",
+			finder:    fakeDefaultApplicationFinder{application: &domain.Application{Slug: "other"}},
+			wantError: true,
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			err := verifyRequiredDefaultApplication(context.Background(), test.finder)
+			if test.wantError && err == nil {
+				t.Fatal("verifyRequiredDefaultApplication() error = nil, want an error")
+			}
+			if !test.wantError && err != nil {
+				t.Fatalf("verifyRequiredDefaultApplication() error = %v", err)
+			}
+		})
+	}
+}
 
 func TestValidateDedicatedDatabaseURL(t *testing.T) {
 	t.Parallel()
