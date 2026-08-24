@@ -37,4 +37,16 @@ describe("admin API client", () => {
       headers: expect.objectContaining({ "X-KeyStar-App": "app-2" }),
     }));
   });
+
+  it("loads onboarding progress for the explicit initialized application", async () => {
+    document.cookie = "keystar_application_id=stale-app; Path=/";
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.onboardingProgress("selected-app");
+
+    expect(fetchMock).toHaveBeenCalledWith("/v1/admin/onboarding/progress", expect.objectContaining({
+      headers: expect.objectContaining({ "X-KeyStar-App": "selected-app" }),
+    }));
+  });
 });

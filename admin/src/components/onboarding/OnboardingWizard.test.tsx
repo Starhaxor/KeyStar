@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AdminIdentityProvider } from "@/context/AdminIdentityContext";
-import { ApplicationProvider } from "@/context/ApplicationContext";
+import { ApplicationProvider, useApplication } from "@/context/ApplicationContext";
 import { api, type OnboardingProgress } from "@/lib/api";
 import type { Application } from "@/lib/types";
 import OnboardingWizard from "./OnboardingWizard";
@@ -24,6 +24,13 @@ const application: Application = {
   environment_mode: "separate",
 };
 
+const secondApplication: Application = {
+  ...application,
+  id: "app-2",
+  name: "Second app",
+  slug: "second-app",
+};
+
 const credentialProgress: OnboardingProgress = {
   ok: true,
   application,
@@ -39,7 +46,12 @@ const catalogProgress: OnboardingProgress = {
   credential_environment: "test",
 };
 
-function renderWizard() {
+function RefreshApplicationContext() {
+  const { refresh } = useApplication();
+  return <button type="button" onClick={() => void refresh()}>Refresh application context</button>;
+}
+
+function renderWizard(extra?: React.ReactNode) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -48,6 +60,7 @@ function renderWizard() {
       <AdminIdentityProvider>
         <ApplicationProvider>
           <OnboardingWizard />
+          {extra}
         </ApplicationProvider>
       </AdminIdentityProvider>
     );
@@ -127,6 +140,61 @@ describe("deriveOnboardingStep", () => {
 });
 
 describe("OnboardingWizard", () => {
+  it("waits for application initialization before loading progress", async () => {
+    document.cookie = "keystar_application_id=app-1; Path=/";
+    let resolveApplications!: (value: { ok: boolean; items: Application[] }) => void;
+    vi.mocked(api.applications).mockReturnValue(new Promise((resolve) => {
+      resolveApplications = resolve;
+    }));
+    const loadProgress = vi.spyOn(api, "onboardingProgress").mockResolvedValue({
+      ...credentialProgress,
+      application: secondApplication,
+    });
+
+    renderWizard();
+    await flushEffects();
+    expect(loadProgress).not.toHaveBeenCalled();
+
+    resolveApplications({ ok: true, items: [secondApplication] });
+    await flushEffects();
+    expect(loadProgress).toHaveBeenCalledWith("app-2");
+  });
+
+  it("refetches progress when application context selects a different application", async () => {
+    document.cookie = "keystar_application_id=app-1; Path=/";
+    vi.mocked(api.applications)
+      .mockResolvedValueOnce({ ok: true, items: [application] })
+      .mockResolvedValueOnce({ ok: true, items: [secondApplication] });
+    const loadProgress = vi.spyOn(api, "onboardingProgress").mockImplementation(async (applicationID: string) => ({
+      ...catalogProgress,
+      application: applicationID === application.id ? application : secondApplication,
+    }));
+
+    renderWizard(<RefreshApplicationContext />);
+    await flushEffects();
+    expect(loadProgress).toHaveBeenCalledWith("app-1");
+
+    await act(async () => button("Refresh application context")?.click());
+    await flushEffects();
+
+    expect(loadProgress).toHaveBeenCalledWith("app-2");
+    expect(document.querySelector<HTMLSelectElement>("#onboarding-application")?.value).toBe("app-2");
+  });
+
+  it("does not expose mutation controls for progress from a different application", async () => {
+    vi.spyOn(api, "onboardingProgress").mockResolvedValue({
+      ...credentialProgress,
+      application: secondApplication,
+    });
+
+    renderWizard();
+    await flushEffects();
+
+    expect(document.querySelector<HTMLSelectElement>("#onboarding-application")?.value).toBe("app-1");
+    expect(button("Create credential")).toBeUndefined();
+    expect(document.body.textContent).toContain("Unable to load onboarding progress. Try again.");
+  });
+
   it("reloads server progress on re-entry instead of restoring browser wizard state", async () => {
     const loadProgress = vi.spyOn(api, "onboardingProgress")
       .mockResolvedValueOnce(credentialProgress)
@@ -195,5 +263,67 @@ describe("OnboardingWizard", () => {
 
     await act(async () => button("Done")?.click());
     expect(document.body.textContent).not.toContain("ks_pk_test_shown-once");
+  });
+
+  it("reloads persisted catalog state after plan creation fails and retries without recreating the product", async () => {
+    const productOnlyProgress: OnboardingProgress = {
+      ...catalogProgress,
+      product_count: 1,
+      product: { id: "product-1", name: "Desktop" },
+    };
+    const loadProgress = vi.spyOn(api, "onboardingProgress")
+      .mockResolvedValueOnce(catalogProgress)
+      .mockResolvedValue(productOnlyProgress);
+    const createProduct = vi.spyOn(api, "createProduct").mockResolvedValue({
+      ok: true,
+      product: {
+        id: "product-1",
+        application_id: application.id,
+        name: "Desktop",
+        slug: "desktop",
+        status: "active",
+        created_at: "2026-08-24T00:00:00Z",
+        updated_at: "2026-08-24T00:00:00Z",
+      },
+    });
+    const createPlan = vi.spyOn(api, "createPlan")
+      .mockRejectedValueOnce(new Error("plan insert failed"))
+      .mockResolvedValue({
+        ok: true,
+        plan: {
+          id: "plan-1",
+          product_id: "product-1",
+          name: "Test plan",
+          code: "test",
+          level: 1,
+          max_devices: 1,
+          default_duration_seconds: null,
+          status: "active",
+          created_at: "2026-08-24T00:00:00Z",
+          updated_at: "2026-08-24T00:00:00Z",
+        },
+      });
+
+    renderWizard();
+    await flushEffects();
+    const productName = document.querySelector<HTMLInputElement>("#onboarding-product-name");
+    if (productName) setControlValue(productName, "Desktop");
+
+    await act(async () => button("Create product and plan")?.click());
+    await flushEffects();
+
+    expect(loadProgress).toHaveBeenCalledTimes(2);
+    expect(document.querySelector("#onboarding-product-name")).toBeNull();
+    expect(document.body.textContent).toContain("Add the first active plan to Desktop.");
+
+    await act(async () => button("Create product and plan")?.click());
+    expect(createProduct).toHaveBeenCalledOnce();
+    expect(createPlan).toHaveBeenCalledTimes(2);
+    expect(createPlan).toHaveBeenLastCalledWith("product-1", {
+      name: "Test plan",
+      code: "test",
+      level: 1,
+      max_devices: 1,
+    });
   });
 });

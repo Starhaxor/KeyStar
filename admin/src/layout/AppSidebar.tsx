@@ -8,6 +8,7 @@ import { useAdminIdentity } from "../context/AdminIdentityContext";
 import { useApplication } from "../context/ApplicationContext";
 import {
   sidebarSections,
+  isSidebarItemVisible,
   type SidebarIcon,
   type SidebarItem,
   type SidebarSubItem,
@@ -78,7 +79,7 @@ const AppSidebar: React.FC = () => {
   const visibleSections = sidebarSections
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) => !item.permission || hasPermission(item.permission)),
+      items: section.items.filter((item) => isSidebarItemVisible(item, hasPermission)),
     }))
     .filter((section) => section.items.length > 0);
 

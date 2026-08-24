@@ -8,7 +8,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { sidebarSections } from "@/layout/sidebarNavigation";
+import { isSidebarItemVisible, sidebarSections } from "@/layout/sidebarNavigation";
 import { useAdminIdentity } from "@/context/AdminIdentityContext";
 import { useTheme } from "@/context/ThemeContext";
 import { SearchIcon } from "@/icons";
@@ -80,7 +80,7 @@ export default function CommandPalette() {
     const navigation: PaletteEntry[] = [];
     for (const section of sidebarSections) {
       for (const item of section.items) {
-        if (item.permission && !hasPermission(item.permission)) continue;
+        if (!isSidebarItemVisible(item, hasPermission)) continue;
         if (
           item.children?.some(
             (child) => child.permission && !hasPermission(child.permission)

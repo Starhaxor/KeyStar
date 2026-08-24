@@ -14,6 +14,8 @@ import (
 
 const onboardingApplicationID = "019c2222-2222-7222-8222-222222222222"
 
+var onboardingNow = time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+
 type fakeOnboardingConsole struct {
 	httpapi.AdminConsoleStore
 
@@ -21,11 +23,12 @@ type fakeOnboardingConsole struct {
 	credentials  []domain.ApplicationCredential
 	products     []domain.Product
 	plans        map[string][]domain.Plan
-	licenseCount int64
+	licenses     []domain.ConsoleLicense
 
 	credentialApplicationID string
 	productApplicationID    string
 	licenseApplicationID    string
+	licenseStatus           string
 }
 
 func (*fakeOnboardingConsole) AppendAuditLog(context.Context, domain.NewAuditLog) error {
@@ -54,9 +57,14 @@ func (fake *fakeOnboardingConsole) ListPlans(_ context.Context, productID string
 	return fake.plans[productID], nil
 }
 
-func (fake *fakeOnboardingConsole) ListConsoleLicenses(_ context.Context, applicationID string, _, _ int, _, _ string) ([]domain.ConsoleLicense, int64, error) {
+func (fake *fakeOnboardingConsole) ListConsoleLicenses(_ context.Context, applicationID string, offset, limit int, _, status string) ([]domain.ConsoleLicense, int64, error) {
 	fake.licenseApplicationID = applicationID
-	return nil, fake.licenseCount, nil
+	fake.licenseStatus = status
+	if offset >= len(fake.licenses) {
+		return []domain.ConsoleLicense{}, int64(len(fake.licenses)), nil
+	}
+	end := min(offset+limit, len(fake.licenses))
+	return fake.licenses[offset:end], int64(len(fake.licenses)), nil
 }
 
 type onboardingApplicationResolver struct{}
@@ -78,6 +86,7 @@ func newOnboardingTestRouter(t *testing.T, console *fakeOnboardingConsole, accou
 	core := httpapi.NewRouter(httpapi.RouterConfig{
 		Applications:         onboardingApplicationResolver{},
 		DefaultApplicationID: onboardingApplicationID,
+		Now:                  func() time.Time { return onboardingNow },
 		Admin: httpapi.AdminConfig{
 			Auth: auth, Console: console,
 			AllowedOrigins: []string{"http://localhost:3000"},
@@ -104,11 +113,13 @@ func TestAdminOnboardingProgressIsApplicationScopedAndSecretFree(t *testing.T) {
 		},
 		credentials: []domain.ApplicationCredential{
 			{ID: "publishable-active", CredentialType: domain.CredentialPublishable, Environment: domain.CredentialEnvironmentTest, Status: domain.CredentialStatusActive, KeyHash: []byte("must-not-leak")},
+			{ID: "publishable-time-expired", CredentialType: domain.CredentialPublishable, Environment: domain.CredentialEnvironmentLive, Status: domain.CredentialStatusActive, ExpiresAt: timePointer(onboardingNow.Add(-time.Minute))},
 			{ID: "secret-active", CredentialType: domain.CredentialSecret, Environment: domain.CredentialEnvironmentLive, Status: domain.CredentialStatusActive, KeyHash: []byte("must-not-leak-either")},
 			{ID: "publishable-revoked", CredentialType: domain.CredentialPublishable, Environment: domain.CredentialEnvironmentLive, Status: domain.CredentialStatusRevoked},
 		},
 		products: []domain.Product{
 			{ID: "product-active", ApplicationID: onboardingApplicationID, Name: "Desktop", Status: domain.CatalogStatusActive},
+			{ID: "product-other", ApplicationID: onboardingApplicationID, Name: "Other", Status: domain.CatalogStatusActive},
 			{ID: "product-archived", ApplicationID: onboardingApplicationID, Name: "Old", Status: domain.CatalogStatusArchived},
 		},
 		plans: map[string][]domain.Plan{
@@ -116,8 +127,19 @@ func TestAdminOnboardingProgressIsApplicationScopedAndSecretFree(t *testing.T) {
 				{ID: "plan-active", ProductID: "product-active", Name: "Test", Status: domain.CatalogStatusActive},
 				{ID: "plan-archived", ProductID: "product-active", Name: "Old", Status: domain.CatalogStatusArchived},
 			},
+			"product-other": {
+				{ID: "plan-other", ProductID: "product-other", Name: "Other", Status: domain.CatalogStatusActive},
+			},
 		},
-		licenseCount: 2,
+		licenses: []domain.ConsoleLicense{
+			{ID: "license-valid", ProductID: "product-active", PlanID: "plan-active", Status: domain.LicenseStatusActive, ExpiresAt: onboardingNow.Add(time.Hour)},
+			{ID: "license-revoked", ProductID: "product-active", PlanID: "plan-active", Status: domain.LicenseStatusRevoked, ExpiresAt: onboardingNow.Add(time.Hour)},
+			{ID: "license-status-expired", ProductID: "product-active", PlanID: "plan-active", Status: domain.LicenseStatusExpired, ExpiresAt: onboardingNow.Add(time.Hour)},
+			{ID: "license-time-expired", ProductID: "product-active", PlanID: "plan-active", Status: domain.LicenseStatusActive, ExpiresAt: onboardingNow.Add(-time.Minute)},
+			{ID: "license-archived-product", ProductID: "product-archived", PlanID: "plan-active", Status: domain.LicenseStatusActive, ExpiresAt: onboardingNow.Add(time.Hour)},
+			{ID: "license-archived-plan", ProductID: "product-active", PlanID: "plan-archived", Status: domain.LicenseStatusActive, ExpiresAt: onboardingNow.Add(time.Hour)},
+			{ID: "license-mismatched-plan", ProductID: "product-active", PlanID: "plan-other", Status: domain.LicenseStatusActive, ExpiresAt: onboardingNow.Add(time.Hour)},
+		},
 	}
 	router := newOnboardingTestRouter(t, console, testOwnerAccount())
 	recorder := httptest.NewRecorder()
@@ -132,9 +154,9 @@ func TestAdminOnboardingProgressIsApplicationScopedAndSecretFree(t *testing.T) {
 		`"id":"` + onboardingApplicationID + `"`,
 		`"credential_count":1`,
 		`"credential_environment":"test"`,
-		`"product_count":1`,
-		`"plan_count":1`,
-		`"license_count":2`,
+		`"product_count":2`,
+		`"plan_count":2`,
+		`"license_count":1`,
 		`"product":{"id":"product-active","name":"Desktop"}`,
 		`"plan":{"id":"plan-active","name":"Test"}`,
 	} {
@@ -150,24 +172,42 @@ func TestAdminOnboardingProgressIsApplicationScopedAndSecretFree(t *testing.T) {
 	if console.credentialApplicationID != onboardingApplicationID || console.productApplicationID != onboardingApplicationID || console.licenseApplicationID != onboardingApplicationID {
 		t.Fatalf("scope = credentials %q, products %q, licenses %q", console.credentialApplicationID, console.productApplicationID, console.licenseApplicationID)
 	}
+	if console.licenseStatus != "active" {
+		t.Fatalf("license status filter = %q, want active", console.licenseStatus)
+	}
 }
 
 func TestAdminOnboardingProgressRequiresAllReadPermissions(t *testing.T) {
-	account := testOwnerAccount()
-	account.Permissions = []string{
+	required := []string{
 		domain.PermApplicationsRead,
 		domain.PermCredentialsRead,
 		domain.PermCatalogRead,
+		domain.PermLicensesRead,
 	}
-	router := newOnboardingTestRouter(t, &fakeOnboardingConsole{}, account)
-	recorder := httptest.NewRecorder()
+	for _, missing := range required {
+		t.Run(missing, func(t *testing.T) {
+			account := testOwnerAccount()
+			account.Permissions = nil
+			for _, permission := range required {
+				if permission != missing {
+					account.Permissions = append(account.Permissions, permission)
+				}
+			}
+			router := newOnboardingTestRouter(t, &fakeOnboardingConsole{}, account)
+			recorder := httptest.NewRecorder()
 
-	router.ServeHTTP(recorder, onboardingRequest("/v1/admin/onboarding/progress"))
+			router.ServeHTTP(recorder, onboardingRequest("/v1/admin/onboarding/progress"))
 
-	if recorder.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+			if recorder.Code != http.StatusForbidden {
+				t.Fatalf("missing %s: status = %d, body = %s", missing, recorder.Code, recorder.Body.String())
+			}
+			if !strings.Contains(recorder.Body.String(), `"code":"PERMISSION_DENIED"`) {
+				t.Fatalf("missing %s: body = %s", missing, recorder.Body.String())
+			}
+		})
 	}
-	if !strings.Contains(recorder.Body.String(), `"code":"PERMISSION_DENIED"`) {
-		t.Fatalf("body = %s", recorder.Body.String())
-	}
+}
+
+func timePointer(value time.Time) *time.Time {
+	return &value
 }

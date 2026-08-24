@@ -20,7 +20,7 @@ describe("CommandPalette", () => {
   });
 
   it("filters navigation entries by admin permissions", () => {
-    expect(source).toContain("hasPermission(item.permission)");
+    expect(source).toContain("isSidebarItemVisible(item, hasPermission)");
   });
 
   it("supports keyboard navigation and dismissal", () => {

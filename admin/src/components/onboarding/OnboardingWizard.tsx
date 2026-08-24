@@ -10,7 +10,7 @@ import { reportClientError } from "@/lib/clientError";
 import { defaultScopesForCredentialType } from "@/lib/credentialScopes";
 import type { Organization } from "@/lib/types";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { deriveOnboardingStep, type OnboardingStep } from "./onboardingState";
 
@@ -32,7 +32,7 @@ function completedStep(current: OnboardingStep, candidate: OnboardingStep) {
 
 export default function OnboardingWizard() {
   const { hasPermission } = useAdminIdentity();
-  const { applications, selectedApplicationID, selectApplication, refresh: refreshApplications } = useApplication();
+  const { applications, selectedApplicationID, selectApplication, refresh: refreshApplications, loading: applicationsLoading } = useApplication();
   const [progress, setProgress] = useState<OnboardingProgress | null>(null);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,28 +53,43 @@ export default function OnboardingWizard() {
   const [applicationName, setApplicationName] = useState("");
   const [applicationSlug, setApplicationSlug] = useState("");
   const [organizationID, setOrganizationID] = useState("");
+  const selectedApplicationRef = useRef(selectedApplicationID);
+  selectedApplicationRef.current = selectedApplicationID;
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (applicationID: string) => {
     setLoading(true);
     setError(null);
     try {
       const [nextProgress, organizationResponse] = await Promise.all([
-        api.onboardingProgress(),
+        api.onboardingProgress(applicationID),
         api.organizations(),
       ]);
+      if (selectedApplicationRef.current !== applicationID) return;
+      if (nextProgress.application?.id !== applicationID) {
+        setProgress(null);
+        setError("Unable to load onboarding progress. Try again.");
+        return;
+      }
       setProgress(nextProgress);
       setOrganizations(organizationResponse.items);
       setOrganizationID((current) => current || organizationResponse.items[0]?.id || "");
     } catch (loadError) {
+      if (selectedApplicationRef.current !== applicationID) return;
       setError(reportClientError(loadError, "Unable to load onboarding progress. Try again."));
     } finally {
-      setLoading(false);
+      if (selectedApplicationRef.current === applicationID) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (applicationsLoading) return;
+    if (!selectedApplicationID) {
+      setProgress(null);
+      setLoading(false);
+      return;
+    }
+    void load(selectedApplicationID);
+  }, [applicationsLoading, load, selectedApplicationID]);
 
   const step = useMemo(() => progress ? deriveOnboardingStep(progress) : "application", [progress]);
 
@@ -97,6 +112,8 @@ export default function OnboardingWizard() {
 
   async function createCredential(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const applicationID = selectedApplicationID;
+    if (!applicationID || progress?.application?.id !== applicationID) return;
     await runAction(async () => {
       const response = await api.createCredential({
         name: credentialName.trim(),
@@ -105,32 +122,37 @@ export default function OnboardingWizard() {
         scopes: defaultScopesForCredentialType("publishable"),
       });
       reveal("credential", response.key);
-      await load();
+      await load(applicationID);
     }, "Unable to create the credential. Try again.");
   }
 
   async function createCatalog(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!progress) return;
+    const applicationID = selectedApplicationID;
+    if (!applicationID || progress?.application?.id !== applicationID) return;
     await runAction(async () => {
-      let productID = progress.product?.id;
-      if (!productID) {
-        const productResponse = await api.createProduct(productName.trim(), productSlug.trim());
-        productID = productResponse.product.id;
+      try {
+        let productID = progress.product?.id;
+        if (!productID) {
+          const productResponse = await api.createProduct(productName.trim(), productSlug.trim());
+          productID = productResponse.product.id;
+        }
+        await api.createPlan(productID, {
+          name: planName.trim(),
+          code: planCode.trim(),
+          level: 1,
+          max_devices: 1,
+        });
+      } finally {
+        await load(applicationID);
       }
-      await api.createPlan(productID, {
-        name: planName.trim(),
-        code: planCode.trim(),
-        level: 1,
-        max_devices: 1,
-      });
-      await load();
     }, "Unable to create the product and plan. Try again.");
   }
 
   async function createTestLicense(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!progress?.product || !progress.plan) return;
+    const applicationID = selectedApplicationID;
+    if (!applicationID || progress?.application?.id !== applicationID || !progress.product || !progress.plan) return;
     await runAction(async () => {
       const response = await api.createLicense(
         licenseEmail.trim(),
@@ -139,7 +161,7 @@ export default function OnboardingWizard() {
         { productId: progress.product!.id, planId: progress.plan!.id }
       );
       reveal("license", response.key);
-      await load();
+      await load(applicationID);
     }, "Unable to issue the test license. Verify the user email and try again.");
   }
 
@@ -184,6 +206,7 @@ export default function OnboardingWizard() {
   const canCreateCredential = hasPermission("credentials.write");
   const canCreateCatalog = hasPermission("catalog.write");
   const canCreateLicense = hasPermission("licenses.write");
+  const progressMatchesSelection = !applicationsLoading && Boolean(selectedApplicationID) && progress?.application?.id === selectedApplicationID;
 
   return (
     <div className="space-y-6">
@@ -212,7 +235,7 @@ export default function OnboardingWizard() {
             {loading ? (
               <p className="py-12 text-center text-sm text-gray-500">Loading onboarding progress…</p>
             ) : error && !progress ? (
-              <div className="rounded-xl border border-error-200 bg-error-50 p-5 text-sm text-error-700" role="alert"><p>{error}</p><button type="button" className="mt-3 font-semibold underline" onClick={() => void load()}>Retry</button></div>
+              <div className="rounded-xl border border-error-200 bg-error-50 p-5 text-sm text-error-700" role="alert"><p>{error}</p><button type="button" className="mt-3 font-semibold underline" onClick={() => { if (selectedApplicationID) void load(selectedApplicationID); }}>Retry</button></div>
             ) : (
               <>
                 {error && <p className="mb-4 rounded-xl border border-error-200 bg-error-50 p-4 text-sm text-error-700" role="alert">{error}</p>}
@@ -233,7 +256,7 @@ export default function OnboardingWizard() {
                       <Field id="onboarding-credential-name" name="name" label="Credential name" description="A descriptive label visible to administrators; the secret is shown only once.">
                         <input className={inputClass} value={credentialName} maxLength={64} onChange={(event) => setCredentialName(event.target.value)} />
                       </Field>
-                      <Button size="sm" disabled={busy || !canCreateCredential || !credentialName.trim()}>{busy ? "Creating…" : "Create credential"}</Button>
+                      <Button size="sm" disabled={busy || !canCreateCredential || !progressMatchesSelection || !credentialName.trim()}>{busy ? "Creating…" : "Create credential"}</Button>
                       {!canCreateCredential && <PermissionNote permission="credentials.write" />}
                     </form>
                   </StepPanel>
@@ -251,7 +274,7 @@ export default function OnboardingWizard() {
                         <Field id="onboarding-plan-name" name="plan_name" label="Plan name"><input className={inputClass} value={planName} onChange={(event) => setPlanName(event.target.value)} /></Field>
                         <Field id="onboarding-plan-code" name="plan_code" label="Plan code"><input className={inputClass} value={planCode} onChange={(event) => setPlanCode(event.target.value)} /></Field>
                       </div>
-                      <Button size="sm" disabled={busy || !canCreateCatalog || (!progress.product && !productName.trim()) || !planName.trim() || !planCode.trim()}>{busy ? "Creating…" : "Create product and plan"}</Button>
+                      <Button size="sm" disabled={busy || !canCreateCatalog || !progressMatchesSelection || (!progress.product && !productName.trim()) || !planName.trim() || !planCode.trim()}>{busy ? "Creating…" : "Create product and plan"}</Button>
                       {!canCreateCatalog && <PermissionNote permission="catalog.write" />}
                     </form>
                   </StepPanel>
@@ -262,7 +285,7 @@ export default function OnboardingWizard() {
                       <Field id="onboarding-license-email" name="user_email" label="Existing test user email" description="The user must already exist in this application.">
                         <input className={inputClass} type="email" required value={licenseEmail} placeholder="tester@example.com" onChange={(event) => setLicenseEmail(event.target.value)} />
                       </Field>
-                      <Button size="sm" disabled={busy || !canCreateLicense || !licenseEmail.trim() || !progress.product || !progress.plan}>{busy ? "Issuing…" : "Issue test license"}</Button>
+                      <Button size="sm" disabled={busy || !canCreateLicense || !progressMatchesSelection || !licenseEmail.trim() || !progress.product || !progress.plan}>{busy ? "Issuing…" : "Issue test license"}</Button>
                       {!canCreateLicense && <PermissionNote permission="licenses.write" />}
                     </form>
                   </StepPanel>
@@ -279,14 +302,14 @@ export default function OnboardingWizard() {
           <aside className="rounded-2xl border border-gray-200 bg-gray-50 p-5 dark:border-gray-800 dark:bg-white/[0.02]">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Application context</p>
             <label className="mt-4 block text-sm font-medium text-gray-700 dark:text-gray-300" htmlFor="onboarding-application">Current application</label>
-            <select id="onboarding-application" className={`${inputClass} mt-2`} value={selectedApplicationID ?? ""} disabled={applications.length === 0} onChange={(event) => selectApplication(event.target.value)}>
+            <select id="onboarding-application" className={`${inputClass} mt-2`} value={selectedApplicationID ?? ""} disabled={applicationsLoading || applications.length === 0} onChange={(event) => selectApplication(event.target.value)}>
               <option value="" disabled>Select application</option>
               {applications.map((application) => <option key={application.id} value={application.id}>{application.name}</option>)}
             </select>
             {progress?.application && <dl className="mt-5 space-y-3 text-sm"><ResourceCount label="Publishable credentials" value={progress.credential_count} /><ResourceCount label="Active products" value={progress.product_count} /><ResourceCount label="Active plans" value={progress.plan_count} /><ResourceCount label="Licenses" value={progress.license_count} /></dl>}
             <div className="mt-5 space-y-2">
-              <Button type="button" size="sm" variant="outline" className="w-full" disabled={!canCreateApplication} onClick={() => setApplicationDialogOpen(true)}>Create application</Button>
-              <button type="button" className="w-full text-center text-xs font-medium text-gray-500 hover:text-brand-500" disabled={!canCreateApplication} onClick={() => setOrganizationDialogOpen(true)}>Create organization</button>
+              <Button type="button" size="sm" variant="outline" className="w-full" disabled={applicationsLoading || !canCreateApplication} onClick={() => setApplicationDialogOpen(true)}>Create application</Button>
+              <button type="button" className="w-full text-center text-xs font-medium text-gray-500 hover:text-brand-500" disabled={applicationsLoading || !canCreateApplication} onClick={() => setOrganizationDialogOpen(true)}>Create organization</button>
             </div>
           </aside>
         </div>

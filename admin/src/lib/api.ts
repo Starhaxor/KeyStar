@@ -79,11 +79,11 @@ export function hasSessionCookie(): boolean {
 
 async function request<T>(
   path: string,
-  init?: { method?: string; body?: unknown; isLogin?: boolean; skipApplicationHeader?: boolean }
+  init?: { method?: string; body?: unknown; isLogin?: boolean; skipApplicationHeader?: boolean; applicationId?: string }
 ): Promise<T> {
   const method = init?.method ?? "GET";
   const headers: Record<string, string> = {};
-	const applicationID = readCookie(APPLICATION_COOKIE);
+	const applicationID = init?.applicationId ?? readCookie(APPLICATION_COOKIE);
 	if (applicationID && !init?.skipApplicationHeader) headers[APPLICATION_HEADER] = applicationID;
   if (init?.body !== undefined) {
     headers["Content-Type"] = "application/json";
@@ -240,8 +240,8 @@ export const api = {
   applications() {
     return request<{ ok: boolean; items: Application[] }>("/v1/admin/applications", { skipApplicationHeader: true });
   },
-  onboardingProgress() {
-    return request<OnboardingProgress>("/v1/admin/onboarding/progress");
+  onboardingProgress(applicationId: string) {
+    return request<OnboardingProgress>("/v1/admin/onboarding/progress", { applicationId });
   },
   organizations() {
     return request<{ ok: boolean; items: Organization[] }>("/v1/admin/applications/organizations", { skipApplicationHeader: true });

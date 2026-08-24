@@ -68,6 +68,7 @@ type onboardingProgressJSON struct {
 // never enter this response.
 func (router *Router) handleAdminOnboardingProgress(writer http.ResponseWriter, request *http.Request) {
 	applicationID := router.AdminApplicationID(request)
+	now := router.Now().UTC()
 	applications, err := router.Admin.Console.ListApplications(request.Context())
 	if err != nil {
 		router.WriteConsoleError(writer, request, err)
@@ -98,7 +99,9 @@ func (router *Router) handleAdminOnboardingProgress(writer http.ResponseWriter, 
 		},
 	}
 	for _, entry := range credentials {
-		if entry.Status == domain.CredentialStatusActive && entry.CredentialType == domain.CredentialPublishable {
+		if entry.Status == domain.CredentialStatusActive &&
+			entry.CredentialType == domain.CredentialPublishable &&
+			(entry.ExpiresAt == nil || entry.ExpiresAt.After(now)) {
 			progress.CredentialCount++
 			if progress.CredentialEnvironment == "" {
 				progress.CredentialEnvironment = string(entry.Environment)
@@ -111,10 +114,13 @@ func (router *Router) handleAdminOnboardingProgress(writer http.ResponseWriter, 
 		router.WriteConsoleError(writer, request, err)
 		return
 	}
+	activeProducts := make(map[string]struct{}, len(products))
+	activePlanProducts := make(map[string]string)
 	for _, product := range products {
 		if product.Status != domain.CatalogStatusActive {
 			continue
 		}
+		activeProducts[product.ID] = struct{}{}
 		progress.ProductCount++
 		if progress.Product == nil {
 			progress.Product = &onboardingResourceJSON{ID: product.ID, Name: product.Name}
@@ -128,6 +134,7 @@ func (router *Router) handleAdminOnboardingProgress(writer http.ResponseWriter, 
 			if plan.Status != domain.CatalogStatusActive {
 				continue
 			}
+			activePlanProducts[plan.ID] = product.ID
 			progress.PlanCount++
 			if progress.Plan == nil {
 				progress.Product = &onboardingResourceJSON{ID: product.ID, Name: product.Name}
@@ -136,10 +143,25 @@ func (router *Router) handleAdminOnboardingProgress(writer http.ResponseWriter, 
 		}
 	}
 
-	_, progress.LicenseCount, err = router.Admin.Console.ListConsoleLicenses(request.Context(), applicationID, 0, 1, "", "")
-	if err != nil {
-		router.WriteConsoleError(writer, request, err)
-		return
+	for offset := 0; ; {
+		licenses, total, listErr := router.Admin.Console.ListConsoleLicenses(request.Context(), applicationID, offset, maxAdminPageSize, "", string(domain.LicenseStatusActive))
+		if listErr != nil {
+			router.WriteConsoleError(writer, request, listErr)
+			return
+		}
+		for _, license := range licenses {
+			_, productActive := activeProducts[license.ProductID]
+			planProductID, planActive := activePlanProducts[license.PlanID]
+			if license.Status == domain.LicenseStatusActive &&
+				license.ExpiresAt.After(now) &&
+				productActive && planActive && planProductID == license.ProductID {
+				progress.LicenseCount++
+			}
+		}
+		offset += len(licenses)
+		if len(licenses) == 0 || int64(offset) >= total {
+			break
+		}
 	}
 	httpapi.WriteJSON(writer, http.StatusOK, progress)
 }

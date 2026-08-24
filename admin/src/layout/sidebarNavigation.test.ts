@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { sidebarSections } from "./sidebarNavigation";
+import { isSidebarItemVisible, sidebarSections } from "./sidebarNavigation";
 
 describe("sidebar navigation", () => {
   it("groups application resources under one dedicated section", () => {
@@ -26,5 +26,25 @@ describe("sidebar navigation", () => {
       "MFA & settings",
       "Security events",
     ]);
+  });
+
+  it("shows onboarding only when every progress read permission is granted", () => {
+    const onboarding = sidebarSections
+      .flatMap((section) => section.items)
+      .find((item) => item.path === "/onboarding");
+    const required = [
+      "applications.read",
+      "credentials.read",
+      "catalog.read",
+      "licenses.read",
+    ];
+
+    expect(onboarding).toBeDefined();
+    expect(isSidebarItemVisible(onboarding!, (permission) => required.includes(permission))).toBe(true);
+    for (const missing of required) {
+      expect(
+        isSidebarItemVisible(onboarding!, (permission) => permission !== missing && required.includes(permission))
+      ).toBe(false);
+    }
   });
 });

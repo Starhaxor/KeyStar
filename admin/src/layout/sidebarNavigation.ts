@@ -20,6 +20,7 @@ export type SidebarItem = {
   icon: SidebarIcon;
   path: string;
   permission?: string;
+  permissions?: string[];
   children?: SidebarSubItem[];
 };
 
@@ -28,12 +29,20 @@ export type SidebarSection = {
   items: SidebarItem[];
 };
 
+export function isSidebarItemVisible(
+  item: SidebarItem,
+  hasPermission: (permission: string) => boolean
+) {
+  if (item.permission && !hasPermission(item.permission)) return false;
+  return (item.permissions ?? []).every(hasPermission);
+}
+
 export const sidebarSections: SidebarSection[] = [
   {
     name: "Workspace",
     items: [
       { icon: "grid", name: "Overview", path: "/", permission: "overview.read" },
-      { icon: "app", name: "Onboarding", path: "/onboarding", permission: "applications.read" },
+      { icon: "app", name: "Onboarding", path: "/onboarding", permissions: ["applications.read", "credentials.read", "catalog.read", "licenses.read"] },
       { icon: "app", name: "Applications", path: "/applications", permission: "applications.read" },
     ],
   },
