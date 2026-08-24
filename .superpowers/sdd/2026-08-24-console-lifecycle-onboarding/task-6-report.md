@@ -32,3 +32,9 @@
 - Replaced the generic metadata rendering fallback with an explicit allowlist of documented audit scalar keys and `before`/`after` state objects. Every allowed string is format-checked; unrecognized metadata is redacted.
 - Added a regression for `details: "database connection failed: ECONNREFUSED internal-db:5432"`; its raw network and host information is not rendered, while safe `status`, `email`, and `before` state values remain visible.
 - Final verification: `npm test` passed (27 files, 86 tests), `npm run lint` passed, and `npm run build` passed.
+
+## Strict metadata formats follow-up
+
+- Tightened allowlisted audit fields to expected value formats: known status/environment/type/role enums, numeric counters, UUID replacement IDs, and constrained names, slugs, codes, durations, and emails.
+- Added regressions for raw timeout/network-host text under the allowlisted `name`, `environment`, and `status` keys. Safe status, email, and `before` metadata remain visible.
+- Final verification: focused audit dialog test, full `npm test` (27 files, 86 tests), `npm run lint`, and `npm run build` passed.

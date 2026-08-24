@@ -36,6 +36,11 @@ const entry: AuditEntry = {
     status: "disabled",
     email: "audited@example.com",
     before: { name: "Desktop client", status: "active" },
+    after: {
+      name: "connection timeout internal-db",
+      environment: "connection timeout internal-db",
+      status: "connection timeout internal-db",
+    },
     api_token: "must-not-be-rendered",
     nested: { fingerprint: "must-not-be-rendered" },
     details: "database connection failed: ECONNREFUSED internal-db:5432",
@@ -77,6 +82,7 @@ describe("AuditDetailDialog", () => {
     expect(dialog?.textContent).not.toContain("must-not-be-rendered");
     expect(dialog?.textContent).not.toContain("database connection failed");
     expect(dialog?.textContent).not.toContain("internal-db:5432");
+    expect(dialog?.textContent).not.toContain("connection timeout internal-db");
     expect(dialog?.textContent).not.toContain("raw server error");
     expect(dialog?.textContent).not.toContain("internal/service.go");
     expect(dialog?.textContent).not.toContain("database exception");

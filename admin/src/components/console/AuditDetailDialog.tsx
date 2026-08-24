@@ -19,7 +19,15 @@ const safeScalarKeys = new Set([
   "revoked", "role", "slug", "status", "type", "user_email",
 ]);
 const safeObjectKeys = new Set(["before", "after"]);
-const unsafeText = /(bearer\s+|-----BEGIN |\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.|\b(?:error|exception|stack trace|traceback|panic|connection failed|connection refused|econnrefused|database)\b|\bat\s+.+\.(?:go|ts|tsx|js|java|py):\d+)/i;
+const auditStatuses = new Set([
+  "active", "archived", "banned", "delivered", "delivering", "disabled", "expired",
+  "failed", "inactive", "lifted", "maintenance", "pending", "revoked", "suspended", "verified",
+]);
+const credentialTypes = new Set(["publishable", "secret"]);
+const adminRoles = new Set(["owner", "viewer"]);
+const environments = new Set(["live", "test"]);
+const environmentModes = new Set(["separate", "shared"]);
+const unsafeText = /(bearer\s+|-----BEGIN |\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.|\b(?:error|exception|stack trace|traceback|panic|connection|timeout|network|socket|host|internal(?:[-_ ]?db)?|refused|unavailable|deadline exceeded|econnrefused|database)\b|\bat\s+.+\.(?:go|ts|tsx|js|java|py):\d+)/i;
 const encodedSecret = /(?:[a-f\d]{32,}|[A-Za-z\d+/_-]{48,}={0,2})/i;
 const maxTextLength = 240;
 const maxCollectionItems = 30;
@@ -34,7 +42,14 @@ function isSafeScalarValue(key: string, value: string) {
   if (["count", "devices", "grace_hours", "level", "max_devices", "revoked"].includes(key)) return /^\d+$/.test(value);
   if (key === "extend") return /^\d+\s+(?:hour|day|week|month|year)s?$/.test(value);
   if (key === "replacement_id") return /^[\da-f]{8}-[\da-f-]{27,}$/i.test(value);
-  return /^[\p{L}\p{N}][\p{L}\p{N} ._/-]{0,120}$/u.test(value);
+  if (key === "status") return auditStatuses.has(value);
+  if (key === "environment") return environments.has(value);
+  if (key === "environment_mode") return environmentModes.has(value);
+  if (key === "type") return credentialTypes.has(value);
+  if (key === "role") return adminRoles.has(value);
+  if (key === "slug") return /^[a-z\d]+(?:-[a-z\d]+)*$/.test(value);
+  if (key === "code") return /^[A-Za-z\d]+(?:[-_][A-Za-z\d]+)*$/.test(value);
+  return key === "name" && /^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,120}$/u.test(value);
 }
 
 function isPlainRecord(value: object): value is Record<string, unknown> {
