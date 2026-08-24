@@ -228,13 +228,13 @@ export interface DevicePolicy {
 }
 
 export interface Product {
-  id: string; application_id: string; name: string; slug: string; status: string;
+  id: string; application_id: string; name: string; slug: string; status: CatalogStatus;
   created_at: string; updated_at: string;
 }
 
 export interface Plan {
   id: string; product_id: string; name: string; code: string; level: number;
-  max_devices: number; default_duration_seconds: number | null; status: string;
+  max_devices: number; default_duration_seconds: number | null; status: CatalogStatus;
   created_at: string; updated_at: string;
 }
 
@@ -274,6 +274,8 @@ export interface Application {
   status: "active" | "maintenance" | "suspended" | "disabled";
   environment_mode: string;
 }
+
+export type CatalogStatus = "active" | "inactive" | "archived";
 
 export interface DeviceBanRecord {
   id: string; device_id: string; user_id: string; user_email: string; reason: string;

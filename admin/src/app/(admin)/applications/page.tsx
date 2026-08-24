@@ -60,10 +60,14 @@ export default function ApplicationsPage() {
     }
   }
 
+  async function refreshLifecycle() {
+    await Promise.all([load(), refreshApplications()]);
+  }
+
   return <>
     <PageTitle title="Applications" description="Manage organizations and their isolated KeyStar applications." actions={canWrite ? <div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => setOrganizationOpen(true)}>Add organization</Button><Button size="sm" onClick={() => setApplicationOpen(true)}>Add application</Button></div> : undefined} />
     {error && <div className="mb-4"><ErrorNote message={error} onRetry={load} /></div>}
-    <ApplicationsView applications={applications} organizations={organizations} loading={loading} />
+    <ApplicationsView applications={applications} organizations={organizations} loading={loading} canWrite={canWrite} onRefresh={refreshLifecycle} />
     <Modal isOpen={organizationOpen} onClose={() => !busy && setOrganizationOpen(false)} className="max-w-md p-6"><h2 className="text-lg font-semibold">Create organization</h2><OrganizationForm name={organizationName} busy={busy} onNameChange={setOrganizationName} onSubmit={createOrganization} onCancel={() => setOrganizationOpen(false)} /></Modal>
     <Modal isOpen={applicationOpen} onClose={() => !busy && setApplicationOpen(false)} className="max-w-md p-6"><h2 className="text-lg font-semibold">Create application</h2><ApplicationForm organizations={organizations} organizationID={organizationID} name={name} slug={slug} busy={busy} onOrganizationChange={setOrganizationID} onNameChange={setName} onSlugChange={setSlug} onSubmit={createApplication} onCancel={() => setApplicationOpen(false)} /></Modal>
   </>;

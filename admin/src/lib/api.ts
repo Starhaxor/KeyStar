@@ -237,17 +237,35 @@ export const api = {
   createApplication(input: { organization_id: string; name: string; slug: string }) {
     return request<{ ok: boolean; application: Application }>("/v1/admin/applications", { method: "POST", body: input });
   },
+  updateApplication(applicationId: string, input: { name?: string; slug?: string }) {
+    return request<{ ok: boolean; application: Application }>(`/v1/admin/applications/${applicationId}`, { method: "PATCH", body: input });
+  },
+  transitionApplication(applicationId: string, status: "active" | "maintenance" | "disabled") {
+    return request<{ ok: boolean; application: Application }>(`/v1/admin/applications/${applicationId}/transition`, { method: "POST", body: { status } });
+  },
   products() {
     return request<{ ok: boolean; items: Product[] }>("/v1/admin/products");
   },
   createProduct(name: string, slug = "") {
     return request<{ ok: boolean; product: Product }>("/v1/admin/products", { method: "POST", body: { name, slug } });
   },
+  updateProduct(productId: string, input: { name?: string; slug?: string }) {
+    return request<{ ok: boolean; product: Product }>(`/v1/admin/products/${productId}`, { method: "PATCH", body: input });
+  },
+  archiveProduct(productId: string) {
+    return request<{ ok: boolean; product: Product }>(`/v1/admin/products/${productId}/archive`, { method: "POST", body: {} });
+  },
   plans(productId: string) {
     return request<{ ok: boolean; items: Plan[] }>(`/v1/admin/products/${productId}/plans`);
   },
   createPlan(productId: string, input: { name: string; code: string; level: number; max_devices: number }) {
     return request<{ ok: boolean; plan: Plan }>(`/v1/admin/products/${productId}/plans`, { method: "POST", body: input });
+  },
+  updatePlan(productId: string, planId: string, input: { name?: string; code?: string; level?: number; max_devices?: number }) {
+    return request<{ ok: boolean; plan: Plan }>(`/v1/admin/products/${productId}/plans/${planId}`, { method: "PATCH", body: input });
+  },
+  archivePlan(productId: string, planId: string) {
+    return request<{ ok: boolean; plan: Plan }>(`/v1/admin/products/${productId}/plans/${planId}/archive`, { method: "POST", body: {} });
   },
   webhooks() {
     return request<{ ok: boolean; items: Webhook[] }>("/v1/admin/webhooks");
