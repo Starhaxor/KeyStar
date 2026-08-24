@@ -38,8 +38,19 @@ function isVisibleFocusableElement(element: HTMLElement) {
     return false;
   }
 
-  const styles = window.getComputedStyle(element);
-  return styles.display !== "none" && styles.visibility !== "hidden" && styles.visibility !== "collapse";
+  for (let current: HTMLElement | null = element; current; current = current.parentElement) {
+    const styles = window.getComputedStyle(current);
+    if (
+      styles.display === "none" ||
+      styles.visibility === "hidden" ||
+      styles.visibility === "collapse" ||
+      styles.contentVisibility === "hidden"
+    ) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function getFocusableElements(container: HTMLElement) {

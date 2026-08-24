@@ -109,12 +109,12 @@ describe("AccessibleDialog", () => {
     expect(document.body.style.overflow).toBe("auto");
   });
 
-  it("skips display-hidden controls when choosing the initial focus target", () => {
+  it("skips controls nested in a CSS-hidden ancestor when choosing the initial focus target", () => {
     render(
       <AccessibleDialog isOpen onClose={() => undefined} title="Hidden control" showCloseButton={false}>
-        <button type="button" style={{ display: "none" }}>
-          Hidden control
-        </button>
+        <div style={{ display: "none" }}>
+          <button type="button">Hidden control</button>
+        </div>
         <button type="button">Visible control</button>
       </AccessibleDialog>
     );
@@ -192,5 +192,17 @@ describe("AccessibleDialog", () => {
     const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
     const heading = dialog && document.getElementById(dialog.getAttribute("aria-labelledby") ?? "");
     expect(heading?.textContent).toBe("Create application");
+  });
+
+  it("uses a legacy Modal title override when provided", () => {
+    render(
+      <Modal isOpen onClose={() => undefined} title="Rename application">
+        <h2>Create application</h2>
+      </Modal>
+    );
+
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    const heading = dialog && document.getElementById(dialog.getAttribute("aria-labelledby") ?? "");
+    expect(heading?.textContent).toBe("Rename application");
   });
 });
