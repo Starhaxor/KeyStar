@@ -1,5 +1,5 @@
 "use client";
-import Label from "@/components/form/Label";
+import Field from "@/components/form/Field";
 import { inputClasses } from "@/components/form/inputStyles";
 import Button from "@/components/ui/button/Button";
 import { ApiError, api } from "@/lib/api";
@@ -90,46 +90,60 @@ export default function SignInForm() {
             </div>
             <form onSubmit={handleSubmit}>
               <div className="space-y-6">
-                <div>
-                  <Label>
+                <Field
+                  id="sign-in-email"
+                  name="email"
+                  label={
+                    <>
                     Email <span className="text-error-500">*</span>{" "}
-                  </Label>
+                    </>
+                  }
+                >
                   <input
                     className={inputClasses}
                     placeholder="admin@example.com"
                     type="email"
-                    autoComplete="username"
+                    autoComplete="email"
+                    spellCheck={false}
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
                   />
-                </div>
-                <div>
-                  <Label>
+                </Field>
+                <Field
+                  id="sign-in-password"
+                  name="password"
+                  label={
+                    <>
                     Password <span className="text-error-500">*</span>{" "}
-                  </Label>
+                    </>
+                  }
+                >
                   <div className="relative">
                     <input
                       className={inputClasses}
                       type={showPassword ? "text" : "password"}
                       placeholder="Enter your password"
                       autoComplete="current-password"
+                      spellCheck={false}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       required
                     />
-                    <span
+                    <button
+                      type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute z-30 -translate-y-1/2 cursor-pointer right-4 top-1/2"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                      className="absolute z-30 -translate-y-1/2 right-4 top-1/2 rounded focus:outline-none focus:ring-2 focus:ring-brand-500/40"
                     >
                       {showPassword ? (
-                        <EyeIcon className="fill-gray-500 dark:fill-gray-400" />
+                        <EyeIcon aria-hidden="true" className="fill-gray-500 dark:fill-gray-400" />
                       ) : (
-                        <EyeCloseIcon className="fill-gray-500 dark:fill-gray-400" />
+                        <EyeCloseIcon aria-hidden="true" className="fill-gray-500 dark:fill-gray-400" />
                       )}
-                    </span>
+                    </button>
                   </div>
-                </div>
+                </Field>
                 {error && (
                   <p className="text-sm text-error-500" role="alert">
                     {error}
@@ -157,23 +171,29 @@ export default function SignInForm() {
             </div>
             <form onSubmit={handleMfaSubmit}>
               <div className="space-y-6">
-                <div>
-                  <Label>
+                <Field
+                  id="sign-in-mfa-code"
+                  name="mfa-code"
+                  label={
+                    <>
                     {useRecoveryCode ? "Recovery code" : "Authentication code"}{" "}
                     <span className="text-error-500">*</span>{" "}
-                  </Label>
+                    </>
+                  }
+                >
                   <input
                     className={inputClasses}
                     placeholder={useRecoveryCode ? "XXXX-XXXX" : "123456"}
                     type="text"
                     inputMode={useRecoveryCode ? "text" : "numeric"}
                     autoComplete="one-time-code"
+                    spellCheck={false}
                     value={mfaCode}
                     onChange={(e) => setMfaCode(e.target.value)}
                     autoFocus
                     required
                   />
-                </div>
+                </Field>
                 {error && (
                   <p className="text-sm text-error-500" role="alert">
                     {error}
