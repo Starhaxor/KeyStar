@@ -364,7 +364,16 @@ func (router *Router) RecordSecurityEvent(request *http.Request, account *domain
 }
 
 func (router *Router) WriteConsoleError(writer http.ResponseWriter, request *http.Request, err error) {
+	var conflict *domain.ConflictError
 	switch {
+	case errors.As(err, &conflict):
+		httpapi.WriteError(writer, request, http.StatusConflict, conflict.Code(), conflict.Error())
+	case errors.Is(err, domain.ErrApplicationNotFound):
+		httpapi.WriteError(writer, request, http.StatusNotFound, "APPLICATION_NOT_FOUND", "application not found")
+	case errors.Is(err, domain.ErrApplicationExists):
+		httpapi.WriteError(writer, request, http.StatusConflict, "APPLICATION_ALREADY_EXISTS", "an application with this slug already exists")
+	case errors.Is(err, domain.ErrInvalidApplicationUpdate), errors.Is(err, domain.ErrInvalidApplicationTransition):
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_APPLICATION", "invalid application lifecycle request")
 	case errors.Is(err, domain.ErrUserNotFound):
 		httpapi.WriteError(writer, request, http.StatusNotFound, "USER_NOT_FOUND", "user not found")
 	case errors.Is(err, domain.ErrUserAlreadyExists):
@@ -375,6 +384,12 @@ func (router *Router) WriteConsoleError(writer http.ResponseWriter, request *htt
 		httpapi.WriteError(writer, request, http.StatusConflict, "LICENSE_ALREADY_EXISTS", "license already exists for user and product")
 	case errors.Is(err, domain.ErrProductInvalidName):
 		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_PRODUCT", "product name cannot be normalized")
+	case errors.Is(err, domain.ErrProductNotFound):
+		httpapi.WriteError(writer, request, http.StatusNotFound, "PRODUCT_NOT_FOUND", "product not found")
+	case errors.Is(err, domain.ErrPlanNotFound):
+		httpapi.WriteError(writer, request, http.StatusNotFound, "PLAN_NOT_FOUND", "plan not found")
+	case errors.Is(err, domain.ErrInvalidCatalogStatus):
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_CATALOG", "invalid catalog lifecycle request")
 	case errors.Is(err, domain.ErrDeviceNotFound):
 		httpapi.WriteError(writer, request, http.StatusNotFound, "DEVICE_NOT_FOUND", "device not found")
 	case errors.Is(err, domain.ErrAuthSessionNotFound):
