@@ -20,7 +20,7 @@ export default function AuthLayout({
                   KeyStar Admin
                 </span>
                 <p className="text-center text-gray-400 dark:text-white/60">
-                  StarLoader licensing console — manage users, licenses,
+                  KeyStar licensing console — manage users, licenses,
                   devices and sessions.
                 </p>
               </div>
