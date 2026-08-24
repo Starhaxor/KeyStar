@@ -45,6 +45,105 @@ func atoiOrDefault(value string, fallback int) int {
 	return parsed
 }
 
+type onboardingResourceJSON struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type onboardingProgressJSON struct {
+	OK                    bool                    `json:"ok"`
+	Application           applicationJSON         `json:"application"`
+	CredentialCount       int                     `json:"credential_count"`
+	CredentialEnvironment string                  `json:"credential_environment,omitempty"`
+	ProductCount          int                     `json:"product_count"`
+	PlanCount             int                     `json:"plan_count"`
+	LicenseCount          int64                   `json:"license_count"`
+	Product               *onboardingResourceJSON `json:"product,omitempty"`
+	Plan                  *onboardingResourceJSON `json:"plan,omitempty"`
+}
+
+// handleAdminOnboardingProgress derives resumable onboarding state from the
+// selected application's persisted resources. It intentionally returns only
+// counts and display context; credential hashes and one-time plaintext values
+// never enter this response.
+func (router *Router) handleAdminOnboardingProgress(writer http.ResponseWriter, request *http.Request) {
+	applicationID := router.AdminApplicationID(request)
+	applications, err := router.Admin.Console.ListApplications(request.Context())
+	if err != nil {
+		router.WriteConsoleError(writer, request, err)
+		return
+	}
+	var selected *domain.Application
+	for index := range applications {
+		if applications[index].ID == applicationID {
+			selected = &applications[index]
+			break
+		}
+	}
+	if selected == nil {
+		router.writeLifecycleError(writer, request, domain.ErrApplicationNotFound)
+		return
+	}
+
+	credentials, err := router.Admin.Console.ListCredentials(request.Context(), applicationID)
+	if err != nil {
+		router.WriteConsoleError(writer, request, err)
+		return
+	}
+	progress := onboardingProgressJSON{
+		OK: true,
+		Application: applicationJSON{
+			ID: selected.ID, OrganizationID: selected.OrganizationID, Name: selected.Name,
+			Slug: selected.Slug, Status: string(selected.Status), EnvironmentMode: selected.EnvironmentMode,
+		},
+	}
+	for _, entry := range credentials {
+		if entry.Status == domain.CredentialStatusActive && entry.CredentialType == domain.CredentialPublishable {
+			progress.CredentialCount++
+			if progress.CredentialEnvironment == "" {
+				progress.CredentialEnvironment = string(entry.Environment)
+			}
+		}
+	}
+
+	products, err := router.Admin.Console.ListProducts(request.Context(), applicationID)
+	if err != nil {
+		router.WriteConsoleError(writer, request, err)
+		return
+	}
+	for _, product := range products {
+		if product.Status != domain.CatalogStatusActive {
+			continue
+		}
+		progress.ProductCount++
+		if progress.Product == nil {
+			progress.Product = &onboardingResourceJSON{ID: product.ID, Name: product.Name}
+		}
+		plans, listErr := router.Admin.Console.ListPlans(request.Context(), product.ID)
+		if listErr != nil {
+			router.WriteConsoleError(writer, request, listErr)
+			return
+		}
+		for _, plan := range plans {
+			if plan.Status != domain.CatalogStatusActive {
+				continue
+			}
+			progress.PlanCount++
+			if progress.Plan == nil {
+				progress.Product = &onboardingResourceJSON{ID: product.ID, Name: product.Name}
+				progress.Plan = &onboardingResourceJSON{ID: plan.ID, Name: plan.Name}
+			}
+		}
+	}
+
+	_, progress.LicenseCount, err = router.Admin.Console.ListConsoleLicenses(request.Context(), applicationID, 0, 1, "", "")
+	if err != nil {
+		router.WriteConsoleError(writer, request, err)
+		return
+	}
+	httpapi.WriteJSON(writer, http.StatusOK, progress)
+}
+
 type adminPageResponse struct {
 	OK       bool  `json:"ok"`
 	Items    any   `json:"items"`

@@ -37,6 +37,18 @@ import type {
 // cookie on the admin origin (localhost) instead of the API's host.
 export const API_URL = "";
 
+export interface OnboardingProgress {
+  ok: boolean;
+  application: Application | null;
+  credential_count: number;
+  credential_environment?: "test" | "live";
+  product_count: number;
+  plan_count: number;
+  license_count: number;
+  product?: { id: string; name: string };
+  plan?: { id: string; name: string };
+}
+
 const SESSION_COOKIE = "starloader_admin_session";
 const CSRF_COOKIE = "starloader_admin_csrf";
 const CSRF_HEADER = "X-CSRF-Token";
@@ -227,6 +239,9 @@ export const api = {
   },
   applications() {
     return request<{ ok: boolean; items: Application[] }>("/v1/admin/applications", { skipApplicationHeader: true });
+  },
+  onboardingProgress() {
+    return request<OnboardingProgress>("/v1/admin/onboarding/progress");
   },
   organizations() {
     return request<{ ok: boolean; items: Organization[] }>("/v1/admin/applications/organizations", { skipApplicationHeader: true });

@@ -175,6 +175,13 @@ func (router *Router) routeAdmin(writer http.ResponseWriter, request *http.Reque
 			return
 		}
 		router.handleAdminOverview(writer, request, account)
+	case len(segments) == 2 && segments[0] == "onboarding" && segments[1] == "progress" && request.Method == http.MethodGet:
+		for _, permission := range []string{domain.PermApplicationsRead, domain.PermCredentialsRead, domain.PermCatalogRead, domain.PermLicensesRead} {
+			if !router.RequirePermission(writer, request, account, permission) {
+				return
+			}
+		}
+		router.handleAdminOnboardingProgress(writer, request)
 	case len(segments) >= 1 && segments[0] == "users":
 		router.routeAdminUsers(writer, request, account, segments)
 	case len(segments) == 1 && segments[0] == "bans" && request.Method == http.MethodGet:

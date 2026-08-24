@@ -33,6 +33,7 @@ export const sidebarSections: SidebarSection[] = [
     name: "Workspace",
     items: [
       { icon: "grid", name: "Overview", path: "/", permission: "overview.read" },
+      { icon: "app", name: "Onboarding", path: "/onboarding", permission: "applications.read" },
       { icon: "app", name: "Applications", path: "/applications", permission: "applications.read" },
     ],
   },
