@@ -1,0 +1,72 @@
+Start testing: Aug 25 22:43 Türkiye Standart Saati
+----------------------------------------------------------
+1/1 Testing: keystar_tests
+1/1 Test: keystar_tests
+Command: "C:/Users/pc/Desktop/Projelerim/KeyStar/build/sdk/Release/keystar_tests.exe"
+Directory: C:/Users/pc/Desktop/Projelerim/KeyStar/build/sdk
+"keystar_tests" start time: Aug 25 22:43 Türkiye Standart Saati
+Output:
+----------------------------------------------------------
+=== KeyStar C++ SDK Tests ===
+
+[Transport]
+Running transport tests...
+  PASS testFakeTransportRecordsRequests
+  PASS testHttpResponseOk
+  PASS testDefaultWindowsTransportIsAvailable
+  PASS testDefaultWindowsTransportReportsUnsupportedUrl
+  All transport tests passed.
+
+[Error]
+Running error tests...
+  PASS testErrorDefault
+  PASS testErrorWithCode
+  PASS testMapErrorCode
+  All error tests passed.
+
+[JSON Parser]
+Running JSON parser tests...
+  PASS testJsonParseObject
+  PASS testJsonParseNested
+  PASS testJsonParseEmpty
+  PASS testJsonParseInvalid
+  PASS testJsonParseArray
+  PASS testJsonParseErrorResponse
+  PASS testJsonGetDefault
+  All JSON parser tests passed.
+
+[Auth]
+Running auth tests...
+  PASS testLoginSuccess
+  PASS testLoginFailure
+  PASS testRefreshSuccess
+  PASS testRefreshWithoutToken
+  PASS testLogout
+  All auth tests passed.
+
+[Device Verify]
+Running device verify tests...
+  PASS testDeviceIdentityCollect
+  PASS testDeviceIdentitySignChallenge
+  PASS testHasTpm
+  All device verify tests passed.
+
+[Token Store]
+Running token store tests...
+  PASS testTokenStoreSaveAndLoad
+  PASS testTokenStoreLoadEmpty
+  PASS testTokenStoreClear
+  PASS testTokenStoreOverwrite
+  PASS testDpapiStoreRoundTripsASession
+  All token store tests passed.
+
+=== All tests passed ===
+<end of output>
+Test time =   0.04 sec
+----------------------------------------------------------
+Test Passed.
+"keystar_tests" end time: Aug 25 22:43 Türkiye Standart Saati
+"keystar_tests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Aug 25 22:43 Türkiye Standart Saati

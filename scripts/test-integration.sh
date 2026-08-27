@@ -23,6 +23,6 @@ while :; do
   sleep 2
 done
 
-export TEST_DATABASE_URL='postgres://keystar_test:keystar_test@localhost:5432/keystar_test?sslmode=disable'
+export TEST_DATABASE_URL='postgres://keystar_test:keystar_test@127.0.0.1:55432/keystar_test?sslmode=disable'
 cd backend
 go test ./tests/integration/... -count=1

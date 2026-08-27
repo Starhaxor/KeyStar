@@ -1,0 +1,7 @@
+C:\Users\pc\Desktop\Projelerim\KeyStar\backend\sdk\cpp\src\client.cpp;C:\Users\pc\Desktop\Projelerim\KeyStar\build\sdk\keystar.dir\Release\client.obj
+C:\Users\pc\Desktop\Projelerim\KeyStar\backend\sdk\cpp\src\auth.cpp;C:\Users\pc\Desktop\Projelerim\KeyStar\build\sdk\keystar.dir\Release\auth.obj
+C:\Users\pc\Desktop\Projelerim\KeyStar\backend\sdk\cpp\src\device_verify.cpp;C:\Users\pc\Desktop\Projelerim\KeyStar\build\sdk\keystar.dir\Release\device_verify.obj
+C:\Users\pc\Desktop\Projelerim\KeyStar\backend\sdk\cpp\src\error.cpp;C:\Users\pc\Desktop\Projelerim\KeyStar\build\sdk\keystar.dir\Release\error.obj
+C:\Users\pc\Desktop\Projelerim\KeyStar\backend\sdk\cpp\src\json_parser.cpp;C:\Users\pc\Desktop\Projelerim\KeyStar\build\sdk\keystar.dir\Release\json_parser.obj
+C:\Users\pc\Desktop\Projelerim\KeyStar\backend\sdk\cpp\src\platform\transport_winhttp.cpp;C:\Users\pc\Desktop\Projelerim\KeyStar\build\sdk\keystar.dir\Release\transport_winhttp.obj
+C:\Users\pc\Desktop\Projelerim\KeyStar\backend\sdk\cpp\src\platform\token_store_dpapi.cpp;C:\Users\pc\Desktop\Projelerim\KeyStar\build\sdk\keystar.dir\Release\token_store_dpapi.obj

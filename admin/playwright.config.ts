@@ -5,7 +5,7 @@ const adminDirectory = __dirname;
 const backendDirectory = path.resolve(adminDirectory, "../backend");
 const testDatabaseURL =
   process.env.TEST_DATABASE_URL ??
-  "postgres://keystar_test:keystar_test@127.0.0.1:5432/keystar_test?sslmode=disable";
+  "postgres://keystar_test:keystar_test@127.0.0.1:55432/keystar_test?sslmode=disable";
 const isCI = Boolean(process.env.CI);
 
 const backendEnvironment = {

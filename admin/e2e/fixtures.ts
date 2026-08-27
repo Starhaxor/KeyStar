@@ -8,7 +8,7 @@ import { withProvisionedFixture } from "./fixture-lifecycle";
 const execFileAsync = promisify(execFile);
 const backendDirectory = path.resolve(__dirname, "../../backend");
 const defaultDatabaseURL =
-  "postgres://keystar_test:keystar_test@127.0.0.1:5432/keystar_test?sslmode=disable";
+  "postgres://keystar_test:keystar_test@127.0.0.1:55432/keystar_test?sslmode=disable";
 
 type AdminFixture = {
   email: string;
@@ -100,8 +100,8 @@ function currentTOTP(secret: string) {
 
 export async function signIn(page: Page, admin: AdminFixture) {
   await page.goto("/signin");
-  await page.getByLabel("Email").fill(admin.email);
-  await page.getByLabel("Password").fill(admin.password);
+  await page.locator("#sign-in-email").fill(admin.email);
+  await page.locator("#sign-in-password").fill(admin.password);
   await page.getByRole("button", { name: "Sign in" }).click();
 
   if (admin.totpSecret) {

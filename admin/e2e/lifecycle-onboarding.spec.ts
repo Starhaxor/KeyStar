@@ -14,13 +14,15 @@ test("resumes onboarding after reload and issues a test license", async ({
 
   await expect(page.getByRole("heading", { name: "Create a publishable credential" })).toBeVisible();
 
-  await page.goto("/users");
+  await page.getByRole("button", { name: "Users" }).click();
+  await page.getByRole("link", { name: "All users" }).click();
+  await expect(page).toHaveURL(/\/users$/);
   await page.getByRole("button", { name: "Add user" }).click();
   const userDialog = page.getByRole("dialog");
   await userDialog.getByPlaceholder("user@example.com").fill(onboarding.userEmail);
   await userDialog.getByPlaceholder("At least 10 characters").fill(onboarding.userPassword);
   await userDialog.getByRole("button", { name: "Create user" }).click();
-  await expect(page.getByText(onboarding.userEmail)).toBeVisible();
+  await expect(page.getByRole("link", { name: onboarding.userEmail })).toBeVisible();
 
   await page.goto("/onboarding");
   await page.getByLabel("Environment").selectOption("test");
@@ -36,7 +38,7 @@ test("resumes onboarding after reload and issues a test license", async ({
   await page.getByLabel("Plan name").fill("E2E Onboarding Plan");
   await page.getByLabel("Plan code").fill("e2e-onboarding-plan");
   await page.getByRole("button", { name: "Create product and plan" }).click();
-
+  await expect(page.getByRole("heading", { name: "Issue a test license" })).toBeVisible();
   await page.reload();
   await expect(page.getByRole("heading", { name: "Issue a test license" })).toBeVisible();
   await page.getByLabel("Existing test user email").fill(onboarding.userEmail);

@@ -1,0 +1,10 @@
+^C:\USERS\PC\DESKTOP\PROJELERIM\KEYSTAR\BUILD\SDK\CMAKEFILES\76D661020D7F592C821C3511FA6495B2\GENERATE.STAMP.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/pc/Desktop/Projelerim/KeyStar/backend/sdk/cpp -BC:/Users/pc/Desktop/Projelerim/KeyStar/build/sdk --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file C:/Users/pc/Desktop/Projelerim/KeyStar/build/sdk/keystar.slnx
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

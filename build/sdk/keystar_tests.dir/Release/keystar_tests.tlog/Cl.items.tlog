@@ -1,0 +1,7 @@
+C:\Users\pc\Desktop\Projelerim\KeyStar\backend\sdk\cpp\tests\main.cpp;C:\Users\pc\Desktop\Projelerim\KeyStar\build\sdk\keystar_tests.dir\Release\main.obj
+C:\Users\pc\Desktop\Projelerim\KeyStar\backend\sdk\cpp\tests\test_transport.cpp;C:\Users\pc\Desktop\Projelerim\KeyStar\build\sdk\keystar_tests.dir\Release\test_transport.obj
+C:\Users\pc\Desktop\Projelerim\KeyStar\backend\sdk\cpp\tests\test_auth.cpp;C:\Users\pc\Desktop\Projelerim\KeyStar\build\sdk\keystar_tests.dir\Release\test_auth.obj
+C:\Users\pc\Desktop\Projelerim\KeyStar\backend\sdk\cpp\tests\test_device_verify.cpp;C:\Users\pc\Desktop\Projelerim\KeyStar\build\sdk\keystar_tests.dir\Release\test_device_verify.obj
+C:\Users\pc\Desktop\Projelerim\KeyStar\backend\sdk\cpp\tests\test_token_store.cpp;C:\Users\pc\Desktop\Projelerim\KeyStar\build\sdk\keystar_tests.dir\Release\test_token_store.obj
+C:\Users\pc\Desktop\Projelerim\KeyStar\backend\sdk\cpp\tests\test_error.cpp;C:\Users\pc\Desktop\Projelerim\KeyStar\build\sdk\keystar_tests.dir\Release\test_error.obj
+C:\Users\pc\Desktop\Projelerim\KeyStar\backend\sdk\cpp\tests\test_json_parser.cpp;C:\Users\pc\Desktop\Projelerim\KeyStar\build\sdk\keystar_tests.dir\Release\test_json_parser.obj

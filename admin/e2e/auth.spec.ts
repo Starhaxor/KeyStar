@@ -22,10 +22,8 @@ test("requires MFA enrollment before application administration", async ({
   e2eFixture,
 }) => {
   await page.goto("/signin");
-  await page.getByLabel("Email").fill(e2eFixture.unenrolledAdmin.email);
-  await page
-    .getByLabel("Password")
-    .fill(e2eFixture.unenrolledAdmin.password);
+  await page.locator("#sign-in-email").fill(e2eFixture.unenrolledAdmin.email);
+  await page.locator("#sign-in-password").fill(e2eFixture.unenrolledAdmin.password);
   await page.getByRole("button", { name: "Sign in" }).click();
 
   await expect(page).toHaveURL(/\/security$/);

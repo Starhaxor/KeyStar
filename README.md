@@ -506,7 +506,7 @@ npx playwright test e2e/lifecycle-onboarding.spec.ts
 This command uses only `TEST_DATABASE_URL` and the fixture refuses any
 database other than `keystar_test`. Docker Desktop must be available so the
 test configuration can start the disposable PostgreSQL service. Ensure ports
-`5432`, `8080`, and `3000` are free first: they are used respectively by the
+`55432`, `8080`, and `3000` are free first: they are used respectively by the
 database, backend, and admin web server started for the browser suite.
 
 ### Complete local Release A gate
@@ -520,7 +520,7 @@ docker compose up -d db
 .\scripts\test-integration.ps1
 
 cd backend
-go test ./...
+go test -p 1 ./...
 
 cd ..
 cmake -S backend/sdk/cpp -B build/sdk -DKEYSTAR_BUILD_TESTS=ON -G "Visual Studio 17 2022" -A x64

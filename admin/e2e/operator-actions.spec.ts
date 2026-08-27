@@ -22,7 +22,7 @@ test("destructive user, session, and device actions wait for confirmation", asyn
 
   await page.goto("/users");
   await openRowAction(page, alpha.userEmail, "Disable user");
-  await expect(page.getByRole("heading", { name: "Disable user" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Disable user" })).toBeVisible();
   expect(destructiveRequests).toEqual([]);
   const userResponse = page.waitForResponse(
     (response) =>
@@ -44,7 +44,7 @@ test("destructive user, session, and device actions wait for confirmation", asyn
   await expect(page.getByRole("dialog")).toHaveCount(0);
 
   await openRowAction(page, alpha.userEmail, "Revoke");
-  await expect(page.getByRole("heading", { name: "Revoke session" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Revoke session" })).toBeVisible();
   expect(destructiveRequests).toHaveLength(1);
   const sessionResponse = page.waitForResponse(
     (response) =>
@@ -56,7 +56,7 @@ test("destructive user, session, and device actions wait for confirmation", asyn
 
   await page.goto("/devices");
   await openRowAction(page, alpha.userEmail, "Revoke");
-  await expect(page.getByRole("heading", { name: "Revoke device" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Revoke device" })).toBeVisible();
   expect(destructiveRequests).toHaveLength(2);
   const deviceResponse = page.waitForResponse(
     (response) =>
