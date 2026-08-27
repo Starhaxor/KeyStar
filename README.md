@@ -313,12 +313,13 @@ The password is requested securely through the terminal. `ADMIN_COOKIE_SECURE`
 defaults to `true`; set it to `false` only for local HTTP development. Configure
 `ADMIN_ALLOWED_ORIGIN` for the exact production console origin. Every
 HMAC/session secret must be unique and at least 32 bytes;
-`ADMIN_MFA_ENCRYPTION_KEY` must be exactly 32 bytes.
+`ADMIN_MFA_ENCRYPTION_KEY` must contain exactly 32 raw bytes or their base64
+encoding.
 
 Generate each general-purpose secret independently with a cryptographic secret
-manager (for example, `openssl rand -base64 48`). For the exactly 32-character
-MFA key, `openssl rand -base64 24` produces 24 random bytes encoded as 32 ASCII
-characters. Never reuse one generated value for another setting.
+manager (for example, `openssl rand -base64 48`). Generate the MFA encryption
+key with `openssl rand -base64 32`; the backend decodes this representation to
+32 key bytes. Never reuse one generated value for another setting.
 
 When Prometheus metrics are enabled, set a unique 32-byte-or-longer
 `METRICS_TOKEN` and scrape with `Authorization: Bearer <token>`. Webhooks accept

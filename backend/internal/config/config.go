@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/url"
 	"os"
@@ -61,6 +62,11 @@ func Load() (Config, error) {
 		}
 		values[name] = value
 	}
+	mfaKey, err := decodeMFAEncryptionKey(values["ADMIN_MFA_ENCRYPTION_KEY"])
+	if err != nil {
+		return Config{}, err
+	}
+	values["ADMIN_MFA_ENCRYPTION_KEY"] = string(mfaKey)
 	secretNames := []string{"LICENSE_HMAC_KEY", "HARDWARE_HMAC_KEY", "ADMIN_SESSION_SECRET", "ADMIN_MFA_ENCRYPTION_KEY"}
 	seenSecrets := make(map[string]string, len(secretNames))
 	for _, name := range secretNames {
@@ -71,9 +77,6 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("%s and %s must differ", previous, name)
 		}
 		seenSecrets[values[name]] = name
-	}
-	if len([]byte(values["ADMIN_MFA_ENCRYPTION_KEY"])) != 32 {
-		return Config{}, fmt.Errorf("ADMIN_MFA_ENCRYPTION_KEY must be exactly 32 bytes")
 	}
 	loginTimeout := defaultLoginTimeout
 	if configuredTimeout := strings.TrimSpace(os.Getenv("LOGIN_TIMEOUT")); configuredTimeout != "" {
@@ -160,4 +163,17 @@ func Load() (Config, error) {
 		MetricsEnabled:            metricsEnabled,
 		MetricsToken:              metricsToken,
 	}, nil
+}
+
+func decodeMFAEncryptionKey(value string) ([]byte, error) {
+	if raw := []byte(value); len(raw) == 32 {
+		return raw, nil
+	}
+	for _, encoding := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding, base64.RawURLEncoding} {
+		decoded, err := encoding.DecodeString(value)
+		if err == nil && len(decoded) == 32 {
+			return decoded, nil
+		}
+	}
+	return nil, fmt.Errorf("ADMIN_MFA_ENCRYPTION_KEY must be 32 raw bytes or base64-encoded 32 bytes")
 }

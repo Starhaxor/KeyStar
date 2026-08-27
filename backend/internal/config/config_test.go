@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"testing"
 	"time"
 )
@@ -35,6 +36,20 @@ func TestLoadReturnsConfiguredValues(t *testing.T) {
 	}
 	if config.DatabaseURL != "postgres://user:pass@localhost:5432/starloader" || config.Product != "StarLoader" {
 		t.Fatalf("Load() = %#v", config)
+	}
+}
+
+func TestLoadDecodesBase64MFAEncryptionKey(t *testing.T) {
+	setRequiredEnvironment(t)
+	raw := []byte("abcdef0123456789abcdef0123456789")
+	t.Setenv("ADMIN_MFA_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString(raw))
+
+	configuration, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configuration.AdminMFAEncryptionKey != string(raw) {
+		t.Fatal("base64 MFA encryption key was not normalized to 32 key bytes")
 	}
 }
 
