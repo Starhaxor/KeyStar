@@ -12,17 +12,17 @@ import (
 )
 
 const refreshSessionColumns = `
-	id::text, application_id::text, user_id::text, device_id::text,
+	id::text, application_id::text, user_id::text, license_id::text, device_id::text,
 	token_hash, status, expires_at, last_used_at, created_at, revoked_at`
 
 // CreateRefreshSession stores a new refresh token hash.
 func (s *Store) CreateRefreshSession(ctx context.Context, input domain.NewRefreshSession) (*domain.RefreshSession, error) {
 	session, err := scanRefreshSession(s.db.QueryRow(ctx, `
 		insert into refresh_sessions (
-			application_id, user_id, device_id, token_hash, expires_at
-		) values ($1::uuid, $2::uuid, $3::uuid, $4, $5)
+			application_id, user_id, license_id, device_id, token_hash, expires_at
+		) values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6)
 		returning `+refreshSessionColumns,
-		input.ApplicationID, input.UserID, input.DeviceID, input.TokenHash, input.ExpiresAt))
+		input.ApplicationID, input.UserID, input.LicenseID, input.DeviceID, input.TokenHash, input.ExpiresAt))
 	if err != nil {
 		return nil, fmt.Errorf("create refresh session: %w", err)
 	}
@@ -62,7 +62,7 @@ func (s *Store) RotateRefreshSession(ctx context.Context, sessionID string, now 
 }
 
 // RevokeRefreshSession explicitly revokes a refresh token.
-func (s *Store) RevokeRefreshSession(ctx context.Context, sessionID string) error {
+func (s *Store) RevokeRefreshSession(ctx context.Context, applicationID, sessionID string) error {
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin revoke refresh session: %w", err)
@@ -71,7 +71,7 @@ func (s *Store) RevokeRefreshSession(ctx context.Context, sessionID string) erro
 	tag, err := tx.Exec(ctx, `
 		update refresh_sessions
 		set status = 'revoked', revoked_at = now()
-		where id = $1::uuid and status = 'active'`, sessionID)
+		where application_id = $1::uuid and id = $2::uuid and status = 'active'`, applicationID, sessionID)
 	if err != nil {
 		return fmt.Errorf("revoke refresh session: %w", err)
 	}
@@ -85,7 +85,7 @@ func (s *Store) RevokeRefreshSession(ctx context.Context, sessionID string) erro
 // RevokeRefreshSessionFamily revokes every active session for the same
 // user+device pair (reuse detection). This is the nuclear option: when a
 // rotated or revoked token is presented, the entire family is killed.
-func (s *Store) RevokeRefreshSessionFamily(ctx context.Context, userID, deviceID string) (int64, error) {
+func (s *Store) RevokeRefreshSessionFamily(ctx context.Context, applicationID, userID, deviceID string) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return 0, fmt.Errorf("begin revoke refresh session family: %w", err)
@@ -94,8 +94,8 @@ func (s *Store) RevokeRefreshSessionFamily(ctx context.Context, userID, deviceID
 	tag, err := tx.Exec(ctx, `
 		update refresh_sessions
 		set status = 'revoked', revoked_at = now()
-		where user_id = $1::uuid and device_id = $2::uuid and status = 'active'`,
-		userID, deviceID)
+		where application_id = $1::uuid and user_id = $2::uuid and device_id = $3::uuid and status = 'active'`,
+		applicationID, userID, deviceID)
 	if err != nil {
 		return 0, fmt.Errorf("revoke refresh session family: %w", err)
 	}
@@ -107,7 +107,7 @@ func (s *Store) RevokeRefreshSessionFamily(ctx context.Context, userID, deviceID
 
 // RevokeAllUserRefreshSessions revokes every active refresh token for a user
 // across all devices. Used by admin "revoke all sessions" and logout-all.
-func (s *Store) RevokeAllUserRefreshSessions(ctx context.Context, userID string) (int64, error) {
+func (s *Store) RevokeAllUserRefreshSessions(ctx context.Context, applicationID, userID string) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return 0, fmt.Errorf("begin revoke all user refresh sessions: %w", err)
@@ -116,7 +116,7 @@ func (s *Store) RevokeAllUserRefreshSessions(ctx context.Context, userID string)
 	tag, err := tx.Exec(ctx, `
 		update refresh_sessions
 		set status = 'revoked', revoked_at = now()
-		where user_id = $1::uuid and status = 'active'`, userID)
+		where application_id = $1::uuid and user_id = $2::uuid and status = 'active'`, applicationID, userID)
 	if err != nil {
 		return 0, fmt.Errorf("revoke all user refresh sessions: %w", err)
 	}
@@ -187,7 +187,7 @@ func scanRefreshSession(row pgx.Row) (*domain.RefreshSession, error) {
 	var session domain.RefreshSession
 	var lastUsedAt, revokedAt *time.Time
 	err := row.Scan(
-		&session.ID, &session.ApplicationID, &session.UserID, &session.DeviceID,
+		&session.ID, &session.ApplicationID, &session.UserID, &session.LicenseID, &session.DeviceID,
 		&session.TokenHash, &session.Status, &session.ExpiresAt,
 		&lastUsedAt, &session.CreatedAt, &revokedAt,
 	)

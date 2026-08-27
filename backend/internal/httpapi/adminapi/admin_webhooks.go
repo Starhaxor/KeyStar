@@ -10,6 +10,7 @@ import (
 
 	"github.com/starloader/backend/internal/domain"
 	"github.com/starloader/backend/internal/httpapi"
+	"github.com/starloader/backend/internal/security"
 )
 
 type webhookJSON struct {
@@ -95,8 +96,9 @@ func (router *Router) handleAdminWebhookCreate(writer http.ResponseWriter, reque
 		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
 		return
 	}
-	if strings.TrimSpace(body.URL) == "" {
-		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "url is required")
+	body.URL = strings.TrimSpace(body.URL)
+	if err := security.ValidatePublicHTTPSURL(body.URL); err != nil {
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "url must be a public HTTPS endpoint")
 		return
 	}
 	if !validateWebhookEvents(writer, request, body.Events) {
@@ -107,7 +109,8 @@ func (router *Router) handleAdminWebhookCreate(writer http.ResponseWriter, reque
 		httpapi.WriteError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "could not generate secret")
 		return
 	}
-	entry, err := router.Admin.Console.CreateWebhook(request.Context(), router.AdminApplicationID(request), domain.NewWebhook{URL: strings.TrimSpace(body.URL), Events: body.Events}, domain.HashWebhookSecret(secretBytes))
+	secretValue := base64.RawURLEncoding.EncodeToString(secretBytes)
+	entry, err := router.Admin.Console.CreateWebhook(request.Context(), router.AdminApplicationID(request), domain.NewWebhook{URL: body.URL, Events: body.Events}, domain.HashWebhookSecret([]byte(secretValue)))
 	if err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
@@ -117,7 +120,7 @@ func (router *Router) handleAdminWebhookCreate(writer http.ResponseWriter, reque
 		OK      bool        `json:"ok"`
 		Webhook webhookJSON `json:"webhook"`
 		Secret  string      `json:"secret"`
-	}{OK: true, Webhook: mapWebhook(*entry), Secret: base64.RawURLEncoding.EncodeToString(secretBytes)})
+	}{OK: true, Webhook: mapWebhook(*entry), Secret: secretValue})
 }
 
 func (router *Router) handleAdminWebhookUpdate(writer http.ResponseWriter, request *http.Request, account *domain.AdminAccount, webhookID string) {
@@ -130,9 +133,13 @@ func (router *Router) handleAdminWebhookUpdate(writer http.ResponseWriter, reque
 		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
 		return
 	}
-	if body.URL != nil && strings.TrimSpace(*body.URL) == "" {
-		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "url is required")
-		return
+	if body.URL != nil {
+		trimmed := strings.TrimSpace(*body.URL)
+		if err := security.ValidatePublicHTTPSURL(trimmed); err != nil {
+			httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "url must be a public HTTPS endpoint")
+			return
+		}
+		body.URL = &trimmed
 	}
 	if body.Events != nil && !validateWebhookEvents(writer, request, *body.Events) {
 		return

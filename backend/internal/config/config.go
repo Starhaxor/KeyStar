@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -10,7 +11,7 @@ import (
 const (
 	defaultLoginTimeout        = 10 * time.Second
 	defaultAdminSessionTTL     = 12 * time.Hour
-	defaultAdminAllowedOrigins = "http://localhost:3000,http://127.0.0.1:3000,https://starloadernd8h-8080-domgge2y7n.outplane.app"
+	defaultAdminAllowedOrigins = "http://localhost:3000,http://127.0.0.1:3000"
 )
 
 var requiredEnvironmentVariables = [...]string{
@@ -22,27 +23,31 @@ var requiredEnvironmentVariables = [...]string{
 	"LICENSE_AUDIENCE",
 	"PRODUCT",
 	"ADMIN_SESSION_SECRET",
+	"ADMIN_MFA_ENCRYPTION_KEY",
 }
 
 // Config contains the values required to operate the license service. Secrets
 // are read only from the environment and must never be logged.
 type Config struct {
-	DatabaseURL         string
-	LicenseHMACKey      string
-	HardwareHMACKey     string
-	Ed25519PrivateKey   string
-	LicenseIssuer       string
-	LicenseAudience     string
-	Product             string
-	LoginTimeout        time.Duration
-	AdminConsoleEnabled bool
-	AdminSessionSecret  string
-	AdminAllowedOrigins []string
-	AdminSessionTTL     time.Duration
-	AdminCookieSecure   bool
+	DatabaseURL           string
+	LicenseHMACKey        string
+	HardwareHMACKey       string
+	Ed25519PrivateKey     string
+	LicenseIssuer         string
+	LicenseAudience       string
+	Product               string
+	LoginTimeout          time.Duration
+	AdminConsoleEnabled   bool
+	AdminSessionSecret    string
+	AdminMFAEncryptionKey string
+	AdminAllowedOrigins   []string
+	AdminSessionTTL       time.Duration
+	AdminCookieSecure     bool
 	// ClientCredentialsRequired keeps the public client API in strict mode:
 	// login and device verification require a publishable API key.
 	ClientCredentialsRequired bool
+	MetricsEnabled            bool
+	MetricsToken              string
 }
 
 // Load reads the complete configuration, refusing to start when any required
@@ -56,8 +61,19 @@ func Load() (Config, error) {
 		}
 		values[name] = value
 	}
-	if values["LICENSE_HMAC_KEY"] == values["HARDWARE_HMAC_KEY"] {
-		return Config{}, fmt.Errorf("LICENSE_HMAC_KEY and HARDWARE_HMAC_KEY must differ")
+	secretNames := []string{"LICENSE_HMAC_KEY", "HARDWARE_HMAC_KEY", "ADMIN_SESSION_SECRET", "ADMIN_MFA_ENCRYPTION_KEY"}
+	seenSecrets := make(map[string]string, len(secretNames))
+	for _, name := range secretNames {
+		if len([]byte(values[name])) < 32 {
+			return Config{}, fmt.Errorf("%s must be at least 32 bytes", name)
+		}
+		if previous, exists := seenSecrets[values[name]]; exists {
+			return Config{}, fmt.Errorf("%s and %s must differ", previous, name)
+		}
+		seenSecrets[values[name]] = name
+	}
+	if len([]byte(values["ADMIN_MFA_ENCRYPTION_KEY"])) != 32 {
+		return Config{}, fmt.Errorf("ADMIN_MFA_ENCRYPTION_KEY must be exactly 32 bytes")
 	}
 	loginTimeout := defaultLoginTimeout
 	if configuredTimeout := strings.TrimSpace(os.Getenv("LOGIN_TIMEOUT")); configuredTimeout != "" {
@@ -75,6 +91,10 @@ func Load() (Config, error) {
 	adminAllowedOrigins := make([]string, 0, len(strings.Split(configuredOrigins, ",")))
 	for _, candidate := range strings.Split(configuredOrigins, ",") {
 		candidate = strings.TrimRight(strings.TrimSpace(candidate), "/")
+		parsed, err := url.Parse(candidate)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return Config{}, fmt.Errorf("ADMIN_ALLOWED_ORIGIN contains an invalid origin")
+		}
 		if candidate != "" {
 			adminAllowedOrigins = append(adminAllowedOrigins, candidate)
 		}
@@ -90,11 +110,11 @@ func Load() (Config, error) {
 		}
 		adminSessionTTL = parsedTTL
 	}
-	adminCookieSecure := false
+	adminCookieSecure := true
 	switch configuredSecure := strings.ToLower(strings.TrimSpace(os.Getenv("ADMIN_COOKIE_SECURE"))); configuredSecure {
-	case "", "false", "0":
+	case "false", "0":
 		adminCookieSecure = false
-	case "true", "1":
+	case "", "true", "1":
 		adminCookieSecure = true
 	default:
 		return Config{}, fmt.Errorf("ADMIN_COOKIE_SECURE must be true or false")
@@ -108,6 +128,18 @@ func Load() (Config, error) {
 	default:
 		return Config{}, fmt.Errorf("ADMIN_CONSOLE_ENABLED must be true or false")
 	}
+	metricsEnabled := false
+	switch configuredMetrics := strings.ToLower(strings.TrimSpace(os.Getenv("ENABLE_METRICS"))); configuredMetrics {
+	case "", "false", "0":
+	case "true", "1":
+		metricsEnabled = true
+	default:
+		return Config{}, fmt.Errorf("ENABLE_METRICS must be true or false")
+	}
+	metricsToken := strings.TrimSpace(os.Getenv("METRICS_TOKEN"))
+	if metricsEnabled && len([]byte(metricsToken)) < 32 {
+		return Config{}, fmt.Errorf("METRICS_TOKEN must be at least 32 bytes when metrics are enabled")
+	}
 
 	return Config{
 		DatabaseURL:               values["DATABASE_URL"],
@@ -120,9 +152,12 @@ func Load() (Config, error) {
 		LoginTimeout:              loginTimeout,
 		AdminConsoleEnabled:       adminConsoleEnabled,
 		AdminSessionSecret:        values["ADMIN_SESSION_SECRET"],
+		AdminMFAEncryptionKey:     values["ADMIN_MFA_ENCRYPTION_KEY"],
 		AdminAllowedOrigins:       adminAllowedOrigins,
 		AdminSessionTTL:           adminSessionTTL,
 		AdminCookieSecure:         adminCookieSecure,
 		ClientCredentialsRequired: true,
+		MetricsEnabled:            metricsEnabled,
+		MetricsToken:              metricsToken,
 	}, nil
 }

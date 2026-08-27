@@ -252,7 +252,7 @@ describe("OnboardingWizard", () => {
       name: "Desktop SDK",
       environment: "test",
       type: "publishable",
-      scopes: ["auth.login", "device.verify"],
+      scopes: ["auth.login", "device.verify", "auth.refresh", "auth.logout"],
     });
     const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
     expect(dialog?.textContent).toContain("ks_pk_test_shown-once");

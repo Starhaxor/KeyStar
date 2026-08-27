@@ -2,14 +2,72 @@
 #include "keystar/json_parser.hpp"
 
 #include <sstream>
+#include <stdexcept>
+#include <iomanip>
 
 namespace keystar {
 
+namespace {
+
+bool isLoopbackAuthority(const std::string& authority) {
+    const auto hostEnd = authority.find(':');
+    const std::string host = authority.starts_with("[")
+        ? authority.substr(0, authority.find(']') + 1)
+        : authority.substr(0, hostEnd);
+    return host == "localhost" || host == "127.0.0.1" || host == "[::1]";
+}
+
+void validateOptions(const ClientOptions& options) {
+    if (options.application_id.empty() || options.publishable_key.empty()) {
+        throw std::invalid_argument("application_id and publishable_key are required");
+    }
+    const bool https = options.base_url.starts_with("https://");
+    const bool http = options.base_url.starts_with("http://");
+    const auto schemeLength = https ? 8U : 7U;
+    if ((!https && !http) || options.base_url.size() <= schemeLength) {
+        throw std::invalid_argument("base_url must use HTTPS");
+    }
+    const auto authorityEnd = options.base_url.find('/', schemeLength);
+    const auto authority = options.base_url.substr(schemeLength, authorityEnd - schemeLength);
+	if (authority.empty() || authority.find('@') != std::string::npos || options.base_url.find('#') != std::string::npos ||
+		options.base_url.find('?') != std::string::npos) {
+        throw std::invalid_argument("base_url is invalid");
+    }
+    if (http && (!options.allow_insecure_loopback || !isLoopbackAuthority(authority))) {
+        throw std::invalid_argument("plain HTTP is allowed only for opted-in loopback development");
+    }
+}
+
+std::string jsonString(const std::string& value) {
+    std::ostringstream out;
+    out << '"';
+    for (const unsigned char ch : value) {
+        switch (ch) {
+            case '"': out << "\\\""; break;
+            case '\\': out << "\\\\"; break;
+            case '\b': out << "\\b"; break;
+            case '\f': out << "\\f"; break;
+            case '\n': out << "\\n"; break;
+            case '\r': out << "\\r"; break;
+            case '\t': out << "\\t"; break;
+            default:
+                if (ch < 0x20) {
+                    out << "\\u" << std::hex << std::setw(4) << std::setfill('0') << static_cast<int>(ch) << std::dec;
+                } else {
+                    out << static_cast<char>(ch);
+                }
+        }
+    }
+    out << '"';
+    return out.str();
+}
+
+}  // namespace
+
 Client::Client(ClientOptions options)
-    : options_(std::move(options)) {
-    // Production defaults are created in the constructor body via
-    // factory functions (defined in the platform-specific translation
-    // units). For now, the caller must supply them via the DI ctor.
+    : options_(std::move(options)), transport_(createDefaultTransport()),
+      tokenStore_(createPlatformTokenStore(options_.application_id)) {
+    validateOptions(options_);
 }
 
 Client::Client(ClientOptions options,
@@ -20,6 +78,8 @@ Client::Client(ClientOptions options,
       transport_(std::move(transport)),
       deviceProvider_(std::move(deviceProvider)),
       tokenStore_(std::move(tokenStore)) {
+	validateOptions(options_);
+	if (!transport_ || !tokenStore_) throw std::invalid_argument("transport and token store are required");
     // Restore any previously saved session.
     if (auto saved = tokenStore_->load()) {
         refreshToken_ = saved->refresh_token;
@@ -44,12 +104,13 @@ HttpRequest Client::makeRequest(HttpMethod method, const std::string& path,
     req.url = buildUrl(path);
     req.headers["Content-Type"] = "application/json";
     req.headers["X-KeyStar-App"] = options_.application_id;
-    if (!accessToken_.empty()) {
+	if (path == "/v1/me" && !accessToken_.empty()) {
         req.headers["Authorization"] = "Bearer " + accessToken_;
     } else {
         req.headers["Authorization"] = "Bearer " + options_.publishable_key;
     }
-    req.body = body;
+	req.body = body;
+	req.allow_insecure_loopback = options_.allow_insecure_loopback;
     return req;
 }
 
@@ -59,17 +120,16 @@ ApiResponse<SessionResult> Client::login(const std::string& email,
 
     // Step 1: Collect device identity.
     DeviceIdentity identity;
-    DeviceProof proof;
-    if (deviceProvider_) {
-        identity = deviceProvider_->collect();
-    }
+	DeviceProof proof;
+	if (!deviceProvider_) return {.error_code = "DEVICE_PROVIDER_UNAVAILABLE", .error_message = "device identity provider is unavailable"};
+	identity = deviceProvider_->collect();
 
     // Step 2: POST /v1/auth/login
     {
         std::ostringstream oss;
-        oss << "{\"email\":" << JsonValue::parse("\"" + email + "\"").stringValue()
-            << ",\"password\":" << JsonValue::parse("\"" + password + "\"").stringValue()
-            << ",\"device_fingerprint\":\"" << identity.fingerprint << "\"}";
+		oss << "{\"email\":" << jsonString(email)
+			<< ",\"password\":" << jsonString(password)
+			<< ",\"device_fingerprint\":" << jsonString(identity.fingerprint) << "}";
 
         auto resp = transport_->send(makeRequest(HttpMethod::Post, "/v1/auth/login", oss.str()));
         if (!resp.ok()) {
@@ -102,16 +162,16 @@ ApiResponse<SessionResult> Client::login(const std::string& email,
         // Step 4: POST /v1/device/verify
         {
             std::ostringstream voss;
-            voss << "{\"session_id\":\"" << sessionId
-                 << "\",\"challenge\":\"" << challengeB64
-                 << "\",\"challenge_signature\":\"" << proof.challenge_signature
-                 << "\",\"tpm_public_key\":\"" << proof.device_public_key
-                 << "\",\"hardware\":{\"smbios_uuid\":\"" << identity.smbios_uuid
-                 << "\",\"motherboard_serial\":\"" << identity.motherboard_serial
-                 << "\",\"bios_serial\":\"" << identity.bios_serial
-                 << "\",\"system_disk_serial\":\"" << identity.system_disk_serial
-                 << "\",\"machine_guid\":\"" << identity.machine_guid
-                 << "\",\"fingerprint\":\"" << identity.fingerprint << "\"}}";
+			voss << "{\"session_id\":" << jsonString(sessionId)
+				<< ",\"challenge\":" << jsonString(challengeB64)
+				<< ",\"challenge_signature\":" << jsonString(proof.challenge_signature)
+				<< ",\"tpm_public_key\":" << jsonString(proof.device_public_key)
+				<< ",\"hardware\":{\"smbios_uuid\":" << jsonString(identity.smbios_uuid)
+				<< ",\"motherboard_serial\":" << jsonString(identity.motherboard_serial)
+				<< ",\"bios_serial\":" << jsonString(identity.bios_serial)
+				<< ",\"system_disk_serial\":" << jsonString(identity.system_disk_serial)
+				<< ",\"machine_guid\":" << jsonString(identity.machine_guid)
+				<< ",\"fingerprint\":" << jsonString(identity.fingerprint) << "}}";
 
             auto vresp = transport_->send(makeRequest(HttpMethod::Post, "/v1/device/verify", voss.str()));
             if (!vresp.ok()) {
@@ -155,7 +215,7 @@ ApiResponse<SessionResult> Client::refresh() {
     }
 
     std::ostringstream oss;
-    oss << "{\"refresh_token\":\"" << refreshToken_ << "\"}";
+	oss << "{\"refresh_token\":" << jsonString(refreshToken_) << "}";
 
     auto resp = transport_->send(makeRequest(HttpMethod::Post, "/v1/auth/refresh", oss.str()));
     auto json = JsonValue::parse(resp.body);
@@ -205,7 +265,7 @@ bool Client::logout() {
     std::lock_guard lock(mutex_);
     if (!refreshToken_.empty()) {
         std::ostringstream oss;
-        oss << "{\"refresh_token\":\"" << refreshToken_ << "\"}";
+		oss << "{\"refresh_token\":" << jsonString(refreshToken_) << "}";
         transport_->send(makeRequest(HttpMethod::Post, "/v1/auth/logout", oss.str()));
     }
     clearSession();

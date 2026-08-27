@@ -85,6 +85,16 @@ void testDefaultWindowsTransportReportsUnsupportedUrl() {
 
     printf("  PASS testDefaultWindowsTransportReportsUnsupportedUrl\n");
 }
+
+void testDefaultWindowsTransportRejectsPlainHttp() {
+	auto transport = keystar::createDefaultTransport();
+	const auto publicHttp = transport->send({.url = "http://example.com/"});
+	const auto loopbackWithoutOptIn = transport->send({.url = "http://127.0.0.1:8080/"});
+	if (publicHttp.status_code != -1 || loopbackWithoutOptIn.status_code != -1) {
+		throw std::runtime_error("default Windows transport accepted plaintext HTTP");
+	}
+	printf("  PASS testDefaultWindowsTransportRejectsPlainHttp\n");
+}
 #endif
 
 }  // namespace
@@ -95,7 +105,8 @@ void run_transport_tests() {
     testHttpResponseOk();
 #ifdef _WIN32
     testDefaultWindowsTransportIsAvailable();
-    testDefaultWindowsTransportReportsUnsupportedUrl();
+	testDefaultWindowsTransportReportsUnsupportedUrl();
+	testDefaultWindowsTransportRejectsPlainHttp();
 #endif
     printf("  All transport tests passed.\n");
 }

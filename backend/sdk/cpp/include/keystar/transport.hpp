@@ -19,7 +19,8 @@ struct HttpRequest {
     HttpMethod method = HttpMethod::Get;
     std::string url;
     std::map<std::string, std::string> headers;
-    std::string body;  // JSON body for POST/PUT/PATCH
+	std::string body;  // JSON body for POST/PUT/PATCH
+	bool allow_insecure_loopback = false;
 };
 
 /// A single HTTP response.

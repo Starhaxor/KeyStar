@@ -71,6 +71,10 @@ type CredentialVerifier interface {
 	Verify(context.Context, string, string) (*domain.ApplicationCredential, error)
 }
 
+type RateLimitStore interface {
+	AllowRateLimit(ctx context.Context, key []byte, limit int, window time.Duration, now time.Time) (bool, int, error)
+}
+
 // AdminAuthService authenticates dashboard administrators and manages their
 // TOTP enrollment.
 type AdminAuthService interface {
@@ -211,8 +215,8 @@ type ServerStore interface {
 	GetDevicePolicy(ctx context.Context, applicationID string) (*domain.DevicePolicy, error)
 	UpsertDevicePolicy(ctx context.Context, applicationID string, input domain.NewDevicePolicy) (*domain.DevicePolicy, error)
 	ListRefreshSessions(ctx context.Context, applicationID, userID, after string, limit int) ([]domain.RefreshSession, string, bool, error)
-	RevokeRefreshSession(ctx context.Context, sessionID string) error
-	RevokeAllUserRefreshSessions(ctx context.Context, userID string) (int64, error)
+	RevokeRefreshSession(ctx context.Context, applicationID, sessionID string) error
+	RevokeAllUserRefreshSessions(ctx context.Context, applicationID, userID string) (int64, error)
 	CreateWebhook(ctx context.Context, applicationID string, input domain.NewWebhook, secretHash []byte) (*domain.Webhook, error)
 	ListWebhooks(ctx context.Context, applicationID string) ([]domain.Webhook, error)
 	FindWebhookByID(ctx context.Context, applicationID, webhookID string) (*domain.Webhook, error)
@@ -289,6 +293,7 @@ func MapVariable(variable domain.Variable) VariableJSON {
 // HTTP layer. It is satisfied by service.RefreshService.
 type RefreshService interface {
 	Refresh(ctx context.Context, input service.RefreshInput) (service.RefreshResult, error)
+	Revoke(ctx context.Context, input service.RefreshInput) error
 }
 
 // refreshServiceAdapter wraps an optional RefreshService for the router.
@@ -308,4 +313,11 @@ func (a *refreshServiceAdapter) Refresh(ctx context.Context, input service.Refre
 		return service.RefreshResult{}, errors.New("refresh service is not configured")
 	}
 	return a.service.Refresh(ctx, input)
+}
+
+func (a *refreshServiceAdapter) Revoke(ctx context.Context, input service.RefreshInput) error {
+	if a == nil || a.service == nil {
+		return errors.New("refresh service is not configured")
+	}
+	return a.service.Revoke(ctx, input)
 }

@@ -28,8 +28,14 @@ void testJsonParseEmpty() {
 }
 
 void testJsonParseInvalid() {
-    auto json = keystar::JsonValue::parse("{invalid}");
-    assert(json.isNull());
+    const char* invalid[] = {
+        "{invalid}", "{\"key\" 1}", "{\"key\":true} trailing", "{\"key\":1,}", "[1,]",
+        "tru", "nullx", "01", "\"unterminated", "{\"key\":1,\"key\":2}"
+    };
+    for (const char* input : invalid) {
+        auto json = keystar::JsonValue::parse(input);
+        assert(json.isNull());
+    }
     printf("  PASS testJsonParseInvalid\n");
 }
 

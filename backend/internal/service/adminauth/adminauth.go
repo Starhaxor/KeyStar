@@ -35,14 +35,14 @@ var (
 )
 
 const (
-	sessionTokenBytes  = 32
+	sessionTokenBytes   = 32
 	challengeTokenBytes = 32
-	maxStoredUserAgent = 200
-	actionLogin        = "ADMIN_LOGIN"
-	actionLoginFailed  = "ADMIN_LOGIN_FAILED"
-	actionLogout       = "ADMIN_LOGOUT"
-	actionMFAEnrolled  = "ADMIN_MFA_ENROLLED"
-	actionMFADisabled  = "ADMIN_MFA_DISABLED"
+	maxStoredUserAgent  = 200
+	actionLogin         = "ADMIN_LOGIN"
+	actionLoginFailed   = "ADMIN_LOGIN_FAILED"
+	actionLogout        = "ADMIN_LOGOUT"
+	actionMFAEnrolled   = "ADMIN_MFA_ENROLLED"
+	actionMFADisabled   = "ADMIN_MFA_DISABLED"
 	// RecoveryCodeCount is how many single-use recovery codes enrollment
 	// issues; they are only shown once.
 	RecoveryCodeCount = 10
@@ -71,10 +71,11 @@ type Store interface {
 }
 
 type Config struct {
-	SessionTTL   time.Duration
-	ChallengeTTL time.Duration
-	Random       io.Reader
-	Now          func() time.Time
+	SessionTTL    time.Duration
+	ChallengeTTL  time.Duration
+	Random        io.Reader
+	Now           func() time.Time
+	EncryptionKey []byte
 }
 
 // LoginResult carries either a finished session (Token) or a pending MFA
@@ -94,6 +95,7 @@ type Service struct {
 	now          func() time.Time
 	dummyOnce    sync.Once
 	dummyHash    string
+	secretBox    *security.SecretBox
 }
 
 func New(store Store, config Config) *Service {
@@ -112,12 +114,17 @@ func New(store Store, config Config) *Service {
 	if config.Now == nil {
 		config.Now = time.Now
 	}
+	secretBox, err := security.NewSecretBox(config.EncryptionKey)
+	if err != nil {
+		panic("adminauth encryption key must be exactly 32 bytes")
+	}
 	return &Service{
 		store:        store,
 		sessionTTL:   config.SessionTTL,
 		challengeTTL: config.ChallengeTTL,
 		random:       config.Random,
 		now:          config.Now,
+		secretBox:    secretBox,
 	}
 }
 
@@ -205,6 +212,9 @@ func (s *Service) CompleteMFA(ctx context.Context, challengeToken, code, recover
 	if !account.MFAEnrolled || account.TOTPSecret == "" {
 		return "", nil, ErrMFANotEnrolled
 	}
+	if err := s.decryptTOTPSecret(ctx, account); err != nil {
+		return "", nil, fmt.Errorf("decrypt admin mfa secret: %w", err)
+	}
 
 	switch {
 	case strings.TrimSpace(recoveryCode) != "":
@@ -242,7 +252,11 @@ func (s *Service) StartMFAEnrollment(ctx context.Context, account *domain.AdminA
 	if err != nil {
 		return "", "", err
 	}
-	if err := s.store.StartAdminTOTPEnrollment(ctx, account.ID, secret); err != nil {
+	sealed, err := s.secretBox.Encrypt(secret)
+	if err != nil {
+		return "", "", fmt.Errorf("encrypt mfa secret: %w", err)
+	}
+	if err := s.store.StartAdminTOTPEnrollment(ctx, account.ID, sealed); err != nil {
 		return "", "", fmt.Errorf("start mfa enrollment: %w", err)
 	}
 	return secret, security.TOTPProvisioningURI(secret, account.Email, issuer), nil
@@ -256,6 +270,9 @@ func (s *Service) ConfirmMFAEnrollment(ctx context.Context, account *domain.Admi
 	}
 	if account.TOTPSecret == "" {
 		return nil, ErrMFANotEnrolled
+	}
+	if err := s.decryptTOTPSecret(ctx, account); err != nil {
+		return nil, fmt.Errorf("decrypt admin mfa secret: %w", err)
 	}
 	if !security.ValidateTOTPCode(account.TOTPSecret, code, s.now()) {
 		return nil, ErrInvalidMFACode
@@ -309,6 +326,9 @@ func (s *Service) Authenticate(ctx context.Context, token string) (*domain.Admin
 	session, account, err := s.store.LoadActiveAdminSession(ctx, tokenDigest[:])
 	if err != nil {
 		return nil, nil, err
+	}
+	if err := s.decryptTOTPSecret(ctx, account); err != nil {
+		return nil, nil, fmt.Errorf("decrypt admin mfa secret: %w", err)
 	}
 	return session, account, nil
 }
@@ -380,7 +400,34 @@ func (s *Service) loadActiveAccount(ctx context.Context, adminAccountID string) 
 	if account.Status != domain.AdminStatusActive {
 		return nil, ErrInvalidCredentials
 	}
+	if err := s.decryptTOTPSecret(ctx, account); err != nil {
+		return nil, fmt.Errorf("decrypt admin mfa secret: %w", err)
+	}
 	return account, nil
+}
+
+func (s *Service) decryptTOTPSecret(ctx context.Context, account *domain.AdminAccount) error {
+	if account == nil || account.TOTPSecret == "" {
+		return nil
+	}
+	if !security.IsEncryptedSecret(account.TOTPSecret) {
+		plain := account.TOTPSecret
+		sealed, err := s.secretBox.Encrypt(plain)
+		if err != nil {
+			return err
+		}
+		if err := s.store.StartAdminTOTPEnrollment(ctx, account.ID, sealed); err != nil {
+			return err
+		}
+		account.TOTPSecret = plain
+		return nil
+	}
+	plain, err := s.secretBox.Decrypt(account.TOTPSecret)
+	if err != nil {
+		return err
+	}
+	account.TOTPSecret = plain
+	return nil
 }
 
 func (s *Service) auditMFAFailure(ctx context.Context, account *domain.AdminAccount, ipAddress, userAgent, method string) {

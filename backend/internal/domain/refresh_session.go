@@ -19,6 +19,7 @@ type RefreshSession struct {
 	ID            string
 	ApplicationID string
 	UserID        string
+	LicenseID     string
 	DeviceID      string
 	TokenHash     []byte
 	Status        RefreshSessionStatus
@@ -32,6 +33,7 @@ type RefreshSession struct {
 type NewRefreshSession struct {
 	ApplicationID string
 	UserID        string
+	LicenseID     string
 	DeviceID      string
 	TokenHash     []byte
 	ExpiresAt     time.Time

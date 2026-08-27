@@ -28,7 +28,7 @@ type loginResponse struct {
 }
 
 func (router *Router) handleLogin(writer http.ResponseWriter, request *http.Request) {
-	if !router.loginLimiter.allow(ClientIP(request, router.trustedProxies)) {
+	if allowed, _ := router.allowRate(request.Context(), "login", ClientIP(request, router.trustedProxies), 5, time.Minute, router.loginLimiter); !allowed {
 		WriteError(writer, request, http.StatusTooManyRequests, "RATE_LIMITED", "too many requests")
 		return
 	}

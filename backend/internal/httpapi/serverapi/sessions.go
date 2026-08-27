@@ -2,6 +2,7 @@ package serverapi
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/starloader/backend/internal/domain"
 	"github.com/starloader/backend/internal/httpapi"
@@ -36,6 +37,12 @@ func mapRefreshSession(s domain.RefreshSession) serverRefreshSessionJSON {
 func (router *Router) handleServerSessionList(writer http.ResponseWriter, request *http.Request) {
 	applicationID := principalApplicationID(request)
 	userID := request.URL.Query().Get("user_id")
+	if userID == "" {
+		segments := splitServerPath(strings.TrimPrefix(request.URL.Path, httpapi.ServerPathPrefix))
+		if len(segments) == 3 && segments[0] == "users" && segments[2] == "sessions" {
+			userID = segments[1]
+		}
+	}
 	if !httpapi.ValidUUID(userID) {
 		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "user_id is required")
 		return
@@ -59,17 +66,18 @@ func (router *Router) handleServerSessionList(writer http.ResponseWriter, reques
 
 // handleServerSessionRevoke revokes a single refresh session by ID.
 func (router *Router) handleServerSessionRevoke(writer http.ResponseWriter, request *http.Request) {
-	segments := splitServerPath(request.URL.Path)
+	applicationID := principalApplicationID(request)
+	segments := splitServerPath(strings.TrimPrefix(request.URL.Path, httpapi.ServerPathPrefix))
 	if len(segments) < 3 {
 		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "session id required")
 		return
 	}
-	sessionID := segments[2]
+	sessionID := segments[1]
 	if !httpapi.ValidUUID(sessionID) {
 		httpapi.WriteError(writer, request, http.StatusNotFound, "SESSION_NOT_FOUND", "session not found")
 		return
 	}
-	if err := router.ServerStore.RevokeRefreshSession(request.Context(), sessionID); err != nil {
+	if err := router.ServerStore.RevokeRefreshSession(request.Context(), applicationID, sessionID); err != nil {
 		router.writeServerError(writer, request, err)
 		return
 	}
@@ -80,17 +88,18 @@ func (router *Router) handleServerSessionRevoke(writer http.ResponseWriter, requ
 
 // handleServerSessionRevokeAll revokes every active refresh session for a user.
 func (router *Router) handleServerSessionRevokeAll(writer http.ResponseWriter, request *http.Request) {
-	segments := splitServerPath(request.URL.Path)
+	applicationID := principalApplicationID(request)
+	segments := splitServerPath(strings.TrimPrefix(request.URL.Path, httpapi.ServerPathPrefix))
 	if len(segments) < 3 {
 		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "user_id required")
 		return
 	}
-	userID := segments[2]
+	userID := segments[1]
 	if !httpapi.ValidUUID(userID) {
 		httpapi.WriteError(writer, request, http.StatusNotFound, "USER_NOT_FOUND", "user not found")
 		return
 	}
-	count, err := router.ServerStore.RevokeAllUserRefreshSessions(request.Context(), userID)
+	count, err := router.ServerStore.RevokeAllUserRefreshSessions(request.Context(), applicationID, userID)
 	if err != nil {
 		router.writeServerError(writer, request, err)
 		return

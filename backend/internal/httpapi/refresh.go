@@ -85,6 +85,26 @@ func (router *Router) handleRefresh(writer http.ResponseWriter, request *http.Re
 	})
 }
 
+func (router *Router) handleLogout(writer http.ResponseWriter, request *http.Request) {
+	var body refreshRequestBody
+	if err := DecodeJSONBody(writer, request, &body); err != nil || body.RefreshToken == "" {
+		WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		return
+	}
+	principal, ok := AppPrincipalFromContext(request.Context())
+	if !ok || principal.ApplicationID == "" {
+		WriteError(writer, request, http.StatusUnauthorized, "INVALID_CREDENTIAL", "application credential required")
+		return
+	}
+	if err := router.refreshService.Revoke(request.Context(), service.RefreshInput{ApplicationID: principal.ApplicationID, RefreshToken: body.RefreshToken}); err != nil {
+		router.writeRefreshError(writer, request, err)
+		return
+	}
+	WriteJSON(writer, http.StatusOK, struct {
+		OK bool `json:"ok"`
+	}{OK: true})
+}
+
 // refreshFromRequest bridges the HTTP handler to the RefreshService. The
 // RefreshService is wired through the DeviceService's configuration; the
 // router holds a reference to it via the refreshService field.

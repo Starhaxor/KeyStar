@@ -40,5 +40,7 @@ export function scopeOptionsForCredentialType(type: CredentialType): CredentialS
 }
 
 export function defaultScopesForCredentialType(type: CredentialType): string[] {
-  return type === "publishable" ? ["auth.login", "device.verify"] : ["users.read"];
+  return type === "publishable"
+    ? ["auth.login", "device.verify", "auth.refresh", "auth.logout"]
+    : ["users.read"];
 }

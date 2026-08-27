@@ -121,7 +121,7 @@ func (router *Router) requireCredentialMode(requiredType domain.CredentialType, 
 			// Per-credential throttling protects the backend from a leaked or
 			// runaway key without penalising other credentials of the same
 			// application.
-			if allowed, retryAfter := router.AllowCredentialRate(principal.ApplicationID + ":" + applicationCredential.ID); !allowed {
+			if allowed, retryAfter := router.AllowCredentialRateContext(request.Context(), principal.ApplicationID+":"+applicationCredential.ID); !allowed {
 				writer.Header().Set("Retry-After", strconv.Itoa(retryAfter))
 				WriteError(writer, request, http.StatusTooManyRequests, "RATE_LIMITED", "rate limit exceeded")
 				return

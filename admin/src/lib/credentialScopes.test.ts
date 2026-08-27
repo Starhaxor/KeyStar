@@ -6,10 +6,12 @@ import {
 } from "./credentialScopes";
 
 describe("credential scope choices", () => {
-  it("preselects the two permissions needed by the StarLoader desktop client", () => {
+  it("preselects every permission needed by the StarLoader desktop session lifecycle", () => {
     expect(defaultScopesForCredentialType("publishable")).toEqual([
       "auth.login",
       "device.verify",
+      "auth.refresh",
+      "auth.logout",
     ]);
   });
 

@@ -7,10 +7,10 @@ import (
 	"github.com/starloader/backend/migrations"
 )
 
-func TestVersionedMigrationsIncludeModerationSchema(t *testing.T) {
+func TestVersionedMigrationsIncludeSharedRateLimits(t *testing.T) {
 	last := versionedMigrations[len(versionedMigrations)-1]
-	if last.version != 16 || last.up != "000016_console_lifecycle.up.sql" {
-		t.Fatalf("latest migration = %#v, want console lifecycle migration 16", last)
+	if last.version != 18 || last.up != "000018_rate_limit_buckets.up.sql" {
+		t.Fatalf("latest migration = %#v, want shared rate-limit migration 18", last)
 	}
 }
 

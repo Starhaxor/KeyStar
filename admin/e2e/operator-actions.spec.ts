@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 
 async function openRowAction(page: Page, rowText: string, actionName: string) {
-  const row = page.getByRole("row").filter({ hasText: rowText });
+  const row = page.getByRole("row").filter({ hasText: rowText }).first();
   await expect(row).toBeVisible();
   await row.getByRole("button", { name: "Row actions" }).click();
   await page.getByRole("button", { name: actionName, exact: true }).click();
@@ -74,8 +74,15 @@ test("audit details are available without exposing secret session fields", async
 }) => {
   const alpha = e2eFixture.applications.alpha;
   await page.goto("/users");
-  await openRowAction(page, alpha.userEmail, "Disable user");
-  await page.getByRole("dialog").getByRole("button", { name: "Disable" }).click();
+  const row = page.getByRole("row").filter({ hasText: alpha.userEmail });
+  await row.getByRole("button", { name: "Row actions" }).click();
+  const disable = page.getByRole("button", { name: "Disable user", exact: true });
+  const disabling = await disable.isVisible();
+  await (disabling ? disable : page.getByRole("button", { name: "Enable user", exact: true })).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: disabling ? "Disable" : "Enable", exact: true })
+    .click();
 
   await page.goto("/audit-logs");
   await openRowAction(page, "USER_STATUS_CHANGED", "Details");

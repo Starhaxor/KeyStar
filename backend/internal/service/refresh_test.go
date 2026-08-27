@@ -2,12 +2,48 @@ package service
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"testing"
 	"time"
 
 	"github.com/starloader/backend/internal/domain"
 	"github.com/starloader/backend/internal/security"
 )
+
+func TestRefreshServiceIssuesClaimsAcceptedByRealVerifier(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuer, err := security.NewTokenIssuer(privateKey, "starloader", "starloader-client", "StarLoader")
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier, err := security.NewTokenVerifier(publicKey, "starloader", "starloader-client", "StarLoader")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := newFakeRefreshRepository()
+	svc := newTestRefreshService(repo, issuer)
+	now := time.Now().UTC().Truncate(time.Second)
+	svc.now = func() time.Time { return now }
+	token, _, err := svc.IssueRefreshToken(context.Background(), "app-1", "user-1", "license-1", "device-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := svc.Refresh(context.Background(), RefreshInput{ApplicationID: "app-1", RefreshToken: token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := verifier.Verify(result.AccessToken)
+	if err != nil {
+		t.Fatalf("real verifier rejected refreshed token: %v", err)
+	}
+	if claims.LicenseID != "license-1" || claims.Product != "StarLoader" || claims.Issuer != "starloader" {
+		t.Fatalf("claims=%#v", claims)
+	}
+}
 
 // fakeRefreshRepository implements RefreshTokenRepository for testing.
 type fakeRefreshRepository struct {
@@ -26,6 +62,7 @@ func (repo *fakeRefreshRepository) CreateRefreshSession(_ context.Context, input
 		ID:            id,
 		ApplicationID: input.ApplicationID,
 		UserID:        input.UserID,
+		LicenseID:     input.LicenseID,
 		DeviceID:      input.DeviceID,
 		TokenHash:     input.TokenHash,
 		Status:        domain.RefreshSessionStatusActive,
@@ -34,6 +71,12 @@ func (repo *fakeRefreshRepository) CreateRefreshSession(_ context.Context, input
 	}
 	repo.sessions[id] = session
 	return session, nil
+}
+
+func (repo *fakeRefreshRepository) LoadProfile(_ context.Context, applicationID, userID, licenseID, deviceID string) (*domain.UserProfile, error) {
+	return &domain.UserProfile{ApplicationID: applicationID, AccountStatus: domain.UserStatusActive, Product: "StarLoader",
+		LicenseStatus: domain.LicenseStatusActive, LicenseExpiresAt: time.Now().Add(24 * time.Hour),
+		DeviceID: deviceID, DeviceStatus: domain.DeviceStatusActive}, nil
 }
 
 func (repo *fakeRefreshRepository) FindRefreshSessionByTokenHash(_ context.Context, tokenHash []byte) (*domain.RefreshSession, error) {
@@ -54,7 +97,16 @@ func (repo *fakeRefreshRepository) RotateRefreshSession(_ context.Context, sessi
 	return s, nil
 }
 
-func (repo *fakeRefreshRepository) RevokeRefreshSessionFamily(_ context.Context, userID, deviceID string) (int64, error) {
+func (repo *fakeRefreshRepository) RevokeRefreshSession(_ context.Context, applicationID, sessionID string) error {
+	session, ok := repo.sessions[sessionID]
+	if !ok || session.ApplicationID != applicationID {
+		return domain.ErrRefreshSessionNotFound
+	}
+	session.Status = domain.RefreshSessionStatusRevoked
+	return nil
+}
+
+func (repo *fakeRefreshRepository) RevokeRefreshSessionFamily(_ context.Context, _ string, userID, deviceID string) (int64, error) {
 	var count int64
 	for _, s := range repo.sessions {
 		if s.UserID == userID && s.DeviceID == deviceID && s.Status == domain.RefreshSessionStatusActive {
@@ -65,7 +117,7 @@ func (repo *fakeRefreshRepository) RevokeRefreshSessionFamily(_ context.Context,
 	return count, nil
 }
 
-func (repo *fakeRefreshRepository) RevokeAllUserRefreshSessions(_ context.Context, userID string) (int64, error) {
+func (repo *fakeRefreshRepository) RevokeAllUserRefreshSessions(_ context.Context, _ string, userID string) (int64, error) {
 	var count int64
 	for _, s := range repo.sessions {
 		if s.UserID == userID && s.Status == domain.RefreshSessionStatusActive {
@@ -98,12 +150,17 @@ func bytesEqual(a, b []byte) bool {
 	return true
 }
 
+func newTestRefreshService(repo *fakeRefreshRepository, issuer SessionTokenIssuer) *RefreshService {
+	return NewRefreshService(RefreshServiceConfig{Repository: repo, Profile: repo, HMACKey: []byte("hmac-key"), TokenIssuer: issuer,
+		Issuer: "starloader", Audience: "starloader-client", Product: "StarLoader"})
+}
+
 func TestRefreshServiceIssueRefreshToken(t *testing.T) {
 	repo := newFakeRefreshRepository()
 	issuer := &fakeSessionTokenIssuer{token: "access-token"}
-	svc := NewRefreshService(repo, []byte("hmac-key"), issuer)
+	svc := newTestRefreshService(repo, issuer)
 
-	token, expiresAt, err := svc.IssueRefreshToken(context.Background(), "app-1", "user-1", "device-1")
+	token, expiresAt, err := svc.IssueRefreshToken(context.Background(), "app-1", "user-1", "license-1", "device-1")
 	if err != nil {
 		t.Fatalf("IssueRefreshToken() error = %v", err)
 	}
@@ -122,11 +179,11 @@ func TestRefreshServiceRefreshRotation(t *testing.T) {
 	repo := newFakeRefreshRepository()
 	issuer := &fakeSessionTokenIssuer{token: "new-access-token"}
 	now := time.Now().UTC().Truncate(time.Second)
-	svc := NewRefreshService(repo, []byte("hmac-key"), issuer)
+	svc := newTestRefreshService(repo, issuer)
 	svc.now = func() time.Time { return now }
 
 	// Issue a refresh token.
-	token, _, err := svc.IssueRefreshToken(context.Background(), "app-1", "user-1", "device-1")
+	token, _, err := svc.IssueRefreshToken(context.Background(), "app-1", "user-1", "license-1", "device-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,11 +223,11 @@ func TestRefreshServiceReuseDetection(t *testing.T) {
 	repo := newFakeRefreshRepository()
 	issuer := &fakeSessionTokenIssuer{token: "access"}
 	now := time.Now().UTC().Truncate(time.Second)
-	svc := NewRefreshService(repo, []byte("hmac-key"), issuer)
+	svc := newTestRefreshService(repo, issuer)
 	svc.now = func() time.Time { return now }
 
 	// Issue and rotate.
-	token, _, _ := svc.IssueRefreshToken(context.Background(), "app-1", "user-1", "device-1")
+	token, _, _ := svc.IssueRefreshToken(context.Background(), "app-1", "user-1", "license-1", "device-1")
 	_, err := svc.Refresh(context.Background(), RefreshInput{
 		ApplicationID: "app-1",
 		RefreshToken:  token,
@@ -201,9 +258,9 @@ func TestRefreshServiceReuseDetection(t *testing.T) {
 func TestRefreshServiceRevokedToken(t *testing.T) {
 	repo := newFakeRefreshRepository()
 	issuer := &fakeSessionTokenIssuer{token: "access"}
-	svc := NewRefreshService(repo, []byte("hmac-key"), issuer)
+	svc := newTestRefreshService(repo, issuer)
 
-	token, _, _ := svc.IssueRefreshToken(context.Background(), "app-1", "user-1", "device-1")
+	token, _, _ := svc.IssueRefreshToken(context.Background(), "app-1", "user-1", "license-1", "device-1")
 
 	// Find and manually revoke.
 	for _, s := range repo.sessions {
@@ -220,10 +277,28 @@ func TestRefreshServiceRevokedToken(t *testing.T) {
 	}
 }
 
+func TestRefreshServiceRevokeScopesAndInvalidatesToken(t *testing.T) {
+	repo := newFakeRefreshRepository()
+	svc := newTestRefreshService(repo, &fakeSessionTokenIssuer{token: "access"})
+	token, _, err := svc.IssueRefreshToken(context.Background(), "app-1", "user-1", "license-1", "device-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Revoke(context.Background(), RefreshInput{ApplicationID: "app-2", RefreshToken: token}); err != ErrInvalidRefreshToken {
+		t.Fatalf("cross-tenant revoke error=%v", err)
+	}
+	if err := svc.Revoke(context.Background(), RefreshInput{ApplicationID: "app-1", RefreshToken: token}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Refresh(context.Background(), RefreshInput{ApplicationID: "app-1", RefreshToken: token}); err != domain.ErrRefreshTokenRevoked {
+		t.Fatalf("revoked refresh error=%v", err)
+	}
+}
+
 func TestRefreshServiceInvalidToken(t *testing.T) {
 	repo := newFakeRefreshRepository()
 	issuer := &fakeSessionTokenIssuer{token: "access"}
-	svc := NewRefreshService(repo, []byte("hmac-key"), issuer)
+	svc := newTestRefreshService(repo, issuer)
 
 	_, err := svc.Refresh(context.Background(), RefreshInput{
 		ApplicationID: "app-1",
@@ -237,9 +312,9 @@ func TestRefreshServiceInvalidToken(t *testing.T) {
 func TestRefreshServiceWrongApplication(t *testing.T) {
 	repo := newFakeRefreshRepository()
 	issuer := &fakeSessionTokenIssuer{token: "access"}
-	svc := NewRefreshService(repo, []byte("hmac-key"), issuer)
+	svc := newTestRefreshService(repo, issuer)
 
-	token, _, _ := svc.IssueRefreshToken(context.Background(), "app-1", "user-1", "device-1")
+	token, _, _ := svc.IssueRefreshToken(context.Background(), "app-1", "user-1", "license-1", "device-1")
 
 	_, err := svc.Refresh(context.Background(), RefreshInput{
 		ApplicationID: "app-2",

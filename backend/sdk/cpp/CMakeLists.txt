@@ -55,6 +55,13 @@ if(KEYSTAR_BUILD_TESTS)
         tests/test_error.cpp
         tests/test_json_parser.cpp
     )
-    target_link_libraries(keystar_tests PRIVATE keystar)
-    add_test(NAME keystar_tests COMMAND keystar_tests)
+	target_link_libraries(keystar_tests PRIVATE keystar)
+	# Keep assertions active in Release test binaries; this suite intentionally
+	# uses assert for contract checks.
+	if(MSVC)
+		target_compile_options(keystar_tests PRIVATE /UNDEBUG)
+	else()
+		target_compile_options(keystar_tests PRIVATE -UNDEBUG)
+	endif()
+	add_test(NAME keystar_tests COMMAND keystar_tests)
 endif()

@@ -26,6 +26,7 @@ type fakeStore struct {
 	recoveryCodes [][]byte
 	usedRecovery  [][]byte
 	revokedAllFor string
+	persistedTOTP string
 }
 
 func (f *fakeStore) FindAdminAccountByEmail(_ context.Context, email string) (*domain.AdminAccount, error) {
@@ -111,6 +112,7 @@ func (f *fakeStore) StartAdminTOTPEnrollment(_ context.Context, adminID, secret 
 		return domain.ErrAdminNotFound
 	}
 	f.account.TOTPSecret = secret
+	f.persistedTOTP = secret
 	return nil
 }
 
@@ -165,7 +167,7 @@ func newTestAccount(t *testing.T, password string) *domain.AdminAccount {
 }
 
 func newTestService(store Store) *Service {
-	return New(store, Config{SessionTTL: time.Hour})
+	return New(store, Config{SessionTTL: time.Hour, EncryptionKey: []byte("0123456789abcdef0123456789abcdef")})
 }
 
 // enrolledAccount returns an account with a known TOTP secret already active.
@@ -370,6 +372,9 @@ func TestMFAEnrollmentConfirmsWithValidCodeAndIssuesRecoveryCodes(t *testing.T) 
 	}
 	if secret == "" || uri == "" {
 		t.Fatalf("secret = %q, uri = %q", secret, uri)
+	}
+	if store.persistedTOTP == secret || !security.IsEncryptedSecret(store.persistedTOTP) {
+		t.Fatalf("TOTP secret was not encrypted at rest: %q", store.persistedTOTP)
 	}
 	code, err := security.TOTPCode(secret, time.Now())
 	if err != nil {

@@ -15,6 +15,7 @@ func TestLoadRequiresEverySecuritySetting(t *testing.T) {
 		"LICENSE_AUDIENCE",
 		"PRODUCT",
 		"ADMIN_SESSION_SECRET",
+		"ADMIN_MFA_ENCRYPTION_KEY",
 	} {
 		t.Run(name, func(t *testing.T) {
 			setRequiredEnvironment(t)
@@ -51,7 +52,7 @@ func TestLoadRequiresClientCredentialsByDefault(t *testing.T) {
 
 func TestLoadRejectsReusedHMACKey(t *testing.T) {
 	setRequiredEnvironment(t)
-	t.Setenv("HARDWARE_HMAC_KEY", "license-hmac-key")
+	t.Setenv("HARDWARE_HMAC_KEY", "license-key-0123456789abcdef0123456789")
 	if _, err := Load(); err == nil {
 		t.Fatal("Load() accepted identical license and hardware HMAC keys")
 	}
@@ -101,7 +102,7 @@ func TestLoadDefaultsAdminConsoleSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"http://localhost:3000", "http://127.0.0.1:3000", "https://starloadernd8h-8080-domgge2y7n.outplane.app"}
+	want := []string{"http://localhost:3000", "http://127.0.0.1:3000"}
 	if len(configuration.AdminAllowedOrigins) != len(want) {
 		t.Fatalf("AdminAllowedOrigins = %q, want %q", configuration.AdminAllowedOrigins, want)
 	}
@@ -113,8 +114,40 @@ func TestLoadDefaultsAdminConsoleSettings(t *testing.T) {
 	if configuration.AdminSessionTTL != 12*time.Hour {
 		t.Fatalf("AdminSessionTTL = %s, want 12h", configuration.AdminSessionTTL)
 	}
-	if configuration.AdminCookieSecure {
-		t.Fatal("AdminCookieSecure should default to false")
+	if !configuration.AdminCookieSecure {
+		t.Fatal("AdminCookieSecure should default to true")
+	}
+}
+
+func TestLoadRejectsWeakOrReusedSecrets(t *testing.T) {
+	for _, change := range []struct{ name, value string }{
+		{"LICENSE_HMAC_KEY", "too-short"},
+		{"HARDWARE_HMAC_KEY", "too-short"},
+		{"ADMIN_SESSION_SECRET", "too-short"},
+		{"ADMIN_MFA_ENCRYPTION_KEY", "too-short"},
+		{"ADMIN_SESSION_SECRET", "0123456789abcdef0123456789abcdef"},
+	} {
+		t.Run(change.name+"="+change.value, func(t *testing.T) {
+			setRequiredEnvironment(t)
+			t.Setenv(change.name, change.value)
+			if _, err := Load(); err == nil {
+				t.Fatalf("Load accepted weak/reused %s", change.name)
+			}
+		})
+	}
+}
+
+func TestLoadRequiresMetricsTokenWhenEnabled(t *testing.T) {
+	setRequiredEnvironment(t)
+	t.Setenv("ENABLE_METRICS", "1")
+	t.Setenv("METRICS_TOKEN", "")
+	if _, err := Load(); err == nil {
+		t.Fatal("metrics enabled without a token")
+	}
+	t.Setenv("METRICS_TOKEN", "metrics-token-0123456789abcdef0123456789")
+	configuration, err := Load()
+	if err != nil || !configuration.MetricsEnabled {
+		t.Fatalf("Load()=(%#v,%v)", configuration, err)
 	}
 }
 
@@ -155,15 +188,18 @@ func setRequiredEnvironment(t *testing.T) {
 	t.Setenv("ADMIN_ALLOWED_ORIGIN", "")
 	t.Setenv("ADMIN_SESSION_TTL", "")
 	t.Setenv("ADMIN_COOKIE_SECURE", "")
+	t.Setenv("ENABLE_METRICS", "")
+	t.Setenv("METRICS_TOKEN", "")
 	for _, setting := range []struct{ name, value string }{
 		{"DATABASE_URL", "postgres://user:pass@localhost:5432/starloader"},
-		{"LICENSE_HMAC_KEY", "license-hmac-key"},
-		{"HARDWARE_HMAC_KEY", "hardware-hmac-key"},
+		{"LICENSE_HMAC_KEY", "license-key-0123456789abcdef0123456789"},
+		{"HARDWARE_HMAC_KEY", "hardware-key-0123456789abcdef01234567"},
 		{"ED25519_PRIVATE_KEY", "ed25519-private-key"},
 		{"LICENSE_ISSUER", "starloader"},
 		{"LICENSE_AUDIENCE", "starloader-client"},
 		{"PRODUCT", "StarLoader"},
-		{"ADMIN_SESSION_SECRET", "admin-session-secret"},
+		{"ADMIN_SESSION_SECRET", "session-key-0123456789abcdef0123456789"},
+		{"ADMIN_MFA_ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef"},
 	} {
 		t.Setenv(setting.name, setting.value)
 	}

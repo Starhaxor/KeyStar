@@ -66,7 +66,7 @@ func (router *Router) handleDeviceVerify(writer http.ResponseWriter, request *ht
 		WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
 		return
 	}
-	if !router.sessionLimiter.allow(strings.TrimSpace(body.SessionID)) {
+	if allowed, _ := router.allowRate(request.Context(), "device-session", strings.TrimSpace(body.SessionID), 10, time.Minute, router.sessionLimiter); !allowed {
 		WriteError(writer, request, http.StatusTooManyRequests, "RATE_LIMITED", "too many requests")
 		return
 	}

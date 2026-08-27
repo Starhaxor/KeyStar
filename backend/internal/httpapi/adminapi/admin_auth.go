@@ -33,7 +33,7 @@ type adminMFARequest struct {
 
 func (router *Router) handleAdminLogin(writer http.ResponseWriter, request *http.Request) {
 	ipAddress := httpapi.ClientIP(request, router.TrustedProxies())
-	if !router.AllowAdminRate(ipAddress + "|admin-login") {
+	if !router.AllowAdminRate(request.Context(), ipAddress+"|admin-login") {
 		router.RecordSecurityEvent(request, nil, "ADMIN_LOGIN_RATE_LIMITED", "warning", nil)
 		httpapi.WriteError(writer, request, http.StatusTooManyRequests, "RATE_LIMITED", "too many requests")
 		return
@@ -104,7 +104,7 @@ func (router *Router) handleAdminLogin(writer http.ResponseWriter, request *http
 // code. The challenge token issued by handleAdminLogin is single-use.
 func (router *Router) handleAdminMFA(writer http.ResponseWriter, request *http.Request) {
 	ipAddress := httpapi.ClientIP(request, router.TrustedProxies())
-	if !router.AllowAdminRate(ipAddress + "|admin-mfa") {
+	if !router.AllowAdminRate(request.Context(), ipAddress+"|admin-mfa") {
 		router.RecordSecurityEvent(request, nil, "ADMIN_MFA_RATE_LIMITED", "warning", nil)
 		httpapi.WriteError(writer, request, http.StatusTooManyRequests, "RATE_LIMITED", "too many requests")
 		return

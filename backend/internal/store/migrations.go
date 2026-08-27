@@ -34,6 +34,8 @@ var versionedMigrations = []migration{
 	{version: 14, up: "000014_owner_console_permissions.up.sql", down: "000014_owner_console_permissions.down.sql"},
 	{version: 15, up: "000015_moderation.up.sql", down: "000015_moderation.down.sql"},
 	{version: 16, up: "000016_console_lifecycle.up.sql", down: "000016_console_lifecycle.down.sql"},
+	{version: 17, up: "000017_refresh_session_license.up.sql", down: "000017_refresh_session_license.down.sql"},
+	{version: 18, up: "000018_rate_limit_buckets.up.sql", down: "000018_rate_limit_buckets.down.sql"},
 }
 
 func MigrateUp(ctx context.Context, pool *pgxpool.Pool) error {

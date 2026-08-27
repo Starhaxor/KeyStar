@@ -16,6 +16,7 @@ void run_device_verify_tests();
 void run_token_store_tests();
 
 int main() {
+    setvbuf(stdout, nullptr, _IONBF, 0);
     printf("=== KeyStar C++ SDK Tests ===\n\n");
 
     int failures = 0;

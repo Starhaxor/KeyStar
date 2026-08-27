@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <memory>
 #include <string>
+#include <stdexcept>
 #include <vector>
 
 namespace {
@@ -18,14 +19,15 @@ public:
     struct RecordedRequest {
         keystar::HttpMethod method;
         std::string url;
-        std::string body;
+		std::string body;
+		std::map<std::string, std::string> headers;
     };
 
     std::vector<RecordedRequest> requests;
     std::vector<keystar::HttpResponse> responses;
 
     keystar::HttpResponse send(const keystar::HttpRequest& request) override {
-        requests.push_back({request.method, request.url, request.body});
+		requests.push_back({request.method, request.url, request.body, request.headers});
         if (!responses.empty()) {
             auto resp = responses.front();
             responses.erase(responses.begin());
@@ -146,6 +148,28 @@ void testLoginFailure() {
     printf("  PASS testLoginFailure\n");
 }
 
+void testClientRejectsUnsafeBaseUrlAndEscapesJson() {
+	auto transport = std::make_shared<FakeTransport>();
+	auto deviceProvider = std::make_shared<FakeDeviceProvider>();
+	auto tokenStore = std::make_shared<FakeTokenStore>();
+	bool rejected = false;
+	try {
+		keystar::Client unsafe({.application_id = "app-1", .publishable_key = "ks_pk_live_x", .base_url = "http://example.com"}, transport, deviceProvider, tokenStore);
+	} catch (const std::invalid_argument&) { rejected = true; }
+	if (!rejected) throw std::runtime_error("Client accepted public plaintext HTTP");
+
+	transport->responses.push_back({.status_code = 401, .body = R"({"ok":false,"code":"INVALID_CREDENTIALS","message":"invalid"})"});
+	keystar::Client client({.application_id = "app-1", .publishable_key = "ks_pk_live_x"}, transport, deviceProvider, tokenStore);
+	const std::string email = "quote\"slash\\line\n@example.com";
+	(void)client.login(email, "pass\"word\\value");
+	if (transport->requests.empty()) throw std::runtime_error("login request was not sent");
+	const auto json = keystar::JsonValue::parse(transport->requests[0].body);
+	if (json.getString("email") != email || json.getString("password") != "pass\"word\\value") {
+		throw std::runtime_error("Client emitted malformed or injectable JSON");
+	}
+	printf("  PASS testClientRejectsUnsafeBaseUrlAndEscapesJson\n");
+}
+
 void testRefreshSuccess() {
     auto transport = std::make_shared<FakeTransport>();
     auto deviceProvider = std::make_shared<FakeDeviceProvider>();
@@ -175,7 +199,10 @@ void testRefreshSuccess() {
 
     // Verify the refresh request was made.
     assert(transport->requests.size() == 1);
-    assert(transport->requests[0].url.find("/v1/auth/refresh") != std::string::npos);
+	assert(transport->requests[0].url.find("/v1/auth/refresh") != std::string::npos);
+	if (transport->requests[0].headers["Authorization"] != "Bearer ks_pk_live_...") {
+		throw std::runtime_error("refresh request did not use the publishable credential");
+	}
 
     printf("  PASS testRefreshSuccess\n");
 }
@@ -214,10 +241,12 @@ void testLogout() {
         transport, deviceProvider, tokenStore
     );
 
-    assert(client.isAuthenticated());
-    assert(client.logout());
-    assert(!client.isAuthenticated());
-    assert(!tokenStore->savedSession.has_value());
+	if (!client.isAuthenticated() || !client.logout() || client.isAuthenticated() || tokenStore->savedSession.has_value()) {
+		throw std::runtime_error("logout did not clear the local session");
+	}
+	if (transport->requests.size() != 1 || transport->requests[0].headers["Authorization"] != "Bearer ks_pk_live_...") {
+		throw std::runtime_error("logout did not revoke using the publishable credential");
+	}
 
     printf("  PASS testLogout\n");
 }
@@ -227,7 +256,8 @@ void testLogout() {
 void run_auth_tests() {
     printf("Running auth tests...\n");
     testLoginSuccess();
-    testLoginFailure();
+	testLoginFailure();
+	testClientRejectsUnsafeBaseUrlAndEscapesJson();
     testRefreshSuccess();
     testRefreshWithoutToken();
     testLogout();

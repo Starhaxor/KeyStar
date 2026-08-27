@@ -23,12 +23,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/starloader/backend/internal/admin"
 	"github.com/starloader/backend/internal/config"
-	"github.com/starloader/backend/internal/metrics"
 	"github.com/starloader/backend/internal/credential"
 	"github.com/starloader/backend/internal/domain"
 	"github.com/starloader/backend/internal/httpapi"
 	"github.com/starloader/backend/internal/httpapi/adminapi"
 	"github.com/starloader/backend/internal/httpapi/serverapi"
+	"github.com/starloader/backend/internal/metrics"
 	"github.com/starloader/backend/internal/security"
 	"github.com/starloader/backend/internal/service"
 	"github.com/starloader/backend/internal/service/adminauth"
@@ -171,7 +171,11 @@ func runServer() error {
 	if err != nil {
 		return errors.New("configuration error: invalid token verifier configuration")
 	}
-	refreshService := service.NewRefreshService(repository, []byte(configuration.LicenseHMACKey), tokenIssuer)
+	refreshService := service.NewRefreshService(service.RefreshServiceConfig{
+		Repository: repository, Profile: repository,
+		HMACKey: []byte(configuration.LicenseHMACKey), TokenIssuer: tokenIssuer,
+		Issuer: configuration.LicenseIssuer, Audience: configuration.LicenseAudience, Product: configuration.Product,
+	})
 	deviceService := service.NewDeviceService(service.NewStoreDeviceRepository(repository), service.DeviceServiceConfig{
 		HardwareHMACKey: []byte(configuration.HardwareHMACKey),
 		TokenIssuer:     tokenIssuer,
@@ -183,9 +187,10 @@ func runServer() error {
 	adminConfig := httpapi.AdminConfig{}
 	if configuration.AdminConsoleEnabled {
 		adminAuthService := adminauth.New(repository, adminauth.Config{
-			SessionTTL: configuration.AdminSessionTTL,
-			Random:     cryptorand.Reader,
-			Now:        time.Now,
+			SessionTTL:    configuration.AdminSessionTTL,
+			Random:        cryptorand.Reader,
+			Now:           time.Now,
+			EncryptionKey: []byte(configuration.AdminMFAEncryptionKey),
 		})
 		adminConfig = httpapi.AdminConfig{
 			Auth:           adminAuthService,
@@ -208,7 +213,7 @@ func runServer() error {
 	// Optional Prometheus instrumentation, gated so metrics (including
 	// route-level traffic) are never exposed unintentionally.
 	var registry *metrics.Registry
-	if envInt("ENABLE_METRICS", 0) == 1 {
+	if configuration.MetricsEnabled {
 		registry = metrics.NewRegistry()
 		registry.DeclareCounter("keystar_http_requests_total", "HTTP requests processed.")
 		registry.DeclareHistogram("keystar_http_request_duration_seconds", "HTTP request latency in seconds.")
@@ -224,9 +229,11 @@ func runServer() error {
 		TrustedProxies:           trustedProxies,
 		Logger:                   log.Default(),
 		RateLimitMaxKeys:         envInt("RATE_LIMIT_MAX_KEYS", 0),
+		RateLimits:               repository,
 		CredentialRateLimit:      envInt("CREDENTIAL_RATE_LIMIT", 0),
 		HealthCheck:              pool.Ping,
 		Metrics:                  registry,
+		MetricsToken:             configuration.MetricsToken,
 		Admin:                    adminConfig,
 		DefaultApplicationID:     defaultApplication.ID,
 		Applications:             repository,

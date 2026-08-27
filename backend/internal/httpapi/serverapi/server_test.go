@@ -1,7 +1,9 @@
 package serverapi
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +14,56 @@ import (
 	"github.com/starloader/backend/internal/domain"
 	"github.com/starloader/backend/internal/httpapi"
 )
+
+func TestServerWebhookCreateReturnsRandomEncodedSecretAndRejectsPrivateTargets(t *testing.T) {
+	store := &fakeServerStore{}
+	router := newServerTestRouter(store, serverSecretKey())
+	first := serverRequest(t, router, http.MethodPost, "/v1/server/webhooks", `{"url":"https://hooks.example.com/events","events":["license.created"]}`)
+	if first.Code != http.StatusCreated {
+		t.Fatalf("first status=%d body=%s", first.Code, first.Body.String())
+	}
+	var firstResponse struct {
+		Secret string `json:"secret"`
+	}
+	if err := json.Unmarshal(first.Body.Bytes(), &firstResponse); err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(firstResponse.Secret)
+	if err != nil || len(decoded) != 32 {
+		t.Fatalf("secret is not 32-byte base64url: %q (%v)", firstResponse.Secret, err)
+	}
+	if !bytes.Equal(store.webhookSecretHash, domain.HashWebhookSecret([]byte(firstResponse.Secret))) {
+		t.Fatal("stored hash does not match the returned secret")
+	}
+	second := serverRequest(t, router, http.MethodPost, "/v1/server/webhooks", `{"url":"https://hooks.example.com/events","events":["license.created"]}`)
+	var secondResponse struct {
+		Secret string `json:"secret"`
+	}
+	if err := json.Unmarshal(second.Body.Bytes(), &secondResponse); err != nil {
+		t.Fatal(err)
+	}
+	if firstResponse.Secret == secondResponse.Secret {
+		t.Fatal("webhook secrets were predictable/reused")
+	}
+
+	blocked := serverRequest(t, router, http.MethodPost, "/v1/server/webhooks", `{"url":"https://127.0.0.1/internal","events":["license.created"]}`)
+	if blocked.Code != http.StatusBadRequest {
+		t.Fatalf("private target status=%d body=%s", blocked.Code, blocked.Body.String())
+	}
+}
+
+func TestServerSessionRevocationPassesTenantBoundary(t *testing.T) {
+	store := &fakeServerStore{}
+	router := newServerTestRouter(store, serverSecretKey())
+	sessionID := "019c2222-2222-7222-8222-222222222222"
+	response := serverRequest(t, router, http.MethodPost, "/v1/server/sessions/"+sessionID+"/revoke", `{}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if store.revokeApplication != serverTestApplicationID || store.revokeSession != sessionID {
+		t.Fatalf("revoke args=(%q,%q)", store.revokeApplication, store.revokeSession)
+	}
+}
 
 const serverTestApplicationID = "019c1111-1111-7111-8111-111111111111"
 
@@ -46,28 +98,34 @@ func (verifier *serverTestCredentialVerifier) Verify(_ context.Context, applicat
 // be implemented.
 type fakeServerStore struct {
 	httpapi.ServerStore
-	users        []domain.ServerUser
-	user         *domain.ServerUser
-	userErr      error
-	createdUser  *domain.User
-	licenses     []domain.ServerLicense
-	license      *domain.ServerLicense
-	licenseErr   error
-	created      *domain.License
-	variables    []domain.Variable
-	variable     *domain.Variable
-	domainPolicy *domain.DevicePolicy
-	notes        string
-	status       domain.UserStatus
-	banReason    string
-	banExpires   *time.Time
-	unbanned     string
-	resetUser    string
-	resetCount   int64
-	revoked      string
-	updated      string
-	deleted      string
-	createCalls  int
+	users                []domain.ServerUser
+	user                 *domain.ServerUser
+	userErr              error
+	createdUser          *domain.User
+	licenses             []domain.ServerLicense
+	license              *domain.ServerLicense
+	licenseErr           error
+	created              *domain.License
+	variables            []domain.Variable
+	variable             *domain.Variable
+	domainPolicy         *domain.DevicePolicy
+	notes                string
+	status               domain.UserStatus
+	banReason            string
+	banExpires           *time.Time
+	unbanned             string
+	resetUser            string
+	resetCount           int64
+	revoked              string
+	updated              string
+	deleted              string
+	createCalls          int
+	webhookSecretHash    []byte
+	webhookURL           string
+	revokeApplication    string
+	revokeSession        string
+	revokeAllApplication string
+	revokeAllUser        string
 }
 
 func (fake *fakeServerStore) ListServerUsers(_ context.Context, _, _ string, _ int) ([]domain.ServerUser, string, bool, error) {
@@ -180,16 +238,20 @@ func (fake *fakeServerStore) ListRefreshSessions(_ context.Context, _, _ string,
 	return nil, "", false, nil
 }
 
-func (fake *fakeServerStore) RevokeRefreshSession(_ context.Context, _ string) error {
+func (fake *fakeServerStore) RevokeRefreshSession(_ context.Context, applicationID, sessionID string) error {
+	fake.revokeApplication, fake.revokeSession = applicationID, sessionID
 	return nil
 }
 
-func (fake *fakeServerStore) RevokeAllUserRefreshSessions(_ context.Context, _ string) (int64, error) {
+func (fake *fakeServerStore) RevokeAllUserRefreshSessions(_ context.Context, applicationID, userID string) (int64, error) {
+	fake.revokeAllApplication, fake.revokeAllUser = applicationID, userID
 	return 0, nil
 }
 
-func (fake *fakeServerStore) CreateWebhook(_ context.Context, _ string, _ domain.NewWebhook, _ []byte) (*domain.Webhook, error) {
-	return &domain.Webhook{ID: "wh-1", Status: domain.WebhookStatusActive, Events: []string{"*"}}, nil
+func (fake *fakeServerStore) CreateWebhook(_ context.Context, applicationID string, input domain.NewWebhook, secretHash []byte) (*domain.Webhook, error) {
+	fake.webhookSecretHash = append([]byte(nil), secretHash...)
+	fake.webhookURL = input.URL
+	return &domain.Webhook{ID: "wh-1", ApplicationID: applicationID, URL: input.URL, Status: domain.WebhookStatusActive, Events: input.Events}, nil
 }
 
 func (fake *fakeServerStore) ListWebhooks(_ context.Context, _ string) ([]domain.Webhook, error) {
@@ -247,7 +309,7 @@ func serverSecretKey() *domain.ApplicationCredential {
 	return &domain.ApplicationCredential{
 		ID: "cred-secret", ApplicationID: serverTestApplicationID,
 		Environment: domain.CredentialEnvironmentLive, CredentialType: domain.CredentialSecret,
-		Scopes: []string{"users.read", "users.write", "licenses.read", "licenses.write", "devices.read", "devices.write", "variables.read", "variables.write"},
+		Scopes: []string{"users.read", "users.write", "licenses.read", "licenses.write", "devices.read", "devices.write", "variables.read", "variables.write", "sessions.read", "sessions.revoke", "webhooks.read", "webhooks.write"},
 		Status: domain.CredentialStatusActive,
 	}
 }

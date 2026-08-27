@@ -26,8 +26,42 @@ type RefreshTokenRepository interface {
 	CreateRefreshSession(ctx context.Context, input domain.NewRefreshSession) (*domain.RefreshSession, error)
 	FindRefreshSessionByTokenHash(ctx context.Context, tokenHash []byte) (*domain.RefreshSession, error)
 	RotateRefreshSession(ctx context.Context, sessionID string, now time.Time) (*domain.RefreshSession, error)
-	RevokeRefreshSessionFamily(ctx context.Context, userID, deviceID string) (int64, error)
-	RevokeAllUserRefreshSessions(ctx context.Context, userID string) (int64, error)
+	RevokeRefreshSession(ctx context.Context, applicationID, sessionID string) error
+	RevokeRefreshSessionFamily(ctx context.Context, applicationID, userID, deviceID string) (int64, error)
+	RevokeAllUserRefreshSessions(ctx context.Context, applicationID, userID string) (int64, error)
+}
+
+// Revoke invalidates the presented refresh token within its application.
+func (service *RefreshService) Revoke(ctx context.Context, input RefreshInput) error {
+	if service == nil || service.repository == nil || input.ApplicationID == "" || input.RefreshToken == "" {
+		return ErrInvalidRefreshToken
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(input.RefreshToken)
+	if err != nil || len(raw) != refreshTokenBytes {
+		return ErrInvalidRefreshToken
+	}
+	session, err := service.repository.FindRefreshSessionByTokenHash(ctx, hashRefreshToken(raw))
+	if err != nil || session.ApplicationID != input.ApplicationID {
+		return ErrInvalidRefreshToken
+	}
+	if err := service.repository.RevokeRefreshSession(ctx, input.ApplicationID, session.ID); err != nil {
+		return fmt.Errorf("revoke refresh token: %w", err)
+	}
+	return nil
+}
+
+type RefreshProfileRepository interface {
+	LoadProfile(ctx context.Context, applicationID, userID, licenseID, deviceID string) (*domain.UserProfile, error)
+}
+
+type RefreshServiceConfig struct {
+	Repository  RefreshTokenRepository
+	Profile     RefreshProfileRepository
+	HMACKey     []byte
+	TokenIssuer SessionTokenIssuer
+	Issuer      string
+	Audience    string
+	Product     string
 }
 
 // RefreshService manages the lifecycle of refresh tokens: issuance on device
@@ -36,24 +70,30 @@ type RefreshService struct {
 	repository  RefreshTokenRepository
 	hmacKey     []byte
 	tokenIssuer SessionTokenIssuer
+	profile     RefreshProfileRepository
+	issuer      string
+	audience    string
+	product     string
 	now         func() time.Time
 }
 
 // NewRefreshService builds a RefreshService. The hmacKey is used only for
 // the optional HMAC-binding in the opaque token prefix (not for hashing).
-func NewRefreshService(repository RefreshTokenRepository, hmacKey []byte, issuer SessionTokenIssuer) *RefreshService {
+func NewRefreshService(config RefreshServiceConfig) *RefreshService {
 	now := time.Now
 	return &RefreshService{
-		repository:  repository,
-		hmacKey:     append([]byte(nil), hmacKey...),
-		tokenIssuer: issuer,
-		now:         now,
+		repository:  config.Repository,
+		profile:     config.Profile,
+		hmacKey:     append([]byte(nil), config.HMACKey...),
+		tokenIssuer: config.TokenIssuer,
+		issuer:      config.Issuer, audience: config.Audience, product: config.Product,
+		now: now,
 	}
 }
 
 // IssueRefreshToken creates a new refresh session and returns the opaque
 // token that should be returned to the client exactly once.
-func (service *RefreshService) IssueRefreshToken(ctx context.Context, applicationID, userID, deviceID string) (string, time.Time, error) {
+func (service *RefreshService) IssueRefreshToken(ctx context.Context, applicationID, userID, licenseID, deviceID string) (string, time.Time, error) {
 	if service == nil || service.repository == nil {
 		return "", time.Time{}, errors.New("refresh service is not configured")
 	}
@@ -68,6 +108,7 @@ func (service *RefreshService) IssueRefreshToken(ctx context.Context, applicatio
 	_, err = service.repository.CreateRefreshSession(ctx, domain.NewRefreshSession{
 		ApplicationID: applicationID,
 		UserID:        userID,
+		LicenseID:     licenseID,
 		DeviceID:      deviceID,
 		TokenHash:     tokenHash,
 		ExpiresAt:     expiresAt,
@@ -120,7 +161,7 @@ func (service *RefreshService) Refresh(ctx context.Context, input RefreshInput) 
 	// Reuse detection: a rotated or revoked token means the family is
 	// compromised. Revoke every active session for this user+device pair.
 	if session.Status == domain.RefreshSessionStatusRotated {
-		_, _ = service.repository.RevokeRefreshSessionFamily(ctx, session.UserID, session.DeviceID)
+		_, _ = service.repository.RevokeRefreshSessionFamily(ctx, session.ApplicationID, session.UserID, session.DeviceID)
 		return RefreshResult{}, domain.ErrRefreshTokenReuse
 	}
 	if session.Status == domain.RefreshSessionStatusRevoked {
@@ -143,7 +184,7 @@ func (service *RefreshService) Refresh(ctx context.Context, input RefreshInput) 
 	}
 
 	// Issue new refresh token.
-	refreshToken, _, err := service.IssueRefreshToken(ctx, session.ApplicationID, session.UserID, session.DeviceID)
+	refreshToken, _, err := service.IssueRefreshToken(ctx, session.ApplicationID, session.UserID, session.LicenseID, session.DeviceID)
 	if err != nil {
 		return RefreshResult{}, fmt.Errorf("issue new refresh token: %w", err)
 	}
@@ -167,16 +208,24 @@ type RefreshInput struct {
 }
 
 func (service *RefreshService) issueAccessToken(ctx context.Context, session *domain.RefreshSession, applicationID string, now time.Time) (string, time.Time, error) {
+	if service.profile == nil || service.issuer == "" || service.audience == "" || service.product == "" || session.LicenseID == "" {
+		return "", time.Time{}, errors.New("refresh service token policy is not configured")
+	}
+	profile, err := service.profile.LoadProfile(ctx, applicationID, session.UserID, session.LicenseID, session.DeviceID)
+	if err != nil || profile.AccountStatus != domain.UserStatusActive || profile.LicenseStatus != domain.LicenseStatusActive ||
+		!profile.LicenseExpiresAt.After(now) || profile.DeviceStatus != domain.DeviceStatusActive || profile.Product != service.product {
+		return "", time.Time{}, ErrInvalidRefreshToken
+	}
 	accessExpiry := now.Add(sessionTokenLifetime)
 	token, err := service.tokenIssuer.Issue(security.SessionClaims{
 		Subject:       session.UserID,
 		ApplicationID: applicationID,
-		LicenseID:     "",
+		LicenseID:     session.LicenseID,
 		DeviceID:      session.DeviceID,
-		Product:       "",
+		Product:       service.product,
 		Features:      []string{},
-		Issuer:        "",
-		Audience:      "",
+		Issuer:        service.issuer,
+		Audience:      service.audience,
 		IssuedAt:      now.Truncate(time.Second),
 		ExpiresAt:     accessExpiry,
 	})

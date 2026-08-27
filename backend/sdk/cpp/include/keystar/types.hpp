@@ -10,7 +10,9 @@ namespace keystar {
 struct ClientOptions {
     std::string application_id;
     std::string publishable_key;
-    std::string base_url = "https://api.keystar.dev";
+	std::string base_url = "https://api.keystar.dev";
+	/// Development-only escape hatch. Plain HTTP is still limited to loopback.
+	bool allow_insecure_loopback = false;
 };
 
 /// Login result on success.

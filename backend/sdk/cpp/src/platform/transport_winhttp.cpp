@@ -13,6 +13,7 @@ namespace keystar {
 namespace {
 
 constexpr int kTransportErrorStatus = -1;
+constexpr size_t kMaxResponseBytes = 1024 * 1024;
 constexpr char kTransportErrorBody[] =
     R"({"code":"TRANSPORT_ERROR","message":"WinHTTP request failed"})";
 
@@ -83,7 +84,7 @@ void populateHeaders(HINTERNET request, HttpResponse& response) {
     WinHttpQueryHeaders(request, WINHTTP_QUERY_RAW_HEADERS_CRLF,
                         WINHTTP_HEADER_NAME_BY_INDEX, nullptr, &bytes,
                         WINHTTP_NO_HEADER_INDEX);
-    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || bytes == 0) return;
+	if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || bytes == 0 || bytes > 64 * 1024) return;
 
     std::vector<wchar_t> raw(bytes / sizeof(wchar_t));
     if (!WinHttpQueryHeaders(request, WINHTTP_QUERY_RAW_HEADERS_CRLF,
@@ -124,25 +125,35 @@ public:
         const std::wstring host(components.lpszHostName, components.dwHostNameLength);
         std::wstring path(components.lpszUrlPath, components.dwUrlPathLength);
         path.append(components.lpszExtraInfo, components.dwExtraInfoLength);
-        if (host.empty()) return transportError();
+		if (host.empty() || components.dwUserNameLength != 0 || components.dwPasswordLength != 0) return transportError();
         if (path.empty()) path = L"/";
 
         const bool secure = components.nScheme == INTERNET_SCHEME_HTTPS;
-        if (!secure && components.nScheme != INTERNET_SCHEME_HTTP) return transportError();
+		const bool loopback = _wcsicmp(host.c_str(), L"localhost") == 0 || host == L"127.0.0.1" || host == L"::1";
+		if (!secure && (components.nScheme != INTERNET_SCHEME_HTTP || !request.allow_insecure_loopback || !loopback)) return transportError();
 
         InternetHandle session(WinHttpOpen(L"KeyStarSDK/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                                            WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
-        if (!session) return transportError();
+		if (!session) return transportError();
+		if (!WinHttpSetTimeouts(session.get(), 5000, 5000, 10000, 10000)) return transportError();
+		DWORD secureProtocols = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2;
+#ifdef WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3
+		secureProtocols |= WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3;
+#endif
+		if (!WinHttpSetOption(session.get(), WINHTTP_OPTION_SECURE_PROTOCOLS, &secureProtocols, sizeof(secureProtocols))) return transportError();
         InternetHandle connection(WinHttpConnect(session.get(), host.c_str(), components.nPort, 0));
         if (!connection) return transportError();
         InternetHandle handle(WinHttpOpenRequest(connection.get(), methodName(request.method), path.c_str(),
                                                   nullptr, WINHTTP_NO_REFERER,
                                                   WINHTTP_DEFAULT_ACCEPT_TYPES,
                                                   secure ? WINHTTP_FLAG_SECURE : 0));
-        if (!handle) return transportError();
+		if (!handle) return transportError();
+		DWORD disabledFeatures = WINHTTP_DISABLE_REDIRECTS;
+		if (!WinHttpSetOption(handle.get(), WINHTTP_OPTION_DISABLE_FEATURE, &disabledFeatures, sizeof(disabledFeatures))) return transportError();
 
         std::wstring headers;
-        for (const auto& [name, value] : request.headers) {
+		for (const auto& [name, value] : request.headers) {
+			if (name.find_first_of("\r\n") != std::string::npos || value.find_first_of("\r\n") != std::string::npos) return transportError();
             const std::wstring wideName = utf8ToWide(name);
             const std::wstring wideValue = utf8ToWide(value);
             if (wideName.empty() || (value.size() != 0 && wideValue.empty())) return transportError();
@@ -175,7 +186,8 @@ public:
             if (!WinHttpQueryDataAvailable(handle.get(), &available)) return transportError();
             if (available == 0) break;
 
-            std::string chunk(available, '\0');
+			if (available > kMaxResponseBytes - response.body.size()) return transportError();
+			std::string chunk(available, '\0');
             DWORD read = 0;
             if (!WinHttpReadData(handle.get(), chunk.data(), available, &read)) return transportError();
             response.body.append(chunk.data(), read);

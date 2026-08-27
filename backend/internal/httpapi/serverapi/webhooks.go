@@ -1,10 +1,14 @@
 package serverapi
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"net/http"
+	"strings"
 
 	"github.com/starloader/backend/internal/domain"
 	"github.com/starloader/backend/internal/httpapi"
+	"github.com/starloader/backend/internal/security"
 )
 
 type serverWebhookJSON struct {
@@ -54,8 +58,9 @@ func (router *Router) handleServerWebhookCreate(writer http.ResponseWriter, requ
 		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
 		return
 	}
-	if body.URL == "" {
-		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "url is required")
+	body.URL = strings.TrimSpace(body.URL)
+	if err := security.ValidatePublicHTTPSURL(body.URL); err != nil {
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "url must be a public HTTPS endpoint")
 		return
 	}
 
@@ -69,11 +74,12 @@ func (router *Router) handleServerWebhookCreate(writer http.ResponseWriter, requ
 
 	// Generate signing secret (32 bytes random).
 	secret := make([]byte, 32)
-	// In production, use crypto/rand.Read.
-	for i := range secret {
-		secret[i] = byte(i)
+	if _, err := rand.Read(secret); err != nil {
+		httpapi.WriteError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "could not generate secret")
+		return
 	}
-	secretHash := domain.HashWebhookSecret(secret)
+	secretValue := base64.RawURLEncoding.EncodeToString(secret)
+	secretHash := domain.HashWebhookSecret([]byte(secretValue))
 
 	wh, err := router.ServerStore.CreateWebhook(request.Context(), applicationID, domain.NewWebhook{
 		URL:    body.URL,
@@ -88,18 +94,17 @@ func (router *Router) handleServerWebhookCreate(writer http.ResponseWriter, requ
 		OK      bool              `json:"ok"`
 		Webhook serverWebhookJSON `json:"webhook"`
 		Secret  string            `json:"secret"`
-	}{OK: true, Webhook: mapWebhook(*wh), Secret: string(secret)})
+	}{OK: true, Webhook: mapWebhook(*wh), Secret: secretValue})
 }
 
 // handleServerWebhookUpdate updates a webhook's URL, status, or events.
 func (router *Router) handleServerWebhookUpdate(writer http.ResponseWriter, request *http.Request) {
 	applicationID := principalApplicationID(request)
-	segments := splitServerPath(request.URL.Path)
-	if len(segments) < 2 {
+	webhookID := serverPathID(request)
+	if webhookID == "" {
 		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "webhook id required")
 		return
 	}
-	webhookID := segments[1]
 	if !httpapi.ValidUUID(webhookID) {
 		httpapi.WriteError(writer, request, http.StatusNotFound, "WEBHOOK_NOT_FOUND", "webhook not found")
 		return
@@ -114,10 +119,22 @@ func (router *Router) handleServerWebhookUpdate(writer http.ResponseWriter, requ
 		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
 		return
 	}
+	if body.URL != nil {
+		trimmed := strings.TrimSpace(*body.URL)
+		if err := security.ValidatePublicHTTPSURL(trimmed); err != nil {
+			httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "url must be a public HTTPS endpoint")
+			return
+		}
+		body.URL = &trimmed
+	}
 
 	var status *domain.WebhookStatus
 	if body.Status != nil {
 		s := domain.WebhookStatus(*body.Status)
+		if s != domain.WebhookStatusActive && s != domain.WebhookStatusDisabled {
+			httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid status")
+			return
+		}
 		status = &s
 	}
 
@@ -141,12 +158,11 @@ func (router *Router) handleServerWebhookUpdate(writer http.ResponseWriter, requ
 // handleServerWebhookDelete deletes a webhook.
 func (router *Router) handleServerWebhookDelete(writer http.ResponseWriter, request *http.Request) {
 	applicationID := principalApplicationID(request)
-	segments := splitServerPath(request.URL.Path)
-	if len(segments) < 2 {
+	webhookID := serverPathID(request)
+	if webhookID == "" {
 		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "webhook id required")
 		return
 	}
-	webhookID := segments[1]
 	if !httpapi.ValidUUID(webhookID) {
 		httpapi.WriteError(writer, request, http.StatusNotFound, "WEBHOOK_NOT_FOUND", "webhook not found")
 		return

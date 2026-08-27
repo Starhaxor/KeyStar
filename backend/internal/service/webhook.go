@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/starloader/backend/internal/domain"
+	"github.com/starloader/backend/internal/security"
 )
 
 // WebhookDispatcher delivers webhook events to registered endpoints using
@@ -46,7 +47,7 @@ type WebhookDispatcherConfig struct {
 func NewWebhookDispatcher(config WebhookDispatcherConfig) *WebhookDispatcher {
 	httpClient := config.HTTPClient
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 10 * time.Second}
+		httpClient = security.NewPublicHTTPSClient(10 * time.Second)
 	}
 	now := config.Now
 	if now == nil {
@@ -107,6 +108,9 @@ func (dispatcher *WebhookDispatcher) ProcessPendingDeliveries(ctx context.Contex
 //
 // and comparing it against the v1 value in X-KeyStar-Signature.
 func (dispatcher *WebhookDispatcher) deliver(ctx context.Context, webhook *domain.Webhook, delivery domain.WebhookDelivery) error {
+	if err := security.ValidatePublicHTTPSURL(webhook.URL); err != nil {
+		return fmt.Errorf("unsafe webhook target: %w", err)
+	}
 	event := domain.WebhookEvent{
 		ID:            delivery.ID,
 		Type:          delivery.EventType,

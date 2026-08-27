@@ -251,7 +251,7 @@ Official competitor references: [KeyAuth user and HWID management](https://docs.
 
 ### Prerequisites
 
-- Go 1.24 or later
+- Go 1.26.6 or later (the patched toolchain pinned by `backend/go.mod`)
 - PostgreSQL 15 or later
 - Node.js 20 or later
 - npm
@@ -278,6 +278,7 @@ LICENSE_ISSUER
 LICENSE_AUDIENCE
 PRODUCT
 ADMIN_SESSION_SECRET
+ADMIN_MFA_ENCRYPTION_KEY
 ```
 
 The backend reads environment variables rather than loading `.env` itself. For
@@ -308,9 +309,31 @@ Use the same terminal session, with the environment loaded:
 go run ./cmd/server admin create-admin --email admin@example.com --role owner
 ```
 
-The password is requested securely through the terminal. In production, set
-`ADMIN_COOKIE_SECURE=true` and configure `ADMIN_ALLOWED_ORIGIN` for the actual
-console origin.
+The password is requested securely through the terminal. `ADMIN_COOKIE_SECURE`
+defaults to `true`; set it to `false` only for local HTTP development. Configure
+`ADMIN_ALLOWED_ORIGIN` for the exact production console origin. Every
+HMAC/session secret must be unique and at least 32 bytes;
+`ADMIN_MFA_ENCRYPTION_KEY` must be exactly 32 bytes.
+
+Generate each general-purpose secret independently with a cryptographic secret
+manager (for example, `openssl rand -base64 48`). For the exactly 32-character
+MFA key, `openssl rand -base64 24` produces 24 random bytes encoded as 32 ASCII
+characters. Never reuse one generated value for another setting.
+
+When Prometheus metrics are enabled, set a unique 32-byte-or-longer
+`METRICS_TOKEN` and scrape with `Authorization: Bearer <token>`. Webhooks accept
+only public HTTPS targets and reject redirects, private addresses, and DNS
+answers that include non-public addresses.
+
+After a backend update, build a new binary or container image and recreate the
+running service; restarting an old image does not deploy the new routes or
+migrations. Run `go run ./cmd/server migrate up`, replace the deployed artifact,
+restart it, and verify `/status` and `/readyz` on the new instance before routing
+traffic to it.
+
+Existing desktop publishable credentials must include `auth.refresh` and
+`auth.logout` in addition to `auth.login` and `device.verify`. New credentials
+created with the console's recommended desktop scopes include all four.
 
 ### 3. Run the administration console
 

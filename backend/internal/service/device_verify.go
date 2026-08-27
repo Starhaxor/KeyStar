@@ -294,7 +294,7 @@ func (service *DeviceService) Verify(ctx context.Context, input VerifyInput) (Ve
 	// Issue a refresh token when the refresh service is configured.
 	if service.refreshService != nil {
 		refreshToken, _, refreshErr := service.refreshService.IssueRefreshToken(
-			ctx, input.ApplicationID, userID, deviceID)
+			ctx, input.ApplicationID, userID, licenseID, deviceID)
 		if refreshErr == nil {
 			result.RefreshToken = refreshToken
 		}

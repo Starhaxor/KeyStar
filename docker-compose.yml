@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:15
+    image: postgres:15@sha256:926f8799aef36e00001cfe15fba7abbd37d3c5224ea57e4c858e4bb670f10561
     environment:
       POSTGRES_DB: keystar_test
       POSTGRES_USER: keystar_test

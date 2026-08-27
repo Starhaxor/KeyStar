@@ -17,6 +17,8 @@
 namespace keystar {
 namespace {
 
+constexpr size_t kMaxStoredSessionBytes = 1024 * 1024;
+
 void appendField(std::vector<BYTE>& bytes, const std::string& value) {
     const auto length = static_cast<std::uint32_t>(value.size());
     for (unsigned shift = 0; shift < 32; shift += 8) {
@@ -38,9 +40,11 @@ bool readField(const std::vector<BYTE>& bytes, size_t& offset, std::string& valu
 }
 
 std::vector<BYTE> serialize(const StoredSession& session) {
-    std::vector<BYTE> bytes;
-    bytes.reserve(session.refresh_token.size() + session.user_id.size() + session.device_id.size() +
-                  session.license_id.size() + session.expires_at.size() + 5 * sizeof(std::uint32_t));
+	std::vector<BYTE> bytes;
+	const size_t payloadSize = session.refresh_token.size() + session.user_id.size() + session.device_id.size() +
+				  session.license_id.size() + session.expires_at.size() + 5 * sizeof(std::uint32_t);
+	if (payloadSize > kMaxStoredSessionBytes) return bytes;
+	bytes.reserve(payloadSize);
     appendField(bytes, session.refresh_token);
     appendField(bytes, session.user_id);
     appendField(bytes, session.device_id);
@@ -115,7 +119,8 @@ public:
 
     bool save(const StoredSession& session) override {
         if (!path_) return false;
-        std::vector<BYTE> plaintext = serialize(session);
+		std::vector<BYTE> plaintext = serialize(session);
+		if (plaintext.empty() || plaintext.size() > kMaxStoredSessionBytes) return false;
         DATA_BLOB input{static_cast<DWORD>(plaintext.size()), plaintext.data()};
         DATA_BLOB encrypted{};
         if (!CryptProtectData(&input, L"KeyStar session", nullptr, nullptr, nullptr,
@@ -165,7 +170,7 @@ public:
         std::ifstream input(*path_, std::ios::binary | std::ios::ate);
         if (!input) return std::nullopt;
         const std::streamsize size = input.tellg();
-        if (size < 0 || size > MAXDWORD) return std::nullopt;
+		if (size <= 0 || size > static_cast<std::streamsize>(kMaxStoredSessionBytes)) return std::nullopt;
         input.seekg(0);
         std::vector<BYTE> encrypted(static_cast<size_t>(size));
         if (!encrypted.empty()) {
@@ -179,8 +184,9 @@ public:
                                 CRYPTPROTECT_UI_FORBIDDEN, &plaintext)) {
             return std::nullopt;
         }
-        std::vector<BYTE> bytes(plaintext.pbData, plaintext.pbData + plaintext.cbData);
-        LocalFree(plaintext.pbData);
+		std::vector<BYTE> bytes(plaintext.pbData, plaintext.pbData + plaintext.cbData);
+		LocalFree(plaintext.pbData);
+		if (bytes.size() > kMaxStoredSessionBytes) return std::nullopt;
         return deserialize(bytes);
     }
 

@@ -183,7 +183,10 @@ func newIntegrationDeviceService(t *testing.T, repository *store.Store, now time
 	if err != nil {
 		t.Fatal(err)
 	}
-	refreshService := service.NewRefreshService(repository, []byte("integration-license-hmac"), issuer)
+	refreshService := service.NewRefreshService(service.RefreshServiceConfig{
+		Repository: repository, Profile: repository, HMACKey: []byte("integration-license-hmac"), TokenIssuer: issuer,
+		Issuer: "starloader", Audience: "starloader-client", Product: "StarLoader",
+	})
 	return service.NewDeviceService(service.NewStoreDeviceRepository(repository), service.DeviceServiceConfig{
 		HardwareHMACKey: []byte("integration-hardware-secret"), TokenIssuer: issuer,
 		Issuer: "starloader", Audience: "starloader-client", Product: "StarLoader",

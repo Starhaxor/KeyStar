@@ -16,6 +16,19 @@ import (
 	"github.com/starloader/backend/internal/domain"
 )
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return fn(request) }
+
+func webhookTestClient(server *httptest.Server) *http.Client {
+	return &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		clone := request.Clone(request.Context())
+		clone.URL.Scheme = "https"
+		clone.URL.Host = server.Listener.Addr().String()
+		return server.Client().Transport.RoundTrip(clone)
+	})}
+}
+
 // fakeWebhookRepo records outbox transitions made by the dispatcher.
 type fakeWebhookRepo struct {
 	webhook    *domain.Webhook
@@ -75,7 +88,7 @@ func TestProcessPendingDeliveriesPostsSignedRequest(t *testing.T) {
 	var receivedBody []byte
 	var receivedHeaders http.Header
 	var receivedPath string
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		receivedBody, _ = io.ReadAll(request.Body)
 		receivedHeaders = request.Header.Clone()
 		receivedPath = request.URL.Path
@@ -86,7 +99,7 @@ func TestProcessPendingDeliveriesPostsSignedRequest(t *testing.T) {
 	webhook := &domain.Webhook{
 		ID:            "webhook-1",
 		ApplicationID: "app-1",
-		URL:           server.URL + "/hook",
+		URL:           "https://hooks.example.com/hook",
 		SecretHash:    hash,
 		Status:        domain.WebhookStatusActive,
 		Events:        []string{"license.*"},
@@ -94,6 +107,7 @@ func TestProcessPendingDeliveriesPostsSignedRequest(t *testing.T) {
 	repo := &fakeWebhookRepo{webhook: webhook, deliveries: []domain.WebhookDelivery{testDelivery()}}
 	dispatcher := NewWebhookDispatcher(WebhookDispatcherConfig{
 		WebhookRepo: repo,
+		HTTPClient:  webhookTestClient(server),
 		Now: func() time.Time {
 			return time.Unix(1_800_000_000, 0).UTC()
 		},
@@ -135,7 +149,7 @@ func TestProcessPendingDeliveriesPostsSignedRequest(t *testing.T) {
 
 func TestProcessPendingDeliveriesMarksFailuresAndSkipsDisabled(t *testing.T) {
 	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		calls++
 		writer.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -148,12 +162,12 @@ func TestProcessPendingDeliveriesMarksFailuresAndSkipsDisabled(t *testing.T) {
 	second.WebhookID = "webhook-disabled"
 
 	repo := &fakeWebhookRepo{
-		webhook:    &domain.Webhook{ID: "webhook-1", ApplicationID: "app-1", URL: server.URL, Status: domain.WebhookStatusActive, SecretHash: domain.HashWebhookSecret([]byte("s"))},
+		webhook:    &domain.Webhook{ID: "webhook-1", ApplicationID: "app-1", URL: "https://hooks.example.com", Status: domain.WebhookStatusActive, SecretHash: domain.HashWebhookSecret([]byte("s"))},
 		deliveries: []domain.WebhookDelivery{first, second},
 	}
 	// Second delivery resolves to the disabled webhook via its own lookup.
 	repo.deliveries[1].WebhookID = "webhook-disabled"
-	dispatcher := NewWebhookDispatcher(WebhookDispatcherConfig{WebhookRepo: repo})
+	dispatcher := NewWebhookDispatcher(WebhookDispatcherConfig{WebhookRepo: repo, HTTPClient: webhookTestClient(server)})
 	dispatcher.webhookRepo = &multiWebhookRepo{
 		primary: repo,
 		byID: map[string]*domain.Webhook{

@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"io"
 	"log"
 	"net/http"
@@ -25,6 +27,7 @@ type RouterConfig struct {
 	TrustedProxies      []netip.Prefix
 	Logger              *log.Logger
 	RateLimitMaxKeys    int
+	RateLimits          RateLimitStore
 	// CredentialRateLimit caps requests per credential per minute across the
 	// client and server namespaces. Zero selects the default (120).
 	CredentialRateLimit int
@@ -51,7 +54,8 @@ type RouterConfig struct {
 	RefreshService RefreshService
 	// Metrics, when set, enables request instrumentation and the /metrics
 	// endpoint. Nil keeps both disabled (default).
-	Metrics *metrics.Registry
+	Metrics      *metrics.Registry
+	MetricsToken string
 }
 
 // Router is the root HTTP handler. It serves the public client API directly
@@ -84,9 +88,13 @@ type Router struct {
 	serverHandler            http.Handler
 	loginHandler             http.Handler
 	deviceVerifyHandler      http.Handler
+	refreshHandler           http.Handler
+	logoutHandler            http.Handler
 	meHandler                http.Handler
 	handler                  http.Handler
 	metrics                  *metrics.Registry
+	metricsToken             string
+	rateLimits               RateLimitStore
 }
 
 // Now returns the router clock (injectable in tests).
@@ -112,8 +120,9 @@ func (router *Router) DefaultApplicationID() string {
 
 // AllowAdminRate gates dashboard login/MFA endpoints with the admin rate
 // limiter.
-func (router *Router) AllowAdminRate(key string) bool {
-	return router.adminLimiter.allow(key)
+func (router *Router) AllowAdminRate(ctx context.Context, key string) bool {
+	allowed, _ := router.allowRate(ctx, "admin", key, 10, time.Minute, router.adminLimiter)
+	return allowed
 }
 
 // credentialRateLimit normalizes the configured per-credential limit.
@@ -127,7 +136,23 @@ func credentialRateLimit(configured int) int {
 // AllowCredentialRate gates client/server endpoints with the per-credential
 // limiter. retryAfter is meaningful only when allowed is false.
 func (router *Router) AllowCredentialRate(key string) (allowed bool, retryAfter int) {
-	return router.credentialLimiter.allowWithRetry(key)
+	return router.AllowCredentialRateContext(context.Background(), key)
+}
+
+func (router *Router) AllowCredentialRateContext(ctx context.Context, key string) (bool, int) {
+	return router.allowRate(ctx, "credential", key, router.credentialLimiter.limit, router.credentialLimiter.window, router.credentialLimiter)
+}
+
+func (router *Router) allowRate(ctx context.Context, namespace, key string, limit int, window time.Duration, fallback *ipRateLimiter) (bool, int) {
+	if router.rateLimits == nil {
+		return fallback.allowWithRetry(key)
+	}
+	digest := sha256.Sum256([]byte(namespace + "\x00" + key))
+	allowed, retry, err := router.rateLimits.AllowRateLimit(ctx, digest[:], limit, window, router.now().UTC())
+	if err != nil {
+		return false, 1
+	}
+	return allowed, retry
 }
 
 // MountAdmin attaches the /v1/admin namespace handler.
@@ -183,9 +208,13 @@ func NewRouter(config RouterConfig) *Router {
 		Server:                   config.Server,
 		ServerStore:              config.ServerStore,
 		refreshService:           wrapRefreshService(config.RefreshService),
+		metricsToken:             config.MetricsToken,
+		rateLimits:               config.RateLimits,
 	}
 	router.loginHandler = router.RequireCredential(domain.CredentialPublishable, "auth.login")(http.HandlerFunc(router.handleLogin))
 	router.deviceVerifyHandler = router.RequireCredential(domain.CredentialPublishable, "device.verify")(http.HandlerFunc(router.handleDeviceVerify))
+	router.refreshHandler = router.RequireCredential(domain.CredentialPublishable, "auth.refresh")(http.HandlerFunc(router.handleRefresh))
+	router.logoutHandler = router.RequireCredential(domain.CredentialPublishable, "auth.logout")(http.HandlerFunc(router.handleLogout))
 	router.meHandler = RequireSession(config.SessionVerifier, http.HandlerFunc(router.handleMe))
 	router.metrics = config.Metrics
 	var core http.Handler = http.HandlerFunc(router.route)
@@ -207,7 +236,9 @@ func (router *Router) route(writer http.ResponseWriter, request *http.Request) {
 	case request.Method == http.MethodPost && request.URL.Path == "/v1/device/verify":
 		router.deviceVerifyHandler.ServeHTTP(writer, request)
 	case request.Method == http.MethodPost && request.URL.Path == "/v1/auth/refresh":
-		router.handleRefresh(writer, request)
+		router.refreshHandler.ServeHTTP(writer, request)
+	case request.Method == http.MethodPost && request.URL.Path == "/v1/auth/logout":
+		router.logoutHandler.ServeHTTP(writer, request)
 	case request.Method == http.MethodGet && request.URL.Path == "/healthz":
 		router.handleHealth(writer, request)
 	case request.Method == http.MethodGet && request.URL.Path == "/readyz":
@@ -215,6 +246,11 @@ func (router *Router) route(writer http.ResponseWriter, request *http.Request) {
 	case request.Method == http.MethodGet && request.URL.Path == "/status":
 		router.handleStatus(writer, request)
 	case request.Method == http.MethodGet && request.URL.Path == "/metrics" && router.metrics != nil:
+		if !router.authorizeMetrics(request) {
+			writer.Header().Set("WWW-Authenticate", `Bearer realm="metrics"`)
+			WriteError(writer, request, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
+			return
+		}
 		router.metrics.Handler().ServeHTTP(writer, request)
 	case request.Method == http.MethodGet && request.URL.Path == "/v1/me":
 		router.meHandler.ServeHTTP(writer, request)
@@ -222,11 +258,19 @@ func (router *Router) route(writer http.ResponseWriter, request *http.Request) {
 		router.serveMounted(writer, request, router.adminHandler, "admin console unavailable")
 	case strings.HasPrefix(request.URL.Path, ServerPathPrefix):
 		router.serveMounted(writer, request, router.serverHandler, "server api unavailable")
-	case request.URL.Path == "/v1/auth/login" || request.URL.Path == "/v1/device/verify" || request.URL.Path == "/healthz" || request.URL.Path == "/readyz" || request.URL.Path == "/status" || request.URL.Path == "/v1/me":
+	case request.URL.Path == "/v1/auth/login" || request.URL.Path == "/v1/auth/refresh" || request.URL.Path == "/v1/auth/logout" || request.URL.Path == "/v1/device/verify" || request.URL.Path == "/healthz" || request.URL.Path == "/readyz" || request.URL.Path == "/status" || request.URL.Path == "/v1/me":
 		WriteError(writer, request, http.StatusMethodNotAllowed, "INVALID_REQUEST", "method not allowed")
 	default:
 		WriteError(writer, request, http.StatusNotFound, "INVALID_REQUEST", "not found")
 	}
+}
+
+func (router *Router) authorizeMetrics(request *http.Request) bool {
+	token, ok := bearerKey(strings.TrimSpace(request.Header.Get("Authorization")))
+	if !ok || router.metricsToken == "" || len(token) != len(router.metricsToken) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(token), []byte(router.metricsToken)) == 1
 }
 
 // serveMounted dispatches to a mounted namespace handler, answering 503 when

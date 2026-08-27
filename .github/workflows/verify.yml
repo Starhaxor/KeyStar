@@ -11,7 +11,7 @@ jobs:
   documentation:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Verify README release-gate instructions
         shell: pwsh
         run: |
@@ -31,6 +31,7 @@ jobs:
             'LICENSE_AUDIENCE',
             'PRODUCT',
             'ADMIN_SESSION_SECRET',
+            'ADMIN_MFA_ENCRYPTION_KEY',
             'TEST_DATABASE_URL'
           )
           $missing = @($requiredCommands + $requiredEnvironment | Where-Object { -not $readme.Contains($_) })
@@ -42,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       db:
-        image: postgres:15
+        image: postgres:15@sha256:926f8799aef36e00001cfe15fba7abbd37d3c5224ea57e4c858e4bb670f10561
         env:
           POSTGRES_DB: keystar_test
           POSTGRES_USER: keystar_test
@@ -60,11 +61,16 @@ jobs:
     env:
       TEST_DATABASE_URL: postgres://keystar_test:keystar_test@localhost:5432/keystar_test?sslmode=disable
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.24.x"
+          go-version: "1.26.6"
       - run: go test -p 1 ./...
+      - run: go vet ./...
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+      - run: govulncheck ./...
+      - run: go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0
+      - run: gosec -quiet -severity high -confidence high ./...
 
   admin:
     runs-on: ubuntu-latest
@@ -72,13 +78,14 @@ jobs:
       run:
         working-directory: admin
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "20"
           cache: npm
           cache-dependency-path: admin/package-lock.json
       - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
       - run: npm test
       - run: npm run lint
       - run: npm run build
@@ -88,7 +95,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       db:
-        image: postgres:15
+        image: postgres:15@sha256:926f8799aef36e00001cfe15fba7abbd37d3c5224ea57e4c858e4bb670f10561
         env:
           POSTGRES_DB: keystar_test
           POSTGRES_USER: keystar_test
@@ -103,11 +110,11 @@ jobs:
     env:
       TEST_DATABASE_URL: postgres://keystar_test:keystar_test@127.0.0.1:5432/keystar_test?sslmode=disable
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.24.x"
-      - uses: actions/setup-node@v4
+          go-version: "1.26.6"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "20"
           cache: npm
@@ -122,10 +129,23 @@ jobs:
   sdk-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Configure SDK tests with MSVC
         run: cmake -S backend/sdk/cpp -B build/sdk -DKEYSTAR_BUILD_TESTS=ON -G "Visual Studio 17 2022" -A x64
       - name: Build SDK tests
         run: cmake --build build/sdk --config Release
       - name: Run SDK tests
         run: ctest --test-dir build/sdk -C Release --output-on-failure
+
+  sdk-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install curl development headers
+        run: sudo apt-get update && sudo apt-get install --yes libcurl4-openssl-dev
+      - name: Configure SDK tests
+        run: cmake -S backend/sdk/cpp -B build/sdk-linux -DKEYSTAR_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release
+      - name: Build SDK tests
+        run: cmake --build build/sdk-linux --parallel
+      - name: Run SDK tests
+        run: ctest --test-dir build/sdk-linux --output-on-failure

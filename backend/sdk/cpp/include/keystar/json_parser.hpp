@@ -48,12 +48,11 @@ private:
     std::vector<JsonValue> arrayVal_;
     std::map<std::string, JsonValue> objectVal_;
 
-    void parseImpl(const char*& pos, const char* end);
-    void parseValue(const char*& pos, const char* end);
+    void parseValue(const char*& pos, const char* end, std::size_t depth = 0);
     void parseString(const char*& pos, const char* end);
     void parseNumber(const char*& pos, const char* end);
-    void parseArray(const char*& pos, const char* end);
-    void parseObject(const char*& pos, const char* end);
+    void parseArray(const char*& pos, const char* end, std::size_t depth);
+    void parseObject(const char*& pos, const char* end, std::size_t depth);
     void skipWhitespace(const char*& pos, const char* end);
 };
 
