@@ -4,13 +4,97 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/starloader/backend/internal/domain"
 	"github.com/starloader/backend/internal/store"
 )
+
+func TestAdminBootstrapCreatesExactlyOneOwner(t *testing.T) {
+	ctx := context.Background()
+	pool := openTestPool(t, ctx)
+	resetAndMigrate(t, ctx, pool)
+	repository := store.New(pool)
+
+	required, err := repository.AdminBootstrapRequired(ctx)
+	if err != nil || !required {
+		t.Fatalf("AdminBootstrapRequired() = %t, %v; want true, nil", required, err)
+	}
+
+	const attempts = 6
+	start := make(chan struct{})
+	results := make(chan error, attempts)
+	var ready sync.WaitGroup
+	ready.Add(attempts)
+	for index := 0; index < attempts; index++ {
+		go func(index int) {
+			ready.Done()
+			<-start
+			_, err := repository.BootstrapAdminAccount(ctx, domain.NewAdminAccount{
+				Email:        fmt.Sprintf("root-%d@example.com", index),
+				PasswordHash: "$argon2id$v=19$bootstrap-hash",
+				RoleName:     domain.RoleViewer,
+			})
+			results <- err
+		}(index)
+	}
+	ready.Wait()
+	close(start)
+
+	succeeded := 0
+	closed := 0
+	for index := 0; index < attempts; index++ {
+		err := <-results
+		switch {
+		case err == nil:
+			succeeded++
+		case errors.Is(err, domain.ErrAdminBootstrapClosed):
+			closed++
+		default:
+			t.Fatalf("BootstrapAdminAccount() error = %v", err)
+		}
+	}
+	if succeeded != 1 || closed != attempts-1 {
+		t.Fatalf("bootstrap results = %d success, %d closed", succeeded, closed)
+	}
+
+	required, err = repository.AdminBootstrapRequired(ctx)
+	if err != nil || required {
+		t.Fatalf("AdminBootstrapRequired() = %t, %v; want false, nil", required, err)
+	}
+	accounts, err := repository.ListAdminAccounts(ctx)
+	if err != nil || len(accounts) != 1 || accounts[0].RoleName != domain.RoleOwner {
+		t.Fatalf("ListAdminAccounts() = %#v, %v; want one owner", accounts, err)
+	}
+}
+
+func TestAdminBootstrapRemainsClosedWhenAllAdminsAreRemoved(t *testing.T) {
+	ctx := context.Background()
+	pool := openTestPool(t, ctx)
+	resetAndMigrate(t, ctx, pool)
+	repository := store.New(pool)
+
+	created, err := repository.CreateAdminAccount(ctx, domain.NewAdminAccount{
+		Email: "first@example.com", PasswordHash: "$argon2id$v=19$bootstrap-hash", RoleName: domain.RoleViewer,
+	})
+	if err != nil {
+		t.Fatalf("CreateAdminAccount() error = %v", err)
+	}
+	if created.RoleName != domain.RoleOwner {
+		t.Fatalf("first admin role = %q, want %q", created.RoleName, domain.RoleOwner)
+	}
+	if _, err := pool.Exec(ctx, `delete from admin_accounts`); err != nil {
+		t.Fatalf("delete admin accounts: %v", err)
+	}
+	required, err := repository.AdminBootstrapRequired(ctx)
+	if err != nil || required {
+		t.Fatalf("AdminBootstrapRequired() = %t, %v; want false, nil", required, err)
+	}
+}
 
 func TestGeneratedDatabaseIDsUseUUIDv7(t *testing.T) {
 	fixture := newPostgresVerificationFixture(t, 1)

@@ -124,7 +124,7 @@ async function request<T>(
       response.status === 403 &&
       code === "MFA_ENROLLMENT_REQUIRED" &&
       typeof window !== "undefined" &&
-      !window.location.pathname.startsWith("/security")
+      window.location.pathname !== "/security"
     ) {
       window.location.assign("/security");
     } else if (
@@ -159,6 +159,20 @@ export async function fetchAllPages<T>(load: (page: number, pageSize: number) =>
 }
 
 export const api = {
+  bootstrapStatus() {
+    return request<{ ok: boolean; setup_required: boolean }>(
+      "/v1/admin/auth/bootstrap",
+      { isLogin: true, skipApplicationHeader: true }
+    );
+  },
+  bootstrapRoot(email: string, password: string, bootstrapToken: string) {
+    return request<{ ok: boolean; session_created: boolean }>("/v1/admin/auth/bootstrap", {
+      method: "POST",
+      body: { email, password, bootstrap_token: bootstrapToken },
+      isLogin: true,
+      skipApplicationHeader: true,
+    });
+  },
   login(email: string, password: string) {
     return request<{ ok: boolean } & LoginResponse>("/v1/admin/auth/login", {
       method: "POST",

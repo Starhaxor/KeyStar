@@ -103,8 +103,25 @@ func (f *fakeAdminAuth) Logout(_ context.Context, token string) error {
 // security event paths.
 type fakeAdminConsole struct {
 	httpapi.AdminConsoleStore
-	auditEntries   []domain.NewAuditLog
-	securityEvents []domain.NewSecurityEvent
+	auditEntries      []domain.NewAuditLog
+	securityEvents    []domain.NewSecurityEvent
+	bootstrapRequired bool
+	bootstrapInput    *domain.NewAdminAccount
+	bootstrapErr      error
+	bootstrapCalls    int
+}
+
+func (f *fakeAdminConsole) AdminBootstrapRequired(_ context.Context) (bool, error) {
+	return f.bootstrapRequired, nil
+}
+
+func (f *fakeAdminConsole) BootstrapAdminAccount(_ context.Context, input domain.NewAdminAccount) (*domain.AdminAccount, error) {
+	f.bootstrapCalls++
+	if f.bootstrapErr != nil {
+		return nil, f.bootstrapErr
+	}
+	f.bootstrapInput = &input
+	return &domain.AdminAccount{ID: "root-id", Email: input.Email, RoleName: input.RoleName}, nil
 }
 
 func (f *fakeAdminConsole) AppendAuditLog(_ context.Context, input domain.NewAuditLog) error {
@@ -134,6 +151,7 @@ func newAdminTestRouter(t *testing.T, auth *fakeAdminAuth) (*Router, *fakeAdminC
 		Admin: httpapi.AdminConfig{
 			Auth:           auth,
 			Console:        console,
+			BootstrapToken: "test-bootstrap-token-0123456789abcdef",
 			AllowedOrigins: []string{"http://localhost:3000"},
 			CSRFSecret:     []byte("test-csrf-secret"),
 			SessionTTL:     time.Hour,
@@ -159,6 +177,121 @@ func responseCookie(response *http.Response, name string) *http.Cookie {
 		}
 	}
 	return nil
+}
+
+func TestAdminBootstrapStatusReportsFirstRun(t *testing.T) {
+	router, console := newAdminTestRouter(t, &fakeAdminAuth{})
+	console.bootstrapRequired = true
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/admin/auth/bootstrap", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	var body struct {
+		SetupRequired bool `json:"setup_required"`
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil || !body.SetupRequired {
+		t.Fatalf("body = %s, want setup_required true", recorder.Body.String())
+	}
+}
+
+func TestAdminBootstrapCreatesOnlyOwnerWithHashedPassword(t *testing.T) {
+	auth := &fakeAdminAuth{token: "bootstrap-session", account: &domain.AdminAccount{ID: "root-id", Email: "root@example.com", RoleName: domain.RoleOwner}}
+	router, console := newAdminTestRouter(t, auth)
+	console.bootstrapRequired = true
+	body := bytes.NewBufferString(`{"email":" Root@Example.com ","password":"long enough root password","bootstrap_token":"test-bootstrap-token-0123456789abcdef"}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/admin/auth/bootstrap", body)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Origin", "http://localhost:3000")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if console.bootstrapInput == nil {
+		t.Fatal("bootstrap input was not persisted")
+	}
+	if console.bootstrapInput.Email != "root@example.com" || console.bootstrapInput.RoleName != domain.RoleOwner {
+		t.Fatalf("bootstrap input = %#v", console.bootstrapInput)
+	}
+	if console.bootstrapInput.PasswordHash == "" || console.bootstrapInput.PasswordHash == "long enough root password" {
+		t.Fatal("root password must be hashed before persistence")
+	}
+	if cookie := responseCookie(recorder.Result(), httpapi.AdminSessionCookieName); cookie == nil || cookie.Value != "bootstrap-session" {
+		t.Fatalf("bootstrap session cookie = %#v", cookie)
+	}
+	if len(console.securityEvents) != 1 || console.securityEvents[0].Kind != "ADMIN_ROOT_BOOTSTRAPPED" {
+		t.Fatalf("security events = %#v", console.securityEvents)
+	}
+	if len(console.auditEntries) != 1 || console.auditEntries[0].Action != "ADMIN_ROOT_BOOTSTRAPPED" {
+		t.Fatalf("audit entries = %#v", console.auditEntries)
+	}
+}
+
+func TestAdminBootstrapRejectsMissingSetupToken(t *testing.T) {
+	router, console := newAdminTestRouter(t, &fakeAdminAuth{})
+	console.bootstrapRequired = true
+	body := bytes.NewBufferString(`{"email":"root@example.com","password":"long enough root password"}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/admin/auth/bootstrap", body)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if console.bootstrapCalls != 0 {
+		t.Fatal("missing token reached bootstrap persistence")
+	}
+}
+
+func TestAdminBootstrapRejectsCreationAfterInitialization(t *testing.T) {
+	router, console := newAdminTestRouter(t, &fakeAdminAuth{})
+	body := bytes.NewBufferString(`{"email":"root@example.com","password":"long enough root password","bootstrap_token":"test-bootstrap-token-0123456789abcdef"}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/admin/auth/bootstrap", body)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if console.bootstrapCalls != 0 {
+		t.Fatal("closed bootstrap must be rejected before password hashing or persistence")
+	}
+}
+
+func TestAdminBootstrapHandlesConcurrentClosure(t *testing.T) {
+	router, console := newAdminTestRouter(t, &fakeAdminAuth{})
+	console.bootstrapRequired = true
+	console.bootstrapErr = domain.ErrAdminBootstrapClosed
+	body := bytes.NewBufferString(`{"email":"root@example.com","password":"long enough root password","bootstrap_token":"test-bootstrap-token-0123456789abcdef"}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/admin/auth/bootstrap", body)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusConflict || console.bootstrapCalls != 1 {
+		t.Fatalf("status = %d, calls = %d, body = %s", recorder.Code, console.bootstrapCalls, recorder.Body.String())
+	}
+}
+
+func TestAdminBootstrapRejectsCrossOriginCreation(t *testing.T) {
+	router, _ := newAdminTestRouter(t, &fakeAdminAuth{})
+	body := bytes.NewBufferString(`{"email":"root@example.com","password":"long enough root password","bootstrap_token":"test-bootstrap-token-0123456789abcdef"}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/admin/auth/bootstrap", body)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Origin", "https://attacker.example")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
 }
 
 func TestAdminLoginSetsSessionAndCSRFCookies(t *testing.T) {

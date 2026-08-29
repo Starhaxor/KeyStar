@@ -31,12 +31,18 @@ const adminSessionColumns = `id::text, admin_account_id::text, token_sha256, ip_
 
 const auditLogColumns = `id::text, coalesce(admin_account_id::text, ''), actor_email, action, resource_type, resource_id, ip_sha256, user_agent, metadata::text, created_at`
 
-func (s *Store) CreateAdminAccount(ctx context.Context, input domain.NewAdminAccount) (*domain.AdminAccount, error) {
+const adminBootstrapLockID int64 = 5425508179663213121
+
+type adminAccountRowQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func createAdminAccount(ctx context.Context, db adminAccountRowQuerier, input domain.NewAdminAccount) (*domain.AdminAccount, error) {
 	roleName := input.RoleName
 	if roleName == "" {
 		roleName = domain.RoleOwner
 	}
-	row := s.db.QueryRow(ctx, `
+	row := db.QueryRow(ctx, `
 		with created as (
 			insert into admin_accounts (email, password_hash, role_id)
 			values ($1, $2, (select id from roles where name = $3))
@@ -59,6 +65,97 @@ func (s *Store) CreateAdminAccount(ctx context.Context, input domain.NewAdminAcc
 		return nil, fmt.Errorf("create admin account: %w", err)
 	}
 	return account, nil
+}
+
+func (s *Store) CreateAdminAccount(ctx context.Context, input domain.NewAdminAccount) (*domain.AdminAccount, error) {
+	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("begin create admin account: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock($1)`, adminBootstrapLockID); err != nil {
+		return nil, fmt.Errorf("lock admin creation: %w", err)
+	}
+	required, err := adminBootstrapRequired(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if required {
+		input.RoleName = domain.RoleOwner
+	}
+	account, err := createAdminAccount(ctx, tx, input)
+	if err != nil {
+		return nil, err
+	}
+	if required {
+		if err := completeAdminBootstrap(ctx, tx, account.ID); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit create admin account: %w", err)
+	}
+	return account, nil
+}
+
+// AdminBootstrapRequired reports whether the one-time root setup is still
+// available. Creation itself repeats this check under a transaction lock.
+func (s *Store) AdminBootstrapRequired(ctx context.Context) (bool, error) {
+	return adminBootstrapRequired(ctx, s.db)
+}
+
+// BootstrapAdminAccount atomically creates the first owner. The transaction
+// advisory lock prevents two concurrent first-run requests from both winning.
+func (s *Store) BootstrapAdminAccount(ctx context.Context, input domain.NewAdminAccount) (*domain.AdminAccount, error) {
+	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("begin admin bootstrap: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock($1)`, adminBootstrapLockID); err != nil {
+		return nil, fmt.Errorf("lock admin bootstrap: %w", err)
+	}
+	required, err := adminBootstrapRequired(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if !required {
+		return nil, domain.ErrAdminBootstrapClosed
+	}
+	input.RoleName = domain.RoleOwner
+	account, err := createAdminAccount(ctx, tx, input)
+	if err != nil {
+		return nil, err
+	}
+	if err := completeAdminBootstrap(ctx, tx, account.ID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit admin bootstrap: %w", err)
+	}
+	return account, nil
+}
+
+func adminBootstrapRequired(ctx context.Context, db adminAccountRowQuerier) (bool, error) {
+	var required bool
+	if err := db.QueryRow(ctx, `select completed_at is null from admin_bootstrap_state where singleton = true`).Scan(&required); err != nil {
+		return false, fmt.Errorf("check admin bootstrap: %w", err)
+	}
+	return required, nil
+}
+
+func completeAdminBootstrap(ctx context.Context, db adminAccountRowQuerier, adminID string) error {
+	var completed bool
+	err := db.QueryRow(ctx, `
+		update admin_bootstrap_state
+		set completed_at = clock_timestamp(), completed_by = $1::uuid
+		where singleton = true and completed_at is null
+		returning true`, adminID).Scan(&completed)
+	if err != nil {
+		return fmt.Errorf("complete admin bootstrap: %w", err)
+	}
+	return nil
 }
 
 // SetAdminPassword replaces the Argon2id hash of an admin account. Used to

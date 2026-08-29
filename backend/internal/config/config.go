@@ -25,6 +25,7 @@ var requiredEnvironmentVariables = [...]string{
 	"PRODUCT",
 	"ADMIN_SESSION_SECRET",
 	"ADMIN_MFA_ENCRYPTION_KEY",
+	"ADMIN_BOOTSTRAP_TOKEN",
 }
 
 // Config contains the values required to operate the license service. Secrets
@@ -41,6 +42,7 @@ type Config struct {
 	AdminConsoleEnabled   bool
 	AdminSessionSecret    string
 	AdminMFAEncryptionKey string
+	AdminBootstrapToken   string
 	AdminAllowedOrigins   []string
 	AdminSessionTTL       time.Duration
 	AdminCookieSecure     bool
@@ -67,7 +69,7 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	values["ADMIN_MFA_ENCRYPTION_KEY"] = string(mfaKey)
-	secretNames := []string{"LICENSE_HMAC_KEY", "HARDWARE_HMAC_KEY", "ADMIN_SESSION_SECRET", "ADMIN_MFA_ENCRYPTION_KEY"}
+	secretNames := []string{"LICENSE_HMAC_KEY", "HARDWARE_HMAC_KEY", "ADMIN_SESSION_SECRET", "ADMIN_MFA_ENCRYPTION_KEY", "ADMIN_BOOTSTRAP_TOKEN"}
 	seenSecrets := make(map[string]string, len(secretNames))
 	for _, name := range secretNames {
 		if len([]byte(values[name])) < 32 {
@@ -156,6 +158,7 @@ func Load() (Config, error) {
 		AdminConsoleEnabled:       adminConsoleEnabled,
 		AdminSessionSecret:        values["ADMIN_SESSION_SECRET"],
 		AdminMFAEncryptionKey:     values["ADMIN_MFA_ENCRYPTION_KEY"],
+		AdminBootstrapToken:       values["ADMIN_BOOTSTRAP_TOKEN"],
 		AdminAllowedOrigins:       adminAllowedOrigins,
 		AdminSessionTTL:           adminSessionTTL,
 		AdminCookieSecure:         adminCookieSecure,

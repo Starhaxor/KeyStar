@@ -65,4 +65,25 @@ describe("admin API client", () => {
       headers: expect.objectContaining({ "X-KeyStar-App": "selected-app" }),
     }));
   });
+
+  it("checks and completes first-run root setup without an application context", async () => {
+    document.cookie = "keystar_application_id=stale-app; Path=/";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, setup_required: true }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 201, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.bootstrapStatus();
+    await api.bootstrapRoot("root@example.com", "long enough root password", "setup-token");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/v1/admin/auth/bootstrap", expect.objectContaining({
+      method: "GET",
+      headers: expect.not.objectContaining({ "X-KeyStar-App": expect.anything() }),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/v1/admin/auth/bootstrap", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ email: "root@example.com", password: "long enough root password", bootstrap_token: "setup-token" }),
+      headers: expect.not.objectContaining({ "X-KeyStar-App": expect.anything() }),
+    }));
+  });
 });

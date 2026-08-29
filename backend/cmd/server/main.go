@@ -195,6 +195,7 @@ func runServer() error {
 		adminConfig = httpapi.AdminConfig{
 			Auth:           adminAuthService,
 			Console:        repository,
+			BootstrapToken: configuration.AdminBootstrapToken,
 			LicenseHMACKey: []byte(configuration.LicenseHMACKey),
 			Product:        configuration.Product,
 			MFAIssuer:      "KeyStar Admin",

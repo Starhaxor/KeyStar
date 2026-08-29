@@ -17,6 +17,7 @@ func TestLoadRequiresEverySecuritySetting(t *testing.T) {
 		"PRODUCT",
 		"ADMIN_SESSION_SECRET",
 		"ADMIN_MFA_ENCRYPTION_KEY",
+		"ADMIN_BOOTSTRAP_TOKEN",
 	} {
 		t.Run(name, func(t *testing.T) {
 			setRequiredEnvironment(t)
@@ -140,6 +141,7 @@ func TestLoadRejectsWeakOrReusedSecrets(t *testing.T) {
 		{"HARDWARE_HMAC_KEY", "too-short"},
 		{"ADMIN_SESSION_SECRET", "too-short"},
 		{"ADMIN_MFA_ENCRYPTION_KEY", "too-short"},
+		{"ADMIN_BOOTSTRAP_TOKEN", "too-short"},
 		{"ADMIN_SESSION_SECRET", "0123456789abcdef0123456789abcdef"},
 	} {
 		t.Run(change.name+"="+change.value, func(t *testing.T) {
@@ -215,6 +217,7 @@ func setRequiredEnvironment(t *testing.T) {
 		{"PRODUCT", "StarLoader"},
 		{"ADMIN_SESSION_SECRET", "session-key-0123456789abcdef0123456789"},
 		{"ADMIN_MFA_ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef"},
+		{"ADMIN_BOOTSTRAP_TOKEN", "bootstrap-token-0123456789abcdef012345"},
 	} {
 		t.Setenv(setting.name, setting.value)
 	}

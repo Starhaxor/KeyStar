@@ -143,6 +143,8 @@ type AdminConsoleStore interface {
 	UpsertDevicePolicy(ctx context.Context, applicationID string, input domain.NewDevicePolicy) (*domain.DevicePolicy, error)
 	DeleteDevicePolicy(ctx context.Context, applicationID string) error
 	FindAdminAccountByID(ctx context.Context, adminID string) (*domain.AdminAccount, error)
+	AdminBootstrapRequired(ctx context.Context) (bool, error)
+	BootstrapAdminAccount(ctx context.Context, input domain.NewAdminAccount) (*domain.AdminAccount, error)
 	CreateAdminAccount(ctx context.Context, input domain.NewAdminAccount) (*domain.AdminAccount, error)
 	UpdateAdminAccountStatusAndRole(ctx context.Context, adminID string, status domain.AdminAccountStatus, roleName string) error
 	SetAdminPassword(ctx context.Context, adminID, passwordHash string) error
@@ -180,6 +182,7 @@ type AdminConsoleStore interface {
 type AdminConfig struct {
 	Auth           AdminAuthService
 	Console        AdminConsoleStore
+	BootstrapToken string
 	LicenseHMACKey []byte
 	Product        string
 	MFAIssuer      string

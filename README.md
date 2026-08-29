@@ -278,6 +278,7 @@ LICENSE_ISSUER
 LICENSE_AUDIENCE
 PRODUCT
 ADMIN_SESSION_SECRET
+ADMIN_BOOTSTRAP_TOKEN
 ADMIN_MFA_ENCRYPTION_KEY
 ```
 
@@ -303,7 +304,19 @@ The API listens on `http://localhost:8080` by default.
 
 ### 2. Create the first administrator
 
-Use the same terminal session, with the environment loaded:
+On a fresh database, the administration console automatically opens a
+one-time root setup screen. Create the root account there; it receives the
+built-in `owner` role and is immediately sent to mandatory MFA enrollment.
+The rest of the console remains locked until the first authenticator code is
+confirmed. Once any administrator exists, public root registration closes
+permanently.
+
+Enter the high-entropy `ADMIN_BOOTSTRAP_TOKEN` from the server environment in
+the setup form. This token authorizes the first root claim and must be unique,
+at least 32 bytes, and handled like a password. It cannot reopen registration
+after setup completes.
+
+For unattended provisioning, the existing terminal command remains available:
 
 ```powershell
 go run ./cmd/server admin create-admin --email admin@example.com --role owner
@@ -344,9 +357,10 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3000`, sign in, create or select an organization, then
-create an application. All application resources in the console follow that
-active application selection.
+Open `http://localhost:3000`. A fresh installation starts with root creation;
+an initialized installation starts with sign-in. After MFA setup, create or
+select an organization, then create an application. All application resources
+in the console follow that active application selection.
 
 ---
 

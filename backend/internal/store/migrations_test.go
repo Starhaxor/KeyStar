@@ -9,8 +9,8 @@ import (
 
 func TestVersionedMigrationsIncludeSharedRateLimits(t *testing.T) {
 	last := versionedMigrations[len(versionedMigrations)-1]
-	if last.version != 18 || last.up != "000018_rate_limit_buckets.up.sql" {
-		t.Fatalf("latest migration = %#v, want shared rate-limit migration 18", last)
+	if last.version != 19 || last.up != "000019_admin_bootstrap_state.up.sql" {
+		t.Fatalf("latest migration = %#v, want admin bootstrap state migration 19", last)
 	}
 }
 
