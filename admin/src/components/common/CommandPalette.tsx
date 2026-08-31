@@ -173,7 +173,7 @@ export default function CommandPalette() {
         type="button"
         aria-label="Close command palette"
         onClick={close}
-        className="absolute inset-0 h-full w-full cursor-default bg-gray-950/40 backdrop-blur-[2px] dark:bg-black/60"
+        className="absolute inset-0 h-full w-full cursor-default bg-gray-950/40 dark:bg-black/60"
         tabIndex={-1}
       />
       <div className="relative w-full max-w-xl overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xl dark:border-gray-700 dark:bg-gray-900">

@@ -53,6 +53,17 @@ func TestLoginCreatesShortLivedHashedChallenge(t *testing.T) {
 	}
 }
 
+func TestLoginAcceptsCatalogDisplayNameForConfiguredProductSlug(t *testing.T) {
+	now := time.Date(2026, 8, 10, 9, 30, 0, 0, time.UTC)
+	repository := validLoginRepository(now)
+	loginService := newTestLoginService(repository, bytes.NewReader(bytes.Repeat([]byte{0x2a}, 32)), now)
+	loginService.product = "starloader"
+
+	if _, err := loginService.Login(context.Background(), validLoginInput()); err != nil {
+		t.Fatalf("Login() error = %v, want catalog display name StarLoader to match configured slug starloader", err)
+	}
+}
+
 func TestLoginPolicyFailures(t *testing.T) {
 	now := time.Date(2026, 8, 10, 9, 30, 0, 0, time.UTC)
 	tests := []struct {

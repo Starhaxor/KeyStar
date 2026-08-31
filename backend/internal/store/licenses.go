@@ -43,15 +43,15 @@ func (s *Store) CreateLicense(ctx context.Context, applicationID string, input d
 	return license, nil
 }
 
-// FindLicenseByUserAndProduct resolves a license by the user and the product
-// display name. The name is unique per application because product slugs (and
-// therefore names) are unique within an application.
+// FindLicenseByUserAndProduct resolves a license by the user and a configured
+// product identifier. Matching the canonical slug keeps runtime configuration
+// independent from capitalization in the catalog display name.
 func (s *Store) FindLicenseByUserAndProduct(ctx context.Context, applicationID, userID, product string) (*domain.License, error) {
 	license, err := scanLicense(s.db.QueryRow(ctx,
 		`select `+licenseColumns+` from licenses l
-		 join products p on p.id = l.product_id and p.name = $3
+		 join products p on p.id = l.product_id and p.slug = $3
 		 where l.application_id = $1::uuid and l.user_id = $2`,
-		applicationID, userID, product))
+		applicationID, userID, domain.ProductSlug(product)))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, domain.ErrLicenseNotFound
 	}

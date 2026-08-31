@@ -1,10 +1,10 @@
-Start testing: Aug 25 22:43 Türkiye Standart Saati
+Start testing: Aug 31 15:04 Türkiye Standart Saati
 ----------------------------------------------------------
 1/1 Testing: keystar_tests
 1/1 Test: keystar_tests
 Command: "C:/Users/pc/Desktop/Projelerim/KeyStar/build/sdk/Release/keystar_tests.exe"
 Directory: C:/Users/pc/Desktop/Projelerim/KeyStar/build/sdk
-"keystar_tests" start time: Aug 25 22:43 Türkiye Standart Saati
+"keystar_tests" start time: Aug 31 15:04 Türkiye Standart Saati
 Output:
 ----------------------------------------------------------
 === KeyStar C++ SDK Tests ===
@@ -65,8 +65,8 @@ Running token store tests...
 Test time =   0.04 sec
 ----------------------------------------------------------
 Test Passed.
-"keystar_tests" end time: Aug 25 22:43 Türkiye Standart Saati
+"keystar_tests" end time: Aug 31 15:04 Türkiye Standart Saati
 "keystar_tests" time elapsed: 00:00:00
 ----------------------------------------------------------
 
-End testing: Aug 25 22:43 Türkiye Standart Saati
+End testing: Aug 31 15:04 Türkiye Standart Saati

@@ -116,7 +116,7 @@ func (service *LoginService) Login(ctx context.Context, input LoginInput) (Pendi
 	if license == nil {
 		return PendingChallenge{}, errors.New("find login license: repository returned nil license")
 	}
-	if license.UserID != user.ID || license.Product != service.product {
+	if license.UserID != user.ID || domain.ProductSlug(license.Product) != domain.ProductSlug(service.product) {
 		return PendingChallenge{}, ErrInvalidCredentials
 	}
 	if license.Status == domain.LicenseStatusRevoked {

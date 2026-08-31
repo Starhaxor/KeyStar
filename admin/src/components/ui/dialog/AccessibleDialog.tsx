@@ -149,7 +149,7 @@ export default function AccessibleDialog({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-99999 flex items-center justify-center bg-gray-400/50 p-4 backdrop-blur-[32px] transition-opacity motion-reduce:transition-none"
+      className="fixed inset-0 z-99999 flex items-center justify-center bg-gray-400/50 p-4 transition-opacity motion-reduce:transition-none"
       onMouseDown={(event) => {
         if (!isFullscreen && event.target === event.currentTarget) {
           if (!isTopDialog(dialogId)) return;

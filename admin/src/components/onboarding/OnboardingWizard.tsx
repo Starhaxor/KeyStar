@@ -10,6 +10,7 @@ import { reportClientError } from "@/lib/clientError";
 import { defaultScopesForCredentialType } from "@/lib/credentialScopes";
 import type { Organization } from "@/lib/types";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { deriveOnboardingStep, type OnboardingStep } from "./onboardingState";
@@ -31,6 +32,7 @@ function completedStep(current: OnboardingStep, candidate: OnboardingStep) {
 }
 
 export default function OnboardingWizard() {
+  const router = useRouter();
   const { hasPermission } = useAdminIdentity();
   const { applications, selectedApplicationID, selectApplication, refresh: refreshApplications, loading: applicationsLoading } = useApplication();
   const [progress, setProgress] = useState<OnboardingProgress | null>(null);
@@ -92,6 +94,10 @@ export default function OnboardingWizard() {
   }, [applicationsLoading, load, selectedApplicationID]);
 
   const step = useMemo(() => progress ? deriveOnboardingStep(progress) : "application", [progress]);
+
+  useEffect(() => {
+    if (!loading && step === "complete") router.replace("/");
+  }, [loading, router, step]);
 
   async function runAction(action: () => Promise<void>, safeMessage: string) {
     setBusy(true);
@@ -165,8 +171,7 @@ export default function OnboardingWizard() {
     }, "Unable to issue the test license. Verify the user email and try again.");
   }
 
-  async function createOrganization(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function createOrganization() {
     await runAction(async () => {
       const response = await api.createOrganization(organizationName.trim());
       const nextOrganizations = [...organizations, response.organization];
@@ -207,6 +212,8 @@ export default function OnboardingWizard() {
   const canCreateCatalog = hasPermission("catalog.write");
   const canCreateLicense = hasPermission("licenses.write");
   const progressMatchesSelection = !applicationsLoading && Boolean(selectedApplicationID) && progress?.application?.id === selectedApplicationID;
+
+  if (!loading && step === "complete") return null;
 
   return (
     <div className="space-y-6">
@@ -317,13 +324,24 @@ export default function OnboardingWizard() {
 
       <AccessibleDialog isOpen={organizationDialogOpen} onClose={() => !busy && setOrganizationDialogOpen(false)} title="Create organization" className="max-w-lg p-6">
         <h2 className="text-lg font-semibold text-gray-800 dark:text-white/90">Create organization</h2>
-        <form className="mt-5 space-y-5" onSubmit={createOrganization}><Field id="onboarding-organization-name" name="name" label="Organization name"><input className={inputClass} value={organizationName} onChange={(event) => setOrganizationName(event.target.value)} /></Field><div className="flex justify-end gap-2"><Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setOrganizationDialogOpen(false)}>Cancel</Button><Button size="sm" disabled={busy || !organizationName.trim()}>Create organization</Button></div></form>
+        <form className="mt-5 space-y-5" onSubmit={(event) => { event.preventDefault(); void createOrganization(); }}><Field id="onboarding-organization-name" name="name" label="Organization name"><input className={inputClass} value={organizationName} onChange={(event) => setOrganizationName(event.target.value)} /></Field><div className="flex justify-end gap-2"><Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setOrganizationDialogOpen(false)}>Cancel</Button><Button size="sm" disabled={busy || !organizationName.trim()}>Create organization</Button></div></form>
       </AccessibleDialog>
 
       <AccessibleDialog isOpen={applicationDialogOpen} onClose={() => !busy && setApplicationDialogOpen(false)} title="Create application" className="max-w-lg p-6">
         <h2 className="text-lg font-semibold text-gray-800 dark:text-white/90">Create application</h2>
         <form className="mt-5 space-y-5" onSubmit={createApplication}>
-          <Field id="onboarding-application-organization" name="organization_id" label="Organization"><select className={inputClass} value={organizationID} onChange={(event) => setOrganizationID(event.target.value)}><option value="">Select organization</option>{organizations.map((organization) => <option key={organization.id} value={organization.id}>{organization.name}</option>)}</select></Field>
+          {organizations.length === 0 ? (
+            <div className="rounded-2xl border border-brand-200 bg-brand-50/70 p-4 dark:border-brand-500/25 dark:bg-brand-500/[0.08]">
+              <p className="text-sm font-semibold text-gray-800 dark:text-white/90">Create your first organization here</p>
+              <p className="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">Applications belong to an organization. Create one now and it will be selected automatically.</p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                <Field id="onboarding-inline-organization-name" name="organization_name" label="Organization name"><input className={inputClass} value={organizationName} placeholder="StarLoader" onChange={(event) => setOrganizationName(event.target.value)} /></Field>
+                <Button type="button" size="sm" className="h-11 sm:mb-px" disabled={busy || !organizationName.trim()} onClick={() => void createOrganization()}>{busy ? "Creating…" : "Create organization"}</Button>
+              </div>
+            </div>
+          ) : (
+            <Field id="onboarding-application-organization" name="organization_id" label="Organization"><select className={inputClass} value={organizationID} onChange={(event) => setOrganizationID(event.target.value)}><option value="">Select organization</option>{organizations.map((organization) => <option key={organization.id} value={organization.id}>{organization.name}</option>)}</select></Field>
+          )}
           <Field id="onboarding-application-name" name="name" label="Application name"><input className={inputClass} value={applicationName} onChange={(event) => setApplicationName(event.target.value)} /></Field>
           <Field id="onboarding-application-slug" name="slug" label="Slug (optional)"><input className={inputClass} value={applicationSlug} placeholder="desktop-client" onChange={(event) => setApplicationSlug(event.target.value)} /></Field>
           <div className="flex justify-end gap-2"><Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setApplicationDialogOpen(false)}>Cancel</Button><Button size="sm" disabled={busy || !organizationID || !applicationName.trim()}>Create application</Button></div>

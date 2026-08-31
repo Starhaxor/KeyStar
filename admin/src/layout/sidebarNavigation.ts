@@ -31,8 +31,10 @@ export type SidebarSection = {
 
 export function isSidebarItemVisible(
   item: SidebarItem,
-  hasPermission: (permission: string) => boolean
+  hasPermission: (permission: string) => boolean,
+  onboardingComplete = false
 ) {
+  if (item.path === "/onboarding" && onboardingComplete) return false;
   if (item.permission && !hasPermission(item.permission)) return false;
   return (item.permissions ?? []).every(hasPermission);
 }

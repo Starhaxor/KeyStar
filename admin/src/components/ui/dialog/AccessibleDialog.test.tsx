@@ -87,6 +87,18 @@ function LegacyModalHarness() {
 }
 
 describe("AccessibleDialog", () => {
+  it("dims the page without blurring content behind the dialog", () => {
+    render(
+      <AccessibleDialog isOpen onClose={() => undefined} title="No blur dialog">
+        <button type="button">Continue</button>
+      </AccessibleDialog>
+    );
+
+    const backdrop = document.querySelector<HTMLElement>('[role="dialog"]')?.parentElement;
+    expect(backdrop?.className).toContain("bg-gray-400/50");
+    expect(backdrop?.className).not.toContain("backdrop-blur");
+  });
+
   it("labels the dialog, locks scrolling, and restores focus after document Escape", () => {
     document.body.style.overflow = "auto";
     render(<DialogHarness />);

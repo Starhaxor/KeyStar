@@ -47,4 +47,14 @@ describe("sidebar navigation", () => {
       ).toBe(false);
     }
   });
+
+  it("hides onboarding after the selected application completes setup", () => {
+    const onboarding = sidebarSections
+      .flatMap((section) => section.items)
+      .find((item) => item.path === "/onboarding");
+
+    expect(onboarding).toBeDefined();
+    expect(isSidebarItemVisible(onboarding!, () => true, true)).toBe(false);
+    expect(isSidebarItemVisible(onboarding!, () => true, false)).toBe(true);
+  });
 });

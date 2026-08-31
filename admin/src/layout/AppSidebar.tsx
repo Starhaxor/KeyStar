@@ -1,5 +1,5 @@
 "use client";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
@@ -14,6 +14,8 @@ import {
   type SidebarSubItem,
 } from "./sidebarNavigation";
 import { applicationSelectorOptions } from "../lib/applicationSelection";
+import { api } from "../lib/api";
+import { deriveOnboardingStep } from "../components/onboarding/onboardingState";
 import {
   BoxCubeIcon,
   ChevronLeftIcon,
@@ -55,6 +57,26 @@ const AppSidebar: React.FC = () => {
   const pathname = usePathname();
   const { hasPermission, identity } = useAdminIdentity();
   const { applications, selectedApplicationID, selectApplication, loading: applicationsLoading } = useApplication();
+  const [onboardingStatus, setOnboardingStatus] = useState<{ applicationID: string; complete: boolean } | null>(null);
+  const onboardingComplete = Boolean(
+    selectedApplicationID &&
+    onboardingStatus?.applicationID === selectedApplicationID &&
+    onboardingStatus.complete
+  );
+
+  useEffect(() => {
+    let current = true;
+    if (applicationsLoading || !selectedApplicationID) return;
+    const applicationID = selectedApplicationID;
+    void api.onboardingProgress(selectedApplicationID)
+      .then((progress) => {
+        if (current) setOnboardingStatus({ applicationID, complete: deriveOnboardingStep(progress) === "complete" });
+      })
+      .catch(() => {
+        if (current) setOnboardingStatus({ applicationID, complete: false });
+      });
+    return () => { current = false; };
+  }, [applicationsLoading, pathname, selectedApplicationID]);
 
   // Sections explicitly expanded by the user. The active section is always
   // open without a navigation-side effect.
@@ -79,7 +101,7 @@ const AppSidebar: React.FC = () => {
   const visibleSections = sidebarSections
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) => isSidebarItemVisible(item, hasPermission)),
+      items: section.items.filter((item) => isSidebarItemVisible(item, hasPermission, onboardingComplete)),
     }))
     .filter((section) => section.items.length > 0);
 

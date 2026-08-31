@@ -167,7 +167,9 @@ func TestUserAndLicenseRoundTrip(t *testing.T) {
 		t.Fatalf("CreateLicense() error = %v", err)
 	}
 
-	foundLicense, err := repository.FindLicenseByUserAndProduct(ctx, applicationID, createdUser.ID, "StarLoader")
+	// Runtime PRODUCT is a stable product identifier and may use the canonical
+	// lowercase slug while the catalog keeps a human-friendly display name.
+	foundLicense, err := repository.FindLicenseByUserAndProduct(ctx, applicationID, createdUser.ID, "starloader")
 	if err != nil {
 		t.Fatalf("FindLicenseByUserAndProduct() error = %v", err)
 	}

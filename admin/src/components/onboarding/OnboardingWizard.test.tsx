@@ -10,6 +10,9 @@ import type { Application } from "@/lib/types";
 import OnboardingWizard from "./OnboardingWizard";
 import { deriveOnboardingStep } from "./onboardingState";
 
+const navigation = vi.hoisted(() => ({ replace: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => navigation }));
+
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 let container: HTMLDivElement | undefined;
@@ -93,6 +96,7 @@ function setControlValue(control: HTMLInputElement | HTMLSelectElement, value: s
 }
 
 beforeEach(() => {
+  navigation.replace.mockReset();
   vi.spyOn(api, "me").mockResolvedValue({
     ok: true,
     id: "admin-1",
@@ -140,6 +144,65 @@ describe("deriveOnboardingStep", () => {
 });
 
 describe("OnboardingWizard", () => {
+  it("stops rendering and returns to overview when onboarding is complete", async () => {
+    vi.spyOn(api, "onboardingProgress").mockResolvedValue({
+      ...catalogProgress,
+      product_count: 1,
+      plan_count: 1,
+      license_count: 1,
+    });
+
+    renderWizard();
+    await flushEffects();
+
+    expect(navigation.replace).toHaveBeenCalledWith("/");
+    expect(document.body.textContent).not.toContain("Application setup is complete");
+  });
+
+  it("creates the first organization inside the application dialog and continues with it selected", async () => {
+    vi.spyOn(api, "onboardingProgress").mockResolvedValue(credentialProgress);
+    const createdOrganization = {
+      id: "org-new",
+      name: "StarLoader",
+      slug: "starloader",
+      status: "active",
+      created_at: "2026-08-29T00:00:00Z",
+      updated_at: "2026-08-29T00:00:00Z",
+    };
+    const createOrganization = vi.spyOn(api, "createOrganization").mockResolvedValue({
+      ok: true,
+      organization: createdOrganization,
+    });
+    renderWizard();
+    await flushEffects();
+    act(() => button("Create application")?.click());
+
+    let dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    const organizationName = dialog?.querySelector<HTMLInputElement>("#onboarding-inline-organization-name");
+    expect(organizationName).not.toBeNull();
+    expect(dialog?.querySelector("#onboarding-application-organization")).toBeNull();
+    expect(dialog?.textContent).toContain("Create your first organization here");
+
+    if (organizationName) setControlValue(organizationName, createdOrganization.name);
+    const createOrganizationButton = Array.from(dialog?.querySelectorAll<HTMLButtonElement>("button") ?? [])
+      .find((element) => element.textContent?.trim() === "Create organization");
+    await act(async () => createOrganizationButton?.click());
+    await flushEffects();
+
+    dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    const organization = dialog?.querySelector<HTMLSelectElement>("#onboarding-application-organization");
+    expect(createOrganization).toHaveBeenCalledWith("StarLoader");
+    expect(organization?.value).toBe("org-new");
+
+    const applicationName = dialog?.querySelector<HTMLInputElement>("#onboarding-application-name");
+    const applicationSlug = dialog?.querySelector<HTMLInputElement>("#onboarding-application-slug");
+    if (applicationName) setControlValue(applicationName, "StarLoader Desktop");
+    if (applicationSlug) setControlValue(applicationSlug, "starloader-desktop");
+    const createApplicationButton = Array.from(dialog?.querySelectorAll<HTMLButtonElement>("button") ?? [])
+      .find((element) => element.textContent?.trim() === "Create application");
+    expect(createApplicationButton?.disabled).toBe(false);
+  });
+
   it("waits for application initialization before loading progress", async () => {
     document.cookie = "keystar_application_id=app-1; Path=/";
     let resolveApplications!: (value: { ok: boolean; items: Application[] }) => void;
