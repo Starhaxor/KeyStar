@@ -32,6 +32,46 @@ func (s *Store) CreateApplication(ctx context.Context, input domain.NewApplicati
 	return application, nil
 }
 
+func (s *Store) CreateApplicationWithSigningKey(
+	ctx context.Context,
+	input domain.NewApplication,
+	keyFactory func(string) (domain.NewApplicationSigningKey, error),
+) (*domain.Application, error) {
+	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("begin application provisioning: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	application, err := scanApplication(tx.QueryRow(ctx, `
+		insert into applications (organization_id, name, slug)
+		values ($1, $2, $3)
+		returning `+applicationColumns,
+		input.OrganizationID, strings.TrimSpace(input.Name), normalizeSlug(input.Slug)))
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.ConstraintName == "applications_slug_unique" {
+			return nil, domain.ErrApplicationExists
+		}
+		return nil, fmt.Errorf("create application for provisioning: %w", err)
+	}
+
+	key, err := keyFactory(application.ID)
+	if err != nil {
+		return nil, fmt.Errorf("create application signing key: %w", err)
+	}
+	if key.ApplicationID != application.ID {
+		return nil, errors.New("application signing key does not match created application")
+	}
+	if err := insertApplicationSigningKey(ctx, tx, key); err != nil {
+		return nil, fmt.Errorf("insert application signing key: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit application provisioning: %w", err)
+	}
+	return application, nil
+}
+
 func (s *Store) FindApplicationByID(ctx context.Context, applicationID string) (*domain.Application, error) {
 	application, err := scanApplication(s.db.QueryRow(ctx,
 		`select `+applicationColumns+` from applications where id = $1::uuid`, applicationID))

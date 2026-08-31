@@ -3,6 +3,7 @@ package integration_test
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,8 +12,233 @@ import (
 	"time"
 
 	"github.com/starloader/backend/internal/domain"
+	"github.com/starloader/backend/internal/security"
+	"github.com/starloader/backend/internal/service"
 	"github.com/starloader/backend/internal/store"
 )
+
+func TestApplicationProvisioningCommitsApplicationAndActiveKeyTogether(t *testing.T) {
+	ctx := context.Background()
+	pool := openTestPool(t, ctx)
+	resetAndMigrate(t, ctx, pool)
+	repository := store.New(pool)
+	organization, err := repository.CreateOrganization(ctx, "Provisioning Commit")
+	if err != nil {
+		t.Fatalf("CreateOrganization() error = %v", err)
+	}
+	activatedAt := time.Date(2026, time.August, 31, 11, 45, 0, 0, time.UTC)
+	provisioner := service.NewApplicationProvisioner(
+		repository,
+		newIntegrationApplicationKeyCipher(t),
+		func() time.Time { return activatedAt },
+	)
+
+	application, err := provisioner.Create(ctx, domain.NewApplication{
+		OrganizationID: organization.ID,
+		Name:           "Provisioned Application",
+		Slug:           "provisioned-application",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	activeKey, err := repository.FindActiveApplicationSigningKey(ctx, application.ID)
+	if err != nil {
+		t.Fatalf("FindActiveApplicationSigningKey() error = %v", err)
+	}
+	if activeKey.ApplicationID != application.ID || activeKey.Status != domain.ApplicationSigningKeyActive {
+		t.Fatalf("active key application/status = %q/%q, want %q/%q", activeKey.ApplicationID, activeKey.Status, application.ID, domain.ApplicationSigningKeyActive)
+	}
+	if activeKey.ActivatedAt == nil || !activeKey.ActivatedAt.Equal(activatedAt) {
+		t.Fatalf("active key activation = %v, want %v", activeKey.ActivatedAt, activatedAt)
+	}
+	keys, err := repository.ListApplicationSigningKeys(ctx, application.ID)
+	if err != nil {
+		t.Fatalf("ListApplicationSigningKeys() error = %v", err)
+	}
+	if len(keys) != 1 || keys[0].KID != activeKey.KID {
+		t.Fatalf("application signing key count = %d, want one committed active key", len(keys))
+	}
+}
+
+func TestApplicationProvisioningRollsBackApplicationWhenKeyFactoryFails(t *testing.T) {
+	ctx := context.Background()
+	pool := openTestPool(t, ctx)
+	resetAndMigrate(t, ctx, pool)
+	repository := store.New(pool)
+	organization, err := repository.CreateOrganization(ctx, "Provisioning Factory Failure")
+	if err != nil {
+		t.Fatalf("CreateOrganization() error = %v", err)
+	}
+	factoryErr := errors.New("key factory failed")
+
+	application, err := repository.CreateApplicationWithSigningKey(ctx, domain.NewApplication{
+		OrganizationID: organization.ID,
+		Name:           "Rolled Back Factory",
+		Slug:           "rolled-back-factory",
+	}, func(string) (domain.NewApplicationSigningKey, error) {
+		return domain.NewApplicationSigningKey{}, factoryErr
+	})
+	if !errors.Is(err, factoryErr) || application != nil {
+		t.Fatalf("CreateApplicationWithSigningKey() = (%#v, %v), want nil, factory error", application, err)
+	}
+	if _, err := repository.FindApplicationBySlug(ctx, "rolled-back-factory"); !errors.Is(err, domain.ErrApplicationNotFound) {
+		t.Fatalf("FindApplicationBySlug() error = %v, want %v after rollback", err, domain.ErrApplicationNotFound)
+	}
+}
+
+func TestApplicationProvisioningRollsBackApplicationWhenKeyInsertFails(t *testing.T) {
+	ctx := context.Background()
+	pool := openTestPool(t, ctx)
+	resetAndMigrate(t, ctx, pool)
+	repository := store.New(pool)
+	organization, err := repository.CreateOrganization(ctx, "Provisioning Insert Failure")
+	if err != nil {
+		t.Fatalf("CreateOrganization() error = %v", err)
+	}
+
+	application, err := repository.CreateApplicationWithSigningKey(ctx, domain.NewApplication{
+		OrganizationID: organization.ID,
+		Name:           "Rolled Back Insert",
+		Slug:           "rolled-back-insert",
+	}, func(applicationID string) (domain.NewApplicationSigningKey, error) {
+		return domain.NewApplicationSigningKey{
+			KID:                  "invalid-kid",
+			ApplicationID:        applicationID,
+			Algorithm:            "Ed25519",
+			PublicKey:            bytes.Repeat([]byte{0x11}, 32),
+			EncryptedPrivateKey:  bytes.Repeat([]byte{0x22}, 48),
+			EncryptionNonce:      bytes.Repeat([]byte{0x33}, 12),
+			EncryptionKeyVersion: 1,
+			Status:               domain.ApplicationSigningKeyActive,
+			ActivatedAt:          pointerToTime(time.Date(2026, time.August, 31, 12, 0, 0, 0, time.UTC)),
+		}, nil
+	})
+	if err == nil || application != nil {
+		t.Fatalf("CreateApplicationWithSigningKey() = (%#v, %v), want key insert failure", application, err)
+	}
+	if _, err := repository.FindApplicationBySlug(ctx, "rolled-back-insert"); !errors.Is(err, domain.ErrApplicationNotFound) {
+		t.Fatalf("FindApplicationBySlug() error = %v, want %v after rollback", err, domain.ErrApplicationNotFound)
+	}
+}
+
+func TestApplicationProvisioningGeneratesDifferentPublicKeys(t *testing.T) {
+	ctx := context.Background()
+	pool := openTestPool(t, ctx)
+	resetAndMigrate(t, ctx, pool)
+	repository := store.New(pool)
+	organization, err := repository.CreateOrganization(ctx, "Provisioning Distinct Keys")
+	if err != nil {
+		t.Fatalf("CreateOrganization() error = %v", err)
+	}
+	provisioner := service.NewApplicationProvisioner(repository, newIntegrationApplicationKeyCipher(t), nil)
+
+	first, err := provisioner.Create(ctx, domain.NewApplication{
+		OrganizationID: organization.ID, Name: "First Key", Slug: "first-key",
+	})
+	if err != nil {
+		t.Fatalf("Create() first error = %v", err)
+	}
+	second, err := provisioner.Create(ctx, domain.NewApplication{
+		OrganizationID: organization.ID, Name: "Second Key", Slug: "second-key",
+	})
+	if err != nil {
+		t.Fatalf("Create() second error = %v", err)
+	}
+	firstKey, err := repository.FindActiveApplicationSigningKey(ctx, first.ID)
+	if err != nil {
+		t.Fatalf("FindActiveApplicationSigningKey(first) error = %v", err)
+	}
+	secondKey, err := repository.FindActiveApplicationSigningKey(ctx, second.ID)
+	if err != nil {
+		t.Fatalf("FindActiveApplicationSigningKey(second) error = %v", err)
+	}
+	if bytes.Equal(firstKey.PublicKey, secondKey.PublicKey) {
+		t.Fatalf("two applications received the same public key: %x", firstKey.PublicKey)
+	}
+}
+
+func TestCreateInitialSigningKeyIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	pool := openTestPool(t, ctx)
+	resetAndMigrate(t, ctx, pool)
+	repository := store.New(pool)
+	organization, err := repository.CreateOrganization(ctx, "Initial Key Backfill")
+	if err != nil {
+		t.Fatalf("CreateOrganization() error = %v", err)
+	}
+	application, err := repository.CreateApplication(ctx, domain.NewApplication{
+		OrganizationID: organization.ID, Name: "Existing Application", Slug: "existing-application",
+	})
+	if err != nil {
+		t.Fatalf("CreateApplication() error = %v", err)
+	}
+	withoutKey, err := repository.ListApplicationsWithoutSigningKey(ctx)
+	if err != nil {
+		t.Fatalf("ListApplicationsWithoutSigningKey() error = %v", err)
+	}
+	if !containsString(withoutKey, application.ID) {
+		t.Fatalf("applications without signing key = %#v, want %q", withoutKey, application.ID)
+	}
+
+	cipher := newIntegrationApplicationKeyCipher(t)
+	first := generateActiveIntegrationKey(t, cipher, application.ID, time.Date(2026, time.August, 31, 13, 0, 0, 0, time.UTC))
+	inserted, err := repository.CreateInitialSigningKey(ctx, application.ID, first)
+	if err != nil || !inserted {
+		t.Fatalf("CreateInitialSigningKey() first = (%t, %v), want true, nil", inserted, err)
+	}
+	second := generateActiveIntegrationKey(t, cipher, application.ID, time.Date(2026, time.August, 31, 14, 0, 0, 0, time.UTC))
+	inserted, err = repository.CreateInitialSigningKey(ctx, application.ID, second)
+	if err != nil || inserted {
+		t.Fatalf("CreateInitialSigningKey() second = (%t, %v), want false, nil", inserted, err)
+	}
+	active, err := repository.FindActiveApplicationSigningKey(ctx, application.ID)
+	if err != nil {
+		t.Fatalf("FindActiveApplicationSigningKey() error = %v", err)
+	}
+	if active.KID != first.KID || bytes.Equal(active.PublicKey, second.PublicKey) {
+		t.Fatalf("active key was replaced: got kid %q, want %q", active.KID, first.KID)
+	}
+}
+
+func newIntegrationApplicationKeyCipher(t *testing.T) *security.ApplicationKeyCipher {
+	t.Helper()
+	cipher, err := security.NewApplicationKeyCipher(map[int][]byte{
+		1: bytes.Repeat([]byte{0x5a}, 32),
+	}, 1, rand.Reader)
+	if err != nil {
+		t.Fatalf("NewApplicationKeyCipher() error = %v", err)
+	}
+	return cipher
+}
+
+func generateActiveIntegrationKey(
+	t *testing.T,
+	cipher *security.ApplicationKeyCipher,
+	applicationID string,
+	activatedAt time.Time,
+) domain.NewApplicationSigningKey {
+	t.Helper()
+	key, err := cipher.Generate(applicationID)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	key.Status = domain.ApplicationSigningKeyActive
+	key.ActivatedAt = &activatedAt
+	return key
+}
+
+func pointerToTime(value time.Time) *time.Time {
+	return &value
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
 
 func TestAdminBootstrapCreatesExactlyOneOwner(t *testing.T) {
 	ctx := context.Background()
