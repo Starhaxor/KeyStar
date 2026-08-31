@@ -4012,3 +4012,33 @@ Bu mimari uygulandığında KeyStar, tek projeye özel auth backend olmaktan ç�
 **İlk geliştirme hedefi:** `application_credentials + application middleware + repository application scoping`.  
 Bunlar bitmeden SDK yazmaya başlanmamalıdır; aksi halde SDK yine StarLoader'a özel bir API'nin wrapper'ına dönüşür.
 
+---
+
+# 156. Application Signing-Key Foundation Dağıtımı
+
+Uygulama başına Ed25519 signing-key altyapısı aşağıdaki güvenli sırayla
+dağıtılmalıdır:
+
+1. PostgreSQL'i ve encryption-key yapılandırmasını yedekleyin.
+2. `APPLICATION_KEY_ENCRYPTION_KEYS` ve
+   `APPLICATION_KEY_ACTIVE_VERSION` değişkenlerini ayarlayın.
+   `APPLICATION_KEY_ENCRYPTION_KEYS`, tam olarak
+   `version=standard-base64` girişlerinden oluşan bir sürüm haritasıdır;
+   her çözülmüş değer 32 byte olmalı, aktif sürüm ise pozitif bir sayı olarak
+   bu haritada bulunmalıdır. Gizli anahtar değerlerini source control, ticket
+   veya loglara koymayın.
+3. Migration 20'yi ve backfill komutunu içeren binary'yi deploy edin.
+4. `server migrate up` komutunu çalıştırın.
+5. `server signing-keys backfill` komutunu çalıştırın.
+6. Admin API üzerinden her application için tam olarak bir aktif public key
+   olduğunu doğrulayın.
+7. Trafiği başlatın. Token üretimi bir sonraki token-profile planına kadar
+   bilerek eski global key üzerinde kalır.
+
+Yeni application oluşturma, ilk aktif anahtarını aynı PostgreSQL transaction
+içinde sağlar. Migration öncesi mevcut application'lar için anahtar yalnızca
+açıkça çağrılan ve idempotent olan backfill komutuyla üretilir. PostgreSQL
+backup'ları encryption-key ring'in harici yedekleriyle birlikte tutulmalıdır:
+yapılandırılmış tüm sürümler kaybolursa, o sürümlerle şifrelenmiş seed'ler
+kurtarılamaz.
+

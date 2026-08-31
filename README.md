@@ -580,6 +580,31 @@ The local commands above are the release evidence. A Release A handoff is not
 complete until every command, including the Docker-backed integration and
 browser suites, exits successfully in the target environment.
 
+### Deploying the application signing-key foundation
+
+Deploy the application signing-key foundation in this order:
+
+1. Back up PostgreSQL and the encryption-key configuration.
+2. Set `APPLICATION_KEY_ENCRYPTION_KEYS` and
+   `APPLICATION_KEY_ACTIVE_VERSION`. The key ring is a version map with exact
+   `version=standard-base64` entries; every decoded value must be 32 bytes, and
+   the active version must be a positive version present in that map. Use a
+   secure secret-management system and do not place key material in source
+   control, tickets, or logs.
+3. Deploy the binary containing migration 20 and the backfill command.
+4. Run `server migrate up`.
+5. Run `server signing-keys backfill`.
+6. Through the admin API, verify that every application has exactly one active
+   public key.
+7. Start serving traffic. Token issuance intentionally remains on the legacy
+   global key until the next token-profile plan.
+
+The backfill is explicit and idempotent: it supplies keys for applications
+that existed before migration 20, while application creation provisions its
+initial key atomically. Keep PostgreSQL backups paired with external backups
+of the entire encryption-key ring. If every configured version is lost, the
+encrypted seeds that rely on those versions are unrecoverable.
+
 ---
 
 ## Roadmap

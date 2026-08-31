@@ -594,3 +594,24 @@ git commit -m "docs: document application signing-key foundation"
 - Spec coverage in this delivery: versioned key-encryption configuration, AES-GCM AAD binding, independent key generation, constrained storage, atomic new-application provisioning, idempotent existing-application backfill, private-key consistency checks, application-scoped signing provider, public metadata API, and deployment documentation.
 - Deliberately deferred to separate plans: JWT `kid` issuance and verification, legacy-key cutoff, signing-key staging/activation/retirement/revocation UI, recent-MFA key lifecycle operations, session policy, access-session revocation, DPoP request proof, StarLoader trust-key migration, VMProtect, SPKI pinning, and Authenticode.
 - Type consistency: all tasks use `domain.ApplicationSigningKey`, `domain.NewApplicationSigningKey`, `security.ApplicationKeyCipher`, `service.ApplicationProvisioner`, and `security.ApplicationSigner` with the signatures declared above.
+
+## Verification Evidence
+
+Date: 2026-08-31
+
+### Formatting and static verification
+
+- `cd backend; gofmt -w internal/config/*.go internal/domain/application_signing_key.go internal/security/application_key_cipher.go internal/security/application_key_cipher_test.go internal/security/application_signer.go internal/security/application_signer_test.go internal/store/application_signing_keys.go internal/store/applications.go internal/service/application_provisioning.go internal/service/application_provisioning_test.go internal/httpapi/types.go internal/httpapi/adminapi/admin_applications.go internal/httpapi/adminapi/admin_lifecycle_test.go cmd/server/main.go cmd/server/main_test.go` — exit 1 under PowerShell because `gofmt` received the literal `internal/config/*.go` path. The resolved-file equivalent exited 0.
+- `cd backend; go vet ./...` — exit 0.
+- `cd backend; go test -p 1 ./...` — exit 1 because the integration package requires `TEST_DATABASE_URL`; all non-integration packages passed.
+
+### Dedicated PostgreSQL integration gate
+
+- `docker compose up -d db` — exit 0; the dedicated PostgreSQL container started.
+- `./scripts/test-integration.ps1` — exit 1. The runner reached PostgreSQL, but five application-signing-key provisioning tests failed while creating an organization because the database rejected the normalized organization name with `organizations_name_normalized_check`.
+
+### Secret handling and worktree checks
+
+- `rg -n "EncryptedPrivateKey|EncryptionNonce|ApplicationKeyEncryptionKeys" backend/internal/httpapi admin docs/openapi.yaml` — exit 0; the only match was test fixture setup in `backend/internal/httpapi/adminapi/admin_lifecycle_test.go`, not a response mapping.
+- `git diff --check` — exit 0; no whitespace errors.
+- `git status --short` — exit 0; before documentation edits the worktree was clean; afterward it contained only the three scoped documentation files.
