@@ -36,6 +36,8 @@ tags:
     description: Application key-value store (`admins.*` scopes).
   - name: Server Webhooks
     description: Webhook endpoint management (`webhooks.*` scopes).
+  - name: Admin Applications
+    description: Cookie-authenticated application administration protected by admin RBAC and MFA enrollment.
 
 security:
   - AppHeader: []
@@ -239,6 +241,44 @@ paths:
     patch: { tags: [Server Webhooks], summary: Update URL/status/events, responses: { "200": { description: Updated. } } }
     delete: { tags: [Server Webhooks], summary: Delete the endpoint, responses: { "200": { description: Deleted. } } }
 
+  /v1/admin/applications/{application_id}/signing-keys:
+    parameters:
+      - name: application_id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+        description: Application whose public signing-key lifecycle metadata is requested.
+    get:
+      tags: [Admin Applications]
+      summary: List public application signing-key metadata
+      description: |
+        Requires an authenticated admin session, completed MFA enrollment, and
+        the `applications.read` permission. Disabled applications remain
+        readable for operational recovery. Private seed material, encrypted
+        private keys, nonces, and encryption-key versions are never returned.
+      security:
+        - AdminSession: []
+      responses:
+        "200":
+          description: Public signing-key lifecycle metadata for the named application.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, items]
+                properties:
+                  ok: { type: boolean, example: true }
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/ApplicationSigningKeyPublicMetadata" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: Application not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
 components:
   securitySchemes:
     AppHeader:
@@ -254,6 +294,11 @@ components:
       type: http
       scheme: bearer
       description: "`ks_sk_*` server credential with explicit scopes."
+    AdminSession:
+      type: apiKey
+      in: cookie
+      name: starloader_admin_session
+      description: Cookie session issued after admin authentication.
 
   responses:
     Unauthorized:
@@ -299,3 +344,26 @@ components:
         challenge:
           type: object
           nullable: true
+
+    ApplicationSigningKeyPublicMetadata:
+      type: object
+      additionalProperties: false
+      required: [kid, algorithm, status, public_key, created_at, activated_at, retire_at, revoked_at]
+      properties:
+        kid:
+          type: string
+          example: ksk_AAAAAAAAAAAAAAAAAAAAAA
+        algorithm:
+          type: string
+          enum: [Ed25519]
+        status:
+          type: string
+          enum: [pending, active, retiring, revoked]
+        public_key:
+          type: string
+          format: byte
+          description: Base64-encoded Ed25519 public key.
+        created_at: { type: string, format: date-time }
+        activated_at: { type: string, format: date-time, nullable: true }
+        retire_at: { type: string, format: date-time, nullable: true }
+        revoked_at: { type: string, format: date-time, nullable: true }

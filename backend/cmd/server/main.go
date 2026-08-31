@@ -56,6 +56,8 @@ func run() error {
 		return runAdmin(args)
 	case commandKeygen:
 		return generateSigningKeys(os.Stdout, cryptorand.Reader)
+	case commandSigningKeys:
+		return runSigningKeys(args)
 	default:
 		return errors.New("unsupported command")
 	}
@@ -64,10 +66,11 @@ func run() error {
 type commandMode string
 
 const (
-	commandServe   commandMode = "serve"
-	commandMigrate commandMode = "migrate"
-	commandAdmin   commandMode = "admin"
-	commandKeygen  commandMode = "keygen"
+	commandServe       commandMode = "serve"
+	commandMigrate     commandMode = "migrate"
+	commandAdmin       commandMode = "admin"
+	commandKeygen      commandMode = "keygen"
+	commandSigningKeys commandMode = "signing-keys"
 )
 
 func parseCommand(args []string) (commandMode, []string, error) {
@@ -95,8 +98,13 @@ func parseCommand(args []string) (commandMode, []string, error) {
 			return "", nil, errors.New("keygen does not accept arguments")
 		}
 		return commandKeygen, nil, nil
+	case "signing-keys":
+		if len(args) != 2 || args[1] != "backfill" {
+			return "", nil, errors.New("usage: server signing-keys backfill")
+		}
+		return commandSigningKeys, args[1:], nil
 	default:
-		return "", nil, errors.New("usage: server [serve|migrate up|migrate down|admin ...|keygen]")
+		return "", nil, errors.New("usage: server [serve|migrate up|migrate down|admin ...|keygen|signing-keys backfill]")
 	}
 }
 
@@ -150,6 +158,16 @@ func runServer() error {
 	}
 
 	repository := store.New(pool)
+	applicationKeyCipher, err := security.NewApplicationKeyCipher(
+		configuration.ApplicationKeyEncryptionKeys,
+		configuration.ApplicationKeyActiveVersion,
+		cryptorand.Reader,
+	)
+	if err != nil {
+		return fmt.Errorf("configuration error: %w", err)
+	}
+	applicationProvisioner := service.NewApplicationProvisioner(repository, applicationKeyCipher, time.Now)
+	applicationSigner := security.NewApplicationSigner(repository, applicationKeyCipher)
 	defaultApplication, err := repository.FindDefaultApplication(startupCtx)
 	if err != nil {
 		return fmt.Errorf("resolve default application: %w", err)
@@ -193,16 +211,18 @@ func runServer() error {
 			EncryptionKey: []byte(configuration.AdminMFAEncryptionKey),
 		})
 		adminConfig = httpapi.AdminConfig{
-			Auth:           adminAuthService,
-			Console:        repository,
-			BootstrapToken: configuration.AdminBootstrapToken,
-			LicenseHMACKey: []byte(configuration.LicenseHMACKey),
-			Product:        configuration.Product,
-			MFAIssuer:      "KeyStar Admin",
-			AllowedOrigins: configuration.AdminAllowedOrigins,
-			CSRFSecret:     []byte(configuration.AdminSessionSecret),
-			CookieSecure:   configuration.AdminCookieSecure,
-			SessionTTL:     configuration.AdminSessionTTL,
+			Auth:                   adminAuthService,
+			Console:                repository,
+			ApplicationProvisioner: applicationProvisioner,
+			ApplicationSigningKeys: repository,
+			BootstrapToken:         configuration.AdminBootstrapToken,
+			LicenseHMACKey:         []byte(configuration.LicenseHMACKey),
+			Product:                configuration.Product,
+			MFAIssuer:              "KeyStar Admin",
+			AllowedOrigins:         configuration.AdminAllowedOrigins,
+			CSRFSecret:             []byte(configuration.AdminSessionSecret),
+			CookieSecure:           configuration.AdminCookieSecure,
+			SessionTTL:             configuration.AdminSessionTTL,
 		}
 	} else {
 		// Keep the allowed origin so disabled-console responses still carry
@@ -244,8 +264,9 @@ func runServer() error {
 			LicenseHMACKey: []byte(configuration.LicenseHMACKey),
 			Product:        configuration.Product,
 		},
-		ServerStore:    repository,
-		RefreshService: refreshService,
+		ServerStore:       repository,
+		RefreshService:    refreshService,
+		ApplicationSigner: applicationSigner,
 	})
 	// The admin and server namespaces are mounted as separate handlers so each
 	// package owns its routes while sharing the core router middleware.
@@ -345,6 +366,50 @@ func runMigration(action string) error {
 		return fmt.Errorf("migration %s failed: %w", action, err)
 	}
 	log.Printf("migration %s completed", action)
+	return nil
+}
+
+func runSigningKeys(args []string) error {
+	if len(args) != 1 || args[0] != "backfill" {
+		return errors.New("usage: server signing-keys backfill")
+	}
+	configuration, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("configuration error: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool, err := openDatabase(ctx)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	repository := store.New(pool)
+	applicationKeyCipher, err := security.NewApplicationKeyCipher(
+		configuration.ApplicationKeyEncryptionKeys,
+		configuration.ApplicationKeyActiveVersion,
+		cryptorand.Reader,
+	)
+	if err != nil {
+		return fmt.Errorf("configuration error: %w", err)
+	}
+	provisioner := service.NewApplicationProvisioner(repository, applicationKeyCipher, time.Now)
+	return writeApplicationSigningKeyBackfillResult(ctx, os.Stdout, provisioner)
+}
+
+type applicationSigningKeyBackfiller interface {
+	Backfill(context.Context) (int, error)
+}
+
+func writeApplicationSigningKeyBackfillResult(ctx context.Context, output io.Writer, backfiller applicationSigningKeyBackfiller) error {
+	created, err := backfiller.Backfill(ctx)
+	if err != nil {
+		return fmt.Errorf("application signing-key backfill failed: %w", err)
+	}
+	if _, err := fmt.Fprintf(output, "application signing-key backfill created %d key(s)\n", created); err != nil {
+		return fmt.Errorf("write application signing-key backfill result: %w", err)
+	}
 	return nil
 }
 

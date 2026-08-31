@@ -56,6 +56,61 @@ func TestParseCommand(t *testing.T) {
 	}
 }
 
+func TestParseSigningKeysCommand(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		wantMode commandMode
+		wantArgs []string
+		wantErr  bool
+	}{
+		{name: "backfill", args: []string{"signing-keys", "backfill"}, wantMode: commandMode("signing-keys"), wantArgs: []string{"backfill"}},
+		{name: "missing action", args: []string{"signing-keys"}, wantErr: true},
+		{name: "unknown action", args: []string{"signing-keys", "rotate"}, wantErr: true},
+		{name: "extra argument", args: []string{"signing-keys", "backfill", "unexpected"}, wantErr: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			mode, args, err := parseCommand(test.args)
+			if test.wantErr {
+				if err == nil {
+					t.Fatal("parseCommand() error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseCommand() error = %v", err)
+			}
+			if mode != test.wantMode {
+				t.Fatalf("parseCommand() mode = %q, want %q", mode, test.wantMode)
+			}
+			if strings.Join(args, "\x00") != strings.Join(test.wantArgs, "\x00") {
+				t.Fatalf("parseCommand() args = %q, want %q", args, test.wantArgs)
+			}
+		})
+	}
+}
+
+type signingKeyBackfillerStub struct {
+	created int
+	err     error
+}
+
+func (stub signingKeyBackfillerStub) Backfill(context.Context) (int, error) {
+	return stub.created, stub.err
+}
+
+func TestWriteApplicationSigningKeyBackfillResult(t *testing.T) {
+	var output bytes.Buffer
+	if err := writeApplicationSigningKeyBackfillResult(context.Background(), &output, signingKeyBackfillerStub{created: 3}); err != nil {
+		t.Fatalf("writeApplicationSigningKeyBackfillResult() error = %v", err)
+	}
+	if got, want := output.String(), "application signing-key backfill created 3 key(s)\n"; got != want {
+		t.Fatalf("output = %q, want %q", got, want)
+	}
+}
+
 func TestGenerateSigningKeysWritesMatchingBase64Keys(t *testing.T) {
 	var output bytes.Buffer
 	random := bytes.NewReader(bytes.Repeat([]byte{0x42}, 32))

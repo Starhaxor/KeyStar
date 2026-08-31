@@ -25,6 +25,17 @@ type applicationJSON struct {
 	EnvironmentMode string `json:"environment_mode"`
 }
 
+type applicationSigningKeyJSON struct {
+	KID         string                             `json:"kid"`
+	Algorithm   string                             `json:"algorithm"`
+	Status      domain.ApplicationSigningKeyStatus `json:"status"`
+	PublicKey   []byte                             `json:"public_key"`
+	CreatedAt   string                             `json:"created_at"`
+	ActivatedAt *string                            `json:"activated_at"`
+	RetireAt    *string                            `json:"retire_at"`
+	RevokedAt   *string                            `json:"revoked_at"`
+}
+
 func (router *Router) routeAdminApplications(writer http.ResponseWriter, request *http.Request, account *domain.AdminAccount, segments []string) {
 	switch {
 	case len(segments) == 1 && request.Method == http.MethodGet:
@@ -47,6 +58,11 @@ func (router *Router) routeAdminApplications(writer http.ResponseWriter, request
 			return
 		}
 		router.handleAdminApplicationTransition(writer, request, account, segments[1])
+	case len(segments) == 3 && segments[2] == "signing-keys" && request.Method == http.MethodGet:
+		if !router.RequirePermission(writer, request, account, domain.PermApplicationsRead) {
+			return
+		}
+		router.handleAdminApplicationSigningKeys(writer, request, segments[1])
 	case len(segments) == 2 && segments[1] == "organizations" && request.Method == http.MethodGet:
 		if !router.RequirePermission(writer, request, account, domain.PermApplicationsRead) {
 			return
@@ -195,7 +211,11 @@ func (router *Router) handleAdminApplicationCreate(writer http.ResponseWriter, r
 		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "organization_id and name are required")
 		return
 	}
-	application, err := router.Admin.Console.CreateApplication(request.Context(), domain.NewApplication{OrganizationID: body.OrganizationID, Name: body.Name, Slug: body.Slug})
+	if router.Admin.ApplicationProvisioner == nil {
+		httpapi.WriteError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
+		return
+	}
+	application, err := router.Admin.ApplicationProvisioner.Create(request.Context(), domain.NewApplication{OrganizationID: body.OrganizationID, Name: body.Name, Slug: body.Slug})
 	if err != nil {
 		router.WriteConsoleError(writer, request, err)
 		return
@@ -205,6 +225,38 @@ func (router *Router) handleAdminApplicationCreate(writer http.ResponseWriter, r
 		OK          bool            `json:"ok"`
 		Application applicationJSON `json:"application"`
 	}{OK: true, Application: applicationJSON{ID: application.ID, OrganizationID: application.OrganizationID, Name: application.Name, Slug: application.Slug, Status: string(application.Status), EnvironmentMode: application.EnvironmentMode}})
+}
+
+func (router *Router) handleAdminApplicationSigningKeys(writer http.ResponseWriter, request *http.Request, applicationID string) {
+	console, ok := router.applicationLifecycleConsole(writer, request)
+	if !ok {
+		return
+	}
+	if _, ok := router.findAdminApplication(writer, request, console, applicationID); !ok {
+		return
+	}
+	if router.Admin.ApplicationSigningKeys == nil {
+		httpapi.WriteError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
+		return
+	}
+	keys, err := router.Admin.ApplicationSigningKeys.ListApplicationSigningKeys(request.Context(), applicationID)
+	if err != nil {
+		router.writeLifecycleError(writer, request, err)
+		return
+	}
+	items := make([]applicationSigningKeyJSON, 0, len(keys))
+	for _, key := range keys {
+		items = append(items, applicationSigningKeyJSON{
+			KID: key.KID, Algorithm: key.Algorithm, Status: key.Status,
+			PublicKey: key.PublicKey, CreatedAt: httpapi.FormatTime(key.CreatedAt),
+			ActivatedAt: httpapi.FormatOptionalTime(key.ActivatedAt), RetireAt: httpapi.FormatOptionalTime(key.RetireAt),
+			RevokedAt: httpapi.FormatOptionalTime(key.RevokedAt),
+		})
+	}
+	httpapi.WriteJSON(writer, http.StatusOK, struct {
+		OK    bool                        `json:"ok"`
+		Items []applicationSigningKeyJSON `json:"items"`
+	}{OK: true, Items: items})
 }
 
 func (router *Router) handleAdminOrganizationList(writer http.ResponseWriter, request *http.Request) {

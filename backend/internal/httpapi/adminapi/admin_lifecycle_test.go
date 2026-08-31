@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,22 +18,28 @@ type fakeLifecycleConsole struct {
 	httpapi.AdminConsoleStore
 	auditEntries []domain.NewAuditLog
 
-	application *domain.Application
-	product     *domain.Product
-	plan        *domain.Plan
+	application  *domain.Application
+	applications []domain.Application
+	product      *domain.Product
+	plan         *domain.Plan
+	signingKeys  []domain.ApplicationSigningKey
 
 	transitionApplicationErr error
 	archivePlanErr           error
 	createApplicationErr     error
 
-	transitionApplicationID string
-	archiveProductAppID     string
-	updatePlanAppID         string
-	updateApplicationCalls  int
-	updateProductCalls      int
-	archiveProductCalls     int
-	updatePlanCalls         int
-	archivePlanCalls        int
+	transitionApplicationID   string
+	signingKeyApplicationID   string
+	archiveProductAppID       string
+	updatePlanAppID           string
+	createApplicationCalls    int
+	provisionApplicationCalls int
+	provisionInput            domain.NewApplication
+	updateApplicationCalls    int
+	updateProductCalls        int
+	archiveProductCalls       int
+	updatePlanCalls           int
+	archivePlanCalls          int
 }
 
 func (f *fakeLifecycleConsole) AppendAuditLog(_ context.Context, input domain.NewAuditLog) error {
@@ -45,6 +52,9 @@ func (*fakeLifecycleConsole) AppendSecurityEvent(context.Context, domain.NewSecu
 }
 
 func (f *fakeLifecycleConsole) ListApplications(context.Context) ([]domain.Application, error) {
+	if f.applications != nil {
+		return f.applications, nil
+	}
 	if f.application == nil {
 		return nil, nil
 	}
@@ -135,10 +145,25 @@ func (f *fakeLifecycleConsole) ArchivePlan(_ context.Context, _ string, _ string
 }
 
 func (f *fakeLifecycleConsole) CreateApplication(_ context.Context, _ domain.NewApplication) (*domain.Application, error) {
+	f.createApplicationCalls++
 	if f.createApplicationErr != nil {
 		return nil, f.createApplicationErr
 	}
 	return f.application, nil
+}
+
+func (f *fakeLifecycleConsole) Create(_ context.Context, input domain.NewApplication) (*domain.Application, error) {
+	f.provisionApplicationCalls++
+	f.provisionInput = input
+	if f.createApplicationErr != nil {
+		return nil, f.createApplicationErr
+	}
+	return f.application, nil
+}
+
+func (f *fakeLifecycleConsole) ListApplicationSigningKeys(_ context.Context, applicationID string) ([]domain.ApplicationSigningKey, error) {
+	f.signingKeyApplicationID = applicationID
+	return f.signingKeys, nil
 }
 
 func newAdminLifecycleTestRouter(auth *fakeAdminAuth, console *fakeLifecycleConsole) *Router {
@@ -160,6 +185,7 @@ func newAdminLifecycleTestRouterWithResolver(auth *fakeAdminAuth, console *fakeL
 		Admin: httpapi.AdminConfig{
 			Auth: auth, Console: console, AllowedOrigins: []string{"http://localhost:3000"},
 			CSRFSecret: []byte("test-csrf-secret"), SessionTTL: time.Hour,
+			ApplicationProvisioner: console, ApplicationSigningKeys: console,
 		},
 	})
 	return &Router{Router: core}
@@ -201,6 +227,109 @@ func TestAdminApplicationCreatePreservesLegacyErrorContract(t *testing.T) {
 	var body struct{ Code string }
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil || recorder.Code != http.StatusInternalServerError || body.Code != "SERVER_ERROR" {
 		t.Fatalf("status = %d, body = %s, err = %v", recorder.Code, recorder.Body.String(), err)
+	}
+}
+
+func TestAdminApplicationCreationUsesSigningKeyProvisioner(t *testing.T) {
+	console := &fakeLifecycleConsole{application: &domain.Application{ID: "application-2", OrganizationID: "org-1", Name: "Portal", Slug: "portal", Status: domain.ApplicationStatusActive}}
+	router := newAdminLifecycleTestRouter(&fakeAdminAuth{token: "session-token", account: testOwnerAccount()}, console)
+
+	recorder := httptest.NewRecorder()
+	router.serveAdmin(recorder, lifecycleRequest(t, router, http.MethodPost, "/v1/admin/applications", `{"organization_id":"org-1","name":"Portal","slug":"portal"}`))
+
+	if recorder.Code != http.StatusCreated || console.provisionApplicationCalls != 1 || console.createApplicationCalls != 0 {
+		t.Fatalf("status = %d, provision calls = %d, console create calls = %d, body = %s", recorder.Code, console.provisionApplicationCalls, console.createApplicationCalls, recorder.Body.String())
+	}
+	if console.provisionInput.OrganizationID != "org-1" || console.provisionInput.Name != "Portal" || console.provisionInput.Slug != "portal" {
+		t.Fatalf("provision input = %#v", console.provisionInput)
+	}
+}
+
+func TestAdminApplicationSigningKeysRequireApplicationsRead(t *testing.T) {
+	account := testOwnerAccount()
+	account.Permissions = []string{domain.PermCatalogRead}
+	console := &fakeLifecycleConsole{applications: []domain.Application{{ID: "application-2", Status: domain.ApplicationStatusActive}}}
+	router := newAdminLifecycleTestRouter(&fakeAdminAuth{token: "session-token", account: account}, console)
+
+	recorder := httptest.NewRecorder()
+	router.serveAdmin(recorder, lifecycleRequest(t, router, http.MethodGet, "/v1/admin/applications/application-2/signing-keys", ""))
+
+	if recorder.Code != http.StatusForbidden || console.signingKeyApplicationID != "" {
+		t.Fatalf("status = %d, signing-key application = %q, body = %s", recorder.Code, console.signingKeyApplicationID, recorder.Body.String())
+	}
+}
+
+func TestAdminApplicationSigningKeysUseRequestedApplicationAndExposeOnlyPublicMetadata(t *testing.T) {
+	createdAt := time.Date(2026, time.August, 31, 12, 0, 0, 0, time.UTC)
+	activatedAt := createdAt
+	publicKey := make([]byte, 32)
+	console := &fakeLifecycleConsole{
+		applications: []domain.Application{
+			{ID: "019c1111-1111-7111-8111-111111111111", Status: domain.ApplicationStatusActive},
+			{ID: "019c2222-2222-7222-8222-222222222222", Status: domain.ApplicationStatusActive},
+		},
+		signingKeys: []domain.ApplicationSigningKey{{
+			ID: "internal-key-id", KID: "ksk_AAAAAAAAAAAAAAAAAAAAAA", ApplicationID: "019c2222-2222-7222-8222-222222222222",
+			Algorithm: "Ed25519", PublicKey: publicKey, EncryptedPrivateKey: []byte("ciphertext"), EncryptionNonce: []byte("secret-nonce"),
+			EncryptionKeyVersion: 7, Status: domain.ApplicationSigningKeyActive, CreatedAt: createdAt, ActivatedAt: &activatedAt,
+		}},
+	}
+	router := newAdminLifecycleTestRouter(&fakeAdminAuth{token: "session-token", account: testOwnerAccount()}, console)
+
+	recorder := httptest.NewRecorder()
+	router.serveAdmin(recorder, lifecycleRequest(t, router, http.MethodGet, "/v1/admin/applications/019c2222-2222-7222-8222-222222222222/signing-keys", ""))
+
+	if recorder.Code != http.StatusOK || console.signingKeyApplicationID != "019c2222-2222-7222-8222-222222222222" {
+		t.Fatalf("status = %d, signing-key application = %q, body = %s", recorder.Code, console.signingKeyApplicationID, recorder.Body.String())
+	}
+	var body struct {
+		OK    bool             `json:"ok"`
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	var topLevel map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &topLevel); err != nil || len(topLevel) != 2 {
+		t.Fatalf("top-level fields = %#v, err = %v", topLevel, err)
+	}
+	if !body.OK || len(body.Items) != 1 {
+		t.Fatalf("response = %#v", body)
+	}
+	want := map[string]any{
+		"kid": "ksk_AAAAAAAAAAAAAAAAAAAAAA", "algorithm": "Ed25519", "status": "active",
+		"public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", "created_at": "2026-08-31T12:00:00Z",
+		"activated_at": "2026-08-31T12:00:00Z", "retire_at": nil, "revoked_at": nil,
+	}
+	if len(body.Items[0]) != len(want) {
+		t.Fatalf("public metadata fields = %#v", body.Items[0])
+	}
+	for key, wantValue := range want {
+		if gotValue, exists := body.Items[0][key]; !exists || gotValue != wantValue {
+			t.Fatalf("field %q = %#v, want %#v (item = %#v)", key, gotValue, wantValue, body.Items[0])
+		}
+	}
+	response := strings.ToLower(recorder.Body.String())
+	for _, forbidden := range []string{"ciphertext", "encrypted", "nonce", "encryption_key_version", "private", "seed"} {
+		if strings.Contains(response, forbidden) {
+			t.Fatalf("response contains %q: %s", forbidden, recorder.Body.String())
+		}
+	}
+}
+
+func TestAdminApplicationSigningKeysRemainReadableWhenApplicationDisabled(t *testing.T) {
+	const applicationID = "019c1111-1111-7111-8111-111111111111"
+	console := &fakeLifecycleConsole{
+		applications: []domain.Application{{ID: applicationID, Status: domain.ApplicationStatusDisabled}},
+		signingKeys:  []domain.ApplicationSigningKey{{KID: "ksk_AAAAAAAAAAAAAAAAAAAAAA", ApplicationID: applicationID, Algorithm: "Ed25519", Status: domain.ApplicationSigningKeyActive}},
+	}
+	router := newAdminLifecycleTestRouterWithResolver(&fakeAdminAuth{token: "session-token", account: testOwnerAccount()}, console, lifecycleStatusResolver{status: domain.ApplicationStatusDisabled})
+
+	recorder := httptest.NewRecorder()
+	router.serveAdmin(recorder, lifecycleRequest(t, router, http.MethodGet, "/v1/admin/applications/"+applicationID+"/signing-keys", ""))
+
+	if recorder.Code != http.StatusOK || console.signingKeyApplicationID != applicationID {
+		t.Fatalf("status = %d, signing-key application = %q, body = %s", recorder.Code, console.signingKeyApplicationID, recorder.Body.String())
 	}
 }
 

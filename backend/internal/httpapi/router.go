@@ -52,6 +52,9 @@ type RouterConfig struct {
 	ServerStore ServerStore
 	// RefreshService manages refresh token issuance, rotation and reuse detection.
 	RefreshService RefreshService
+	// ApplicationSigner is staged for the later application-scoped token
+	// profile migration. Existing token issuance and verification do not use it.
+	ApplicationSigner ApplicationSigner
 	// Metrics, when set, enables request instrumentation and the /metrics
 	// endpoint. Nil keeps both disabled (default).
 	Metrics      *metrics.Registry
@@ -84,6 +87,7 @@ type Router struct {
 	Server                   ServerConfig
 	ServerStore              ServerStore
 	refreshService           *refreshServiceAdapter
+	applicationSigner        ApplicationSigner
 	adminHandler             http.Handler
 	serverHandler            http.Handler
 	loginHandler             http.Handler
@@ -208,6 +212,7 @@ func NewRouter(config RouterConfig) *Router {
 		Server:                   config.Server,
 		ServerStore:              config.ServerStore,
 		refreshService:           wrapRefreshService(config.RefreshService),
+		applicationSigner:        config.ApplicationSigner,
 		metricsToken:             config.MetricsToken,
 		rateLimits:               config.RateLimits,
 	}

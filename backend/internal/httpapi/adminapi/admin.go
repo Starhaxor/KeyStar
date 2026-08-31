@@ -153,6 +153,7 @@ func isApplicationLifecycleRecoveryRoute(path, method string) bool {
 	return (len(segments) == 1 && segments[0] == "me" && method == http.MethodGet) ||
 		(len(segments) == 1 && segments[0] == "applications" && method == http.MethodGet) ||
 		(len(segments) == 2 && segments[0] == "applications" && segments[1] == "organizations" && method == http.MethodGet) ||
+		(len(segments) == 3 && segments[0] == "applications" && segments[2] == "signing-keys" && method == http.MethodGet) ||
 		(len(segments) == 3 && segments[0] == "applications" && segments[2] == "transition" && method == http.MethodPost)
 }
 

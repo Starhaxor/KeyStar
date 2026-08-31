@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/starloader/backend/internal/domain"
+	"github.com/starloader/backend/internal/security"
 	"github.com/starloader/backend/internal/service"
 	"github.com/starloader/backend/internal/service/adminauth"
 )
@@ -177,19 +178,39 @@ type AdminConsoleStore interface {
 	CreateOrganization(ctx context.Context, name string) (*domain.Organization, error)
 }
 
+// AdminApplicationProvisioner creates an application and its initial active
+// signing key as one atomic operation.
+type AdminApplicationProvisioner interface {
+	Create(context.Context, domain.NewApplication) (*domain.Application, error)
+}
+
+// AdminApplicationSigningKeyReader exposes application signing-key records to
+// the admin API, which maps them to public lifecycle metadata only.
+type AdminApplicationSigningKeyReader interface {
+	ListApplicationSigningKeys(context.Context, string) ([]domain.ApplicationSigningKey, error)
+}
+
+// ApplicationSigner is retained by the runtime composition for the later
+// application-scoped token migration. Current token flows do not call it.
+type ApplicationSigner interface {
+	Sign(context.Context, string, []byte) (security.SignedMessage, error)
+}
+
 // AdminConfig bundles the dependencies of the /v1/admin namespace. The
 // namespace stays disabled unless both Auth and Console are provided.
 type AdminConfig struct {
-	Auth           AdminAuthService
-	Console        AdminConsoleStore
-	BootstrapToken string
-	LicenseHMACKey []byte
-	Product        string
-	MFAIssuer      string
-	AllowedOrigins []string
-	CSRFSecret     []byte
-	CookieSecure   bool
-	SessionTTL     time.Duration
+	Auth                   AdminAuthService
+	Console                AdminConsoleStore
+	ApplicationProvisioner AdminApplicationProvisioner
+	ApplicationSigningKeys AdminApplicationSigningKeyReader
+	BootstrapToken         string
+	LicenseHMACKey         []byte
+	Product                string
+	MFAIssuer              string
+	AllowedOrigins         []string
+	CSRFSecret             []byte
+	CookieSecure           bool
+	SessionTTL             time.Duration
 }
 
 // ServerStore is the persistence boundary of the server-to-server API. It is
