@@ -586,11 +586,11 @@ Deploy the application signing-key foundation in this order:
 
 1. Back up PostgreSQL and the encryption-key configuration.
 2. Set `APPLICATION_KEY_ENCRYPTION_KEYS` and
-   `APPLICATION_KEY_ACTIVE_VERSION`. The key ring is a version map with exact
-   `version=standard-base64` entries; every decoded value must be 32 bytes, and
-   the active version must be a positive version present in that map. Use a
-   secure secret-management system and do not place key material in source
-   control, tickets, or logs.
+   `APPLICATION_KEY_ACTIVE_VERSION`. The key ring uses the exact comma-delimited
+   grammar `<positive-version>=<standard-base64-32-byte-key>[,...]`; every
+   decoded value must be 32 bytes, and the active version must be a positive
+   version present in that map. Use a secure secret-management system and do
+   not place key material in source control, tickets, or logs.
 3. Deploy the binary containing migration 20 and the backfill command.
 4. Run `server migrate up`.
 5. Run `server signing-keys backfill`.

@@ -34,6 +34,30 @@ func TestUpdateProductToInactiveRejectsActiveDependencies(t *testing.T) {
 	}
 }
 
+func TestCreateOrganizationNormalizesStoredName(t *testing.T) {
+	now := time.Now().UTC()
+	db := &lifecycleContractDB{rows: []pgx.Row{contractRow{values: []any{
+		"organization-1", "mixed organization", "mixed organization", domain.OrganizationStatusActive, now, now,
+	}}}}
+
+	organization, err := New(db).CreateOrganization(context.Background(), "  Mixed Organization  ")
+	if err != nil {
+		t.Fatalf("CreateOrganization() error = %v", err)
+	}
+	if organization.Name != "mixed organization" {
+		t.Fatalf("CreateOrganization() name = %q, want normalized lowercase name", organization.Name)
+	}
+	if len(db.queries) != 1 {
+		t.Fatalf("CreateOrganization() query count = %d, want 1", len(db.queries))
+	}
+	if got := db.queries[0].args[0]; got != "mixed organization" {
+		t.Fatalf("CreateOrganization() stored name = %q, want normalized lowercase name", got)
+	}
+	if got := db.queries[0].args[1]; got != "mixed organization" {
+		t.Fatalf("CreateOrganization() slug = %q, want trimmed lowercase slug", got)
+	}
+}
+
 func TestUpdatePlanRejectsReactivationUnderArchivedProduct(t *testing.T) {
 	active := domain.CatalogStatusActive
 	tx := &lifecycleContractTx{rows: []pgx.Row{

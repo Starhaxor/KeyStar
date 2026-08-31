@@ -4022,11 +4022,11 @@ dağıtılmalıdır:
 1. PostgreSQL'i ve encryption-key yapılandırmasını yedekleyin.
 2. `APPLICATION_KEY_ENCRYPTION_KEYS` ve
    `APPLICATION_KEY_ACTIVE_VERSION` değişkenlerini ayarlayın.
-   `APPLICATION_KEY_ENCRYPTION_KEYS`, tam olarak
-   `version=standard-base64` girişlerinden oluşan bir sürüm haritasıdır;
-   her çözülmüş değer 32 byte olmalı, aktif sürüm ise pozitif bir sayı olarak
-   bu haritada bulunmalıdır. Gizli anahtar değerlerini source control, ticket
-   veya loglara koymayın.
+   `APPLICATION_KEY_ENCRYPTION_KEYS`, tam olarak virgülle ayrılmış
+   `<positive-version>=<standard-base64-32-byte-key>[,...]` dilbilgiseline
+   sahip bir sürüm haritasıdır; her çözülmüş değer 32 byte olmalı, aktif sürüm
+   ise pozitif bir sayı olarak bu haritada bulunmalıdır. Gizli anahtar
+   değerlerini source control, ticket veya loglara koymayın.
 3. Migration 20'yi ve backfill komutunu içeren binary'yi deploy edin.
 4. `server migrate up` komutunu çalıştırın.
 5. `server signing-keys backfill` komutunu çalıştırın.

@@ -224,7 +224,7 @@ func (s *Store) CreateOrganization(ctx context.Context, name string) (*domain.Or
 	row := s.db.QueryRow(ctx, `
 		insert into organizations (name, slug)
 		values ($1, $2)
-		returning `+organizationColumns, strings.TrimSpace(name), normalizeSlug(name))
+		returning `+organizationColumns, strings.ToLower(strings.TrimSpace(name)), normalizeSlug(name))
 	organization, err := scanOrganization(row)
 	if err != nil {
 		var pgErr *pgconn.PgError
