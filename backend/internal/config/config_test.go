@@ -74,7 +74,7 @@ func TestLoadRejectsInvalidApplicationKeyEncryptionConfiguration(t *testing.T) {
 
 func TestLoadRejectsReusedApplicationKeyEncryptionKey(t *testing.T) {
 	setRequiredEnvironment(t)
-	reusedKey := "license-key-0123456789abcdef0123456789"
+	reusedKey := "0123456789abcdef0123456789abcdef"
 	t.Setenv("APPLICATION_KEY_ENCRYPTION_KEYS", "1="+base64.StdEncoding.EncodeToString([]byte(reusedKey)))
 	t.Setenv("APPLICATION_KEY_ACTIVE_VERSION", "1")
 
