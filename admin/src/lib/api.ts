@@ -4,6 +4,7 @@
 import type {
   AdminAccount,
   Application,
+  ApplicationSigningKeyMetadata,
   Organization,
   ApplicationCredential,
   AdminIdentity,
@@ -253,6 +254,12 @@ export const api = {
   },
   applications() {
     return request<{ ok: boolean; items: Application[] }>("/v1/admin/applications", { skipApplicationHeader: true });
+  },
+  applicationSigningKeys(applicationId: string) {
+    return request<{ ok: boolean; items: ApplicationSigningKeyMetadata[] }>(
+      `/v1/admin/applications/${applicationId}/signing-keys`,
+      { skipApplicationHeader: true }
+    );
   },
   onboardingProgress(applicationId: string) {
     return request<OnboardingProgress>("/v1/admin/onboarding/progress", { applicationId });

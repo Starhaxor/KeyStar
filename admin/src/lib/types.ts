@@ -275,6 +275,17 @@ export interface Application {
   environment_mode: string;
 }
 
+export interface ApplicationSigningKeyMetadata {
+  kid: string;
+  algorithm: "Ed25519";
+  status: "pending" | "active" | "retiring" | "revoked";
+  public_key: string;
+  created_at: string;
+  activated_at: string | null;
+  retire_at: string | null;
+  revoked_at: string | null;
+}
+
 export type CatalogStatus = "active" | "inactive" | "archived";
 
 export interface DeviceBanRecord {
