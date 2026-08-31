@@ -7,10 +7,10 @@ import (
 	"github.com/starloader/backend/migrations"
 )
 
-func TestVersionedMigrationsIncludeSharedRateLimits(t *testing.T) {
+func TestVersionedMigrationsIncludeApplicationSigningKeys(t *testing.T) {
 	last := versionedMigrations[len(versionedMigrations)-1]
-	if last.version != 19 || last.up != "000019_admin_bootstrap_state.up.sql" {
-		t.Fatalf("latest migration = %#v, want admin bootstrap state migration 19", last)
+	if last.version != 20 || last.up != "000020_application_signing_keys.up.sql" {
+		t.Fatalf("latest migration = %#v, want application signing keys migration 20", last)
 	}
 }
 

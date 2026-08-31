@@ -105,6 +105,92 @@ func TestSchemaRejectsInvalidStatusesAndUnprotectedValues(t *testing.T) {
 	}
 }
 
+func TestApplicationSigningKeyConstraints(t *testing.T) {
+	ctx := context.Background()
+	pool := openTestPool(t, ctx)
+	resetAndMigrate(t, ctx, pool)
+
+	const insertKey = `
+		insert into application_signing_keys (
+			kid, application_id, algorithm, public_key, encrypted_private_key,
+			encryption_nonce, encryption_key_version, status, activated_at, retire_at, revoked_at
+		) values (
+			$1, (select id from applications where slug = 'starloader'), 'Ed25519',
+			$2, $3, $4, 1, $5, $6, $7, $8
+		)`
+
+	validPublicKey := bytes.Repeat([]byte{0x11}, 32)
+	validEncryptedPrivateKey := bytes.Repeat([]byte{0x22}, 48)
+	validNonce := bytes.Repeat([]byte{0x33}, 12)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	invalidWrites := []struct {
+		name                string
+		kid                 string
+		publicKey           []byte
+		encryptedPrivateKey []byte
+		nonce               []byte
+		status              string
+		activatedAt         any
+		retireAt            any
+		revokedAt           any
+	}{
+		{name: "public key size", kid: "ksk_0000000000000000000001", publicKey: bytes.Repeat([]byte{0x11}, 31), encryptedPrivateKey: validEncryptedPrivateKey, nonce: validNonce, status: "pending"},
+		{name: "encrypted private key size", kid: "ksk_0000000000000000000002", publicKey: validPublicKey, encryptedPrivateKey: bytes.Repeat([]byte{0x22}, 47), nonce: validNonce, status: "pending"},
+		{name: "encryption nonce size", kid: "ksk_0000000000000000000003", publicKey: validPublicKey, encryptedPrivateKey: validEncryptedPrivateKey, nonce: bytes.Repeat([]byte{0x33}, 11), status: "pending"},
+		{name: "invalid status", kid: "ksk_0000000000000000000004", publicKey: validPublicKey, encryptedPrivateKey: validEncryptedPrivateKey, nonce: validNonce, status: "unknown"},
+		{name: "pending with activation timestamp", kid: "ksk_0000000000000000000005", publicKey: validPublicKey, encryptedPrivateKey: validEncryptedPrivateKey, nonce: validNonce, status: "pending", activatedAt: now},
+		{name: "pending with retirement timestamp", kid: "ksk_0000000000000000000006", publicKey: validPublicKey, encryptedPrivateKey: validEncryptedPrivateKey, nonce: validNonce, status: "pending", retireAt: now},
+		{name: "pending with revocation timestamp", kid: "ksk_0000000000000000000007", publicKey: validPublicKey, encryptedPrivateKey: validEncryptedPrivateKey, nonce: validNonce, status: "pending", revokedAt: now},
+		{name: "active without activation", kid: "ksk_0000000000000000000008", publicKey: validPublicKey, encryptedPrivateKey: validEncryptedPrivateKey, nonce: validNonce, status: "active"},
+		{name: "retiring without retirement", kid: "ksk_0000000000000000000009", publicKey: validPublicKey, encryptedPrivateKey: validEncryptedPrivateKey, nonce: validNonce, status: "retiring", activatedAt: now},
+		{name: "revoked without revocation", kid: "ksk_0000000000000000000010", publicKey: validPublicKey, encryptedPrivateKey: validEncryptedPrivateKey, nonce: validNonce, status: "revoked"},
+	}
+
+	for _, tt := range invalidWrites {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := pool.Exec(ctx, insertKey,
+				tt.kid,
+				tt.publicKey,
+				tt.encryptedPrivateKey,
+				tt.nonce,
+				tt.status,
+				tt.activatedAt,
+				tt.retireAt,
+				tt.revokedAt,
+			)
+			if err == nil {
+				t.Fatal("invalid application signing key unexpectedly succeeded")
+			}
+		})
+	}
+
+	if _, err := pool.Exec(ctx, insertKey,
+		"ksk_0000000000000000000011",
+		validPublicKey,
+		validEncryptedPrivateKey,
+		validNonce,
+		"active",
+		now,
+		nil,
+		nil,
+	); err != nil {
+		t.Fatalf("create first active application signing key: %v", err)
+	}
+	if _, err := pool.Exec(ctx, insertKey,
+		"ksk_0000000000000000000012",
+		validPublicKey,
+		validEncryptedPrivateKey,
+		validNonce,
+		"active",
+		now,
+		nil,
+		nil,
+	); err == nil {
+		t.Fatal("second active application signing key unexpectedly succeeded")
+	}
+}
+
 func TestMigrationDownAndUp(t *testing.T) {
 	ctx := context.Background()
 	pool := openTestPool(t, ctx)
