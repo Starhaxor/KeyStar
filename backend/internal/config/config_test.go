@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/base64"
 	"testing"
 	"time"
@@ -18,6 +19,8 @@ func TestLoadRequiresEverySecuritySetting(t *testing.T) {
 		"ADMIN_SESSION_SECRET",
 		"ADMIN_MFA_ENCRYPTION_KEY",
 		"ADMIN_BOOTSTRAP_TOKEN",
+		"APPLICATION_KEY_ENCRYPTION_KEYS",
+		"APPLICATION_KEY_ACTIVE_VERSION",
 	} {
 		t.Run(name, func(t *testing.T) {
 			setRequiredEnvironment(t)
@@ -26,6 +29,57 @@ func TestLoadRequiresEverySecuritySetting(t *testing.T) {
 				t.Fatalf("Load() accepted missing %s", name)
 			}
 		})
+	}
+}
+
+func TestLoadParsesApplicationKeyEncryptionKeys(t *testing.T) {
+	setRequiredEnvironment(t)
+	first := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x11}, 32))
+	second := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x22}, 32))
+	t.Setenv("APPLICATION_KEY_ENCRYPTION_KEYS", "1="+first+",2="+second)
+	t.Setenv("APPLICATION_KEY_ACTIVE_VERSION", "2")
+
+	configuration, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configuration.ApplicationKeyActiveVersion != 2 || !bytes.Equal(configuration.ApplicationKeyEncryptionKeys[2], bytes.Repeat([]byte{0x22}, 32)) {
+		t.Fatal("application signing-key configuration was not parsed correctly")
+	}
+}
+
+func TestLoadRejectsInvalidApplicationKeyEncryptionConfiguration(t *testing.T) {
+	validKey := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x11}, 32))
+	shortKey := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x11}, 31))
+	for _, change := range []struct {
+		name, keys, activeVersion string
+	}{
+		{"duplicate versions", "1=" + validKey + ",1=" + validKey, "1"},
+		{"zero version", "0=" + validKey, "1"},
+		{"negative version", "-1=" + validKey, "1"},
+		{"malformed base64", "1=not-base64!", "1"},
+		{"wrong decoded length", "1=" + shortKey, "1"},
+		{"missing active version", "1=" + validKey, "2"},
+	} {
+		t.Run(change.name, func(t *testing.T) {
+			setRequiredEnvironment(t)
+			t.Setenv("APPLICATION_KEY_ENCRYPTION_KEYS", change.keys)
+			t.Setenv("APPLICATION_KEY_ACTIVE_VERSION", change.activeVersion)
+			if _, err := Load(); err == nil {
+				t.Fatalf("Load() accepted invalid application key configuration %q", change.name)
+			}
+		})
+	}
+}
+
+func TestLoadRejectsReusedApplicationKeyEncryptionKey(t *testing.T) {
+	setRequiredEnvironment(t)
+	reusedKey := "license-key-0123456789abcdef0123456789"
+	t.Setenv("APPLICATION_KEY_ENCRYPTION_KEYS", "1="+base64.StdEncoding.EncodeToString([]byte(reusedKey)))
+	t.Setenv("APPLICATION_KEY_ACTIVE_VERSION", "1")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() accepted an application encryption key reused as another secret")
 	}
 }
 
@@ -218,6 +272,8 @@ func setRequiredEnvironment(t *testing.T) {
 		{"ADMIN_SESSION_SECRET", "session-key-0123456789abcdef0123456789"},
 		{"ADMIN_MFA_ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef"},
 		{"ADMIN_BOOTSTRAP_TOKEN", "bootstrap-token-0123456789abcdef012345"},
+		{"APPLICATION_KEY_ENCRYPTION_KEYS", "1=" + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x33}, 32))},
+		{"APPLICATION_KEY_ACTIVE_VERSION", "1"},
 	} {
 		t.Setenv(setting.name, setting.value)
 	}

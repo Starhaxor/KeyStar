@@ -2,9 +2,11 @@ package config
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -26,6 +28,8 @@ var requiredEnvironmentVariables = [...]string{
 	"ADMIN_SESSION_SECRET",
 	"ADMIN_MFA_ENCRYPTION_KEY",
 	"ADMIN_BOOTSTRAP_TOKEN",
+	"APPLICATION_KEY_ENCRYPTION_KEYS",
+	"APPLICATION_KEY_ACTIVE_VERSION",
 }
 
 // Config contains the values required to operate the license service. Secrets
@@ -48,9 +52,11 @@ type Config struct {
 	AdminCookieSecure     bool
 	// ClientCredentialsRequired keeps the public client API in strict mode:
 	// login and device verification require a publishable API key.
-	ClientCredentialsRequired bool
-	MetricsEnabled            bool
-	MetricsToken              string
+	ClientCredentialsRequired    bool
+	MetricsEnabled               bool
+	MetricsToken                 string
+	ApplicationKeyEncryptionKeys map[int][]byte
+	ApplicationKeyActiveVersion  int
 }
 
 // Load reads the complete configuration, refusing to start when any required
@@ -69,6 +75,17 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	values["ADMIN_MFA_ENCRYPTION_KEY"] = string(mfaKey)
+	applicationKeyEncryptionKeys, err := parseVersionedEncryptionKeys(values["APPLICATION_KEY_ENCRYPTION_KEYS"])
+	if err != nil {
+		return Config{}, err
+	}
+	applicationKeyActiveVersion, err := strconv.Atoi(values["APPLICATION_KEY_ACTIVE_VERSION"])
+	if err != nil || applicationKeyActiveVersion <= 0 {
+		return Config{}, errors.New("APPLICATION_KEY_ACTIVE_VERSION must be a positive integer")
+	}
+	if _, exists := applicationKeyEncryptionKeys[applicationKeyActiveVersion]; !exists {
+		return Config{}, errors.New("APPLICATION_KEY_ACTIVE_VERSION must reference a configured key")
+	}
 	secretNames := []string{"LICENSE_HMAC_KEY", "HARDWARE_HMAC_KEY", "ADMIN_SESSION_SECRET", "ADMIN_MFA_ENCRYPTION_KEY", "ADMIN_BOOTSTRAP_TOKEN"}
 	seenSecrets := make(map[string]string, len(secretNames))
 	for _, name := range secretNames {
@@ -79,6 +96,14 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("%s and %s must differ", previous, name)
 		}
 		seenSecrets[values[name]] = name
+	}
+	for version, key := range applicationKeyEncryptionKeys {
+		name := fmt.Sprintf("APPLICATION_KEY_ENCRYPTION_KEYS version %d", version)
+		keyValue := string(key)
+		if previous, exists := seenSecrets[keyValue]; exists {
+			return Config{}, fmt.Errorf("%s and %s must differ", previous, name)
+		}
+		seenSecrets[keyValue] = name
 	}
 	loginTimeout := defaultLoginTimeout
 	if configuredTimeout := strings.TrimSpace(os.Getenv("LOGIN_TIMEOUT")); configuredTimeout != "" {
@@ -147,25 +172,53 @@ func Load() (Config, error) {
 	}
 
 	return Config{
-		DatabaseURL:               values["DATABASE_URL"],
-		LicenseHMACKey:            values["LICENSE_HMAC_KEY"],
-		HardwareHMACKey:           values["HARDWARE_HMAC_KEY"],
-		Ed25519PrivateKey:         values["ED25519_PRIVATE_KEY"],
-		LicenseIssuer:             values["LICENSE_ISSUER"],
-		LicenseAudience:           values["LICENSE_AUDIENCE"],
-		Product:                   values["PRODUCT"],
-		LoginTimeout:              loginTimeout,
-		AdminConsoleEnabled:       adminConsoleEnabled,
-		AdminSessionSecret:        values["ADMIN_SESSION_SECRET"],
-		AdminMFAEncryptionKey:     values["ADMIN_MFA_ENCRYPTION_KEY"],
-		AdminBootstrapToken:       values["ADMIN_BOOTSTRAP_TOKEN"],
-		AdminAllowedOrigins:       adminAllowedOrigins,
-		AdminSessionTTL:           adminSessionTTL,
-		AdminCookieSecure:         adminCookieSecure,
-		ClientCredentialsRequired: true,
-		MetricsEnabled:            metricsEnabled,
-		MetricsToken:              metricsToken,
+		DatabaseURL:                  values["DATABASE_URL"],
+		LicenseHMACKey:               values["LICENSE_HMAC_KEY"],
+		HardwareHMACKey:              values["HARDWARE_HMAC_KEY"],
+		Ed25519PrivateKey:            values["ED25519_PRIVATE_KEY"],
+		LicenseIssuer:                values["LICENSE_ISSUER"],
+		LicenseAudience:              values["LICENSE_AUDIENCE"],
+		Product:                      values["PRODUCT"],
+		LoginTimeout:                 loginTimeout,
+		AdminConsoleEnabled:          adminConsoleEnabled,
+		AdminSessionSecret:           values["ADMIN_SESSION_SECRET"],
+		AdminMFAEncryptionKey:        values["ADMIN_MFA_ENCRYPTION_KEY"],
+		AdminBootstrapToken:          values["ADMIN_BOOTSTRAP_TOKEN"],
+		AdminAllowedOrigins:          adminAllowedOrigins,
+		AdminSessionTTL:              adminSessionTTL,
+		AdminCookieSecure:            adminCookieSecure,
+		ClientCredentialsRequired:    true,
+		MetricsEnabled:               metricsEnabled,
+		MetricsToken:                 metricsToken,
+		ApplicationKeyEncryptionKeys: applicationKeyEncryptionKeys,
+		ApplicationKeyActiveVersion:  applicationKeyActiveVersion,
 	}, nil
+}
+
+func parseVersionedEncryptionKeys(value string) (map[int][]byte, error) {
+	keys := make(map[int][]byte)
+	for _, entry := range strings.Split(value, ",") {
+		pair := strings.SplitN(strings.TrimSpace(entry), "=", 2)
+		if len(pair) != 2 {
+			return nil, errors.New("APPLICATION_KEY_ENCRYPTION_KEYS has invalid syntax")
+		}
+		version, err := strconv.Atoi(pair[0])
+		if err != nil || version <= 0 {
+			return nil, errors.New("APPLICATION_KEY_ENCRYPTION_KEYS contains an invalid version")
+		}
+		decoded, err := base64.StdEncoding.Strict().DecodeString(pair[1])
+		if err != nil || len(decoded) != 32 {
+			return nil, errors.New("APPLICATION_KEY_ENCRYPTION_KEYS values must decode to 32 bytes")
+		}
+		if _, duplicate := keys[version]; duplicate {
+			return nil, errors.New("APPLICATION_KEY_ENCRYPTION_KEYS contains a duplicate version")
+		}
+		keys[version] = append([]byte(nil), decoded...)
+	}
+	if len(keys) == 0 {
+		return nil, errors.New("APPLICATION_KEY_ENCRYPTION_KEYS is empty")
+	}
+	return keys, nil
 }
 
 func decodeMFAEncryptionKey(value string) ([]byte, error) {
