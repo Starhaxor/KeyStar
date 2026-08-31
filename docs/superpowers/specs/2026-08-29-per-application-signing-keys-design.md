@@ -55,15 +55,15 @@ A new migration creates `application_signing_keys` with:
 - `encryption_key_version integer not null`
 - `status text not null`, restricted to `pending`, `active`, `retiring`, or `revoked`
 - `created_at timestamptz not null`
-- `activated_at timestamptz not null`
+- `activated_at timestamptz`, null while a key is `pending` and required after activation
 - `retire_at timestamptz`
 - `revoked_at timestamptz`
 
-A partial unique index permits exactly one `active` key per application. Database constraints enforce valid lifecycle timestamps. A revoked key can never return to `active`.
+A partial unique index permits exactly one `active` key per application. Database constraints require `pending` keys to have no activation, retirement, or revocation timestamp; `active` keys to have `activated_at`; `retiring` keys to have `activated_at` and `retire_at`; and `revoked` keys to have `revoked_at`. A revoked key can never return to `active`.
 
 The encrypted value contains the 32-byte Ed25519 seed, not the expanded 64-byte private key. AES-GCM additional authenticated data includes a versioned context string, `application_id`, `kid`, algorithm, and encryption-key version. Moving ciphertext to another application or changing its metadata therefore makes decryption fail.
 
-The key-encryption key is a versioned 32-byte random value supplied as strict base64. Configuration loading fails closed if the active version is missing or malformed. Old encryption-key versions may remain temporarily available solely to decrypt rows during key-encryption-key rotation. Secrets and decrypted key bytes must never be logged and should be retained in memory only for the signing operation.
+Key-encryption keys are versioned 32-byte random values supplied as strict standard Base64 in `APPLICATION_KEY_ENCRYPTION_KEYS`, using the exact comma-separated form `1=<base64>,2=<base64>`. `APPLICATION_KEY_ACTIVE_VERSION` selects one positive integer version present in that map. Configuration loading fails closed on duplicate versions, malformed Base64, a decoded size other than 32 bytes, or a missing active version. Old versions remain available solely to decrypt existing rows during key-encryption-key rotation. Secrets and decrypted key bytes must never be logged and should be retained in memory only for the signing operation.
 
 ## Key lifecycle
 
