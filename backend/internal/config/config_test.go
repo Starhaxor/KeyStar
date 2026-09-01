@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"encoding/base64"
 	"testing"
 	"time"
@@ -80,6 +81,50 @@ func TestLoadRejectsReusedApplicationKeyEncryptionKey(t *testing.T) {
 
 	if _, err := Load(); err == nil {
 		t.Fatal("Load() accepted an application encryption key reused as another secret")
+	}
+}
+
+func TestLoadRejectsApplicationKeyEncryptionKeyReusedAsLegacyEd25519Seed(t *testing.T) {
+	seed := bytes.Repeat([]byte{0x71}, ed25519.SeedSize)
+	for _, legacyKey := range []struct {
+		name  string
+		value []byte
+	}{
+		{name: "seed encoding", value: seed},
+		{name: "expanded private key encoding", value: ed25519.NewKeyFromSeed(seed)},
+	} {
+		t.Run(legacyKey.name, func(t *testing.T) {
+			setRequiredEnvironment(t)
+			t.Setenv("ED25519_PRIVATE_KEY", base64.StdEncoding.EncodeToString(legacyKey.value))
+			t.Setenv("APPLICATION_KEY_ENCRYPTION_KEYS", "1="+base64.StdEncoding.EncodeToString(seed))
+
+			if _, err := Load(); err == nil {
+				t.Fatal("Load() accepted an application encryption key reused as the legacy Ed25519 seed")
+			}
+		})
+	}
+}
+
+func TestLoadRejectsApplicationKeyEncryptionKeyReusedAsMetricsToken(t *testing.T) {
+	reusedKey := "metrics-key-0123456789abcdef0123"
+	setRequiredEnvironment(t)
+	t.Setenv("ENABLE_METRICS", "true")
+	t.Setenv("METRICS_TOKEN", reusedKey)
+	t.Setenv("APPLICATION_KEY_ENCRYPTION_KEYS", "1="+base64.StdEncoding.EncodeToString([]byte(reusedKey)))
+
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() accepted an application encryption key reused as METRICS_TOKEN")
+	}
+}
+
+func TestLoadRejectsLegacyEd25519SeedReusedAsRawRuntimeSecret(t *testing.T) {
+	seed := bytes.Repeat([]byte{0x72}, ed25519.SeedSize)
+	setRequiredEnvironment(t)
+	t.Setenv("ED25519_PRIVATE_KEY", base64.StdEncoding.EncodeToString(seed))
+	t.Setenv("LICENSE_HMAC_KEY", string(seed))
+
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() accepted the legacy Ed25519 seed reused as LICENSE_HMAC_KEY")
 	}
 }
 
@@ -265,7 +310,7 @@ func setRequiredEnvironment(t *testing.T) {
 		{"DATABASE_URL", "postgres://user:pass@localhost:5432/starloader"},
 		{"LICENSE_HMAC_KEY", "license-key-0123456789abcdef0123456789"},
 		{"HARDWARE_HMAC_KEY", "hardware-key-0123456789abcdef01234567"},
-		{"ED25519_PRIVATE_KEY", "ed25519-private-key"},
+		{"ED25519_PRIVATE_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x44}, ed25519.SeedSize))},
 		{"LICENSE_ISSUER", "starloader"},
 		{"LICENSE_AUDIENCE", "starloader-client"},
 		{"PRODUCT", "StarLoader"},

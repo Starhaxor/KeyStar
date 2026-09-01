@@ -33,6 +33,8 @@ jobs:
             'ADMIN_SESSION_SECRET',
             'ADMIN_BOOTSTRAP_TOKEN',
             'ADMIN_MFA_ENCRYPTION_KEY',
+            'APPLICATION_KEY_ENCRYPTION_KEYS',
+            'APPLICATION_KEY_ACTIVE_VERSION',
             'TEST_DATABASE_URL'
           )
           $missing = @($requiredCommands + $requiredEnvironment | Where-Object { -not $readme.Contains($_) })

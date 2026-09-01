@@ -2,10 +2,32 @@ package main
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/starloader/backend/internal/domain"
 )
+
+type fakeFixtureApplicationProvisioner struct {
+	backfillErr error
+	createErr   error
+	calls       []string
+	inputs      []domain.NewApplication
+}
+
+func (fake *fakeFixtureApplicationProvisioner) Backfill(context.Context) (int, error) {
+	fake.calls = append(fake.calls, "backfill")
+	return 1, fake.backfillErr
+}
+
+func (fake *fakeFixtureApplicationProvisioner) Create(_ context.Context, input domain.NewApplication) (*domain.Application, error) {
+	fake.calls = append(fake.calls, "create")
+	fake.inputs = append(fake.inputs, input)
+	if fake.createErr != nil {
+		return nil, fake.createErr
+	}
+	return &domain.Application{ID: input.Slug + "-id", Name: input.Name, Slug: input.Slug}, nil
+}
 
 type fakeDefaultApplicationFinder struct {
 	application *domain.Application
@@ -101,5 +123,36 @@ func TestValidateDedicatedDatabaseURL(t *testing.T) {
 				t.Fatalf("validateDedicatedDatabaseURL() error = %v", err)
 			}
 		})
+	}
+}
+
+func TestProvisionFixtureApplicationsBackfillsDefaultBeforeCreatingApplications(t *testing.T) {
+	provisioner := &fakeFixtureApplicationProvisioner{}
+
+	alpha, beta, err := provisionFixtureApplications(context.Background(), provisioner, "organization-id")
+	if err != nil {
+		t.Fatalf("provisionFixtureApplications() error = %v", err)
+	}
+	if len(provisioner.calls) != 3 || provisioner.calls[0] != "backfill" || provisioner.calls[1] != "create" || provisioner.calls[2] != "create" {
+		t.Fatalf("provisioning calls = %#v, want backfill followed by two creates", provisioner.calls)
+	}
+	if len(provisioner.inputs) != 2 || provisioner.inputs[0].OrganizationID != "organization-id" || provisioner.inputs[0].Slug != "e2e-alpha" || provisioner.inputs[1].Slug != "e2e-beta" {
+		t.Fatalf("provisioning inputs = %#v", provisioner.inputs)
+	}
+	if alpha.ID != "e2e-alpha-id" || beta.ID != "e2e-beta-id" {
+		t.Fatalf("provisioned applications = %#v, %#v", alpha, beta)
+	}
+}
+
+func TestProvisionFixtureApplicationsStopsWhenDefaultBackfillFails(t *testing.T) {
+	backfillErr := errors.New("backfill failed")
+	provisioner := &fakeFixtureApplicationProvisioner{backfillErr: backfillErr}
+
+	_, _, err := provisionFixtureApplications(context.Background(), provisioner, "organization-id")
+	if !errors.Is(err, backfillErr) {
+		t.Fatalf("provisionFixtureApplications() error = %v, want %v", err, backfillErr)
+	}
+	if len(provisioner.calls) != 1 || provisioner.calls[0] != "backfill" {
+		t.Fatalf("provisioning calls after backfill failure = %#v", provisioner.calls)
 	}
 }

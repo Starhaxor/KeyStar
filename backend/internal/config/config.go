@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/starloader/backend/internal/security"
 )
 
 const (
@@ -86,8 +88,29 @@ func Load() (Config, error) {
 	if _, exists := applicationKeyEncryptionKeys[applicationKeyActiveVersion]; !exists {
 		return Config{}, errors.New("APPLICATION_KEY_ACTIVE_VERSION must reference a configured key")
 	}
+	legacyPrivateKey, err := security.ParseEd25519PrivateKey(values["ED25519_PRIVATE_KEY"])
+	if err != nil {
+		return Config{}, err
+	}
+	legacySeed := legacyPrivateKey.Seed()
+	clear(legacyPrivateKey)
+	defer clear(legacySeed)
+
+	metricsEnabled := false
+	switch configuredMetrics := strings.ToLower(strings.TrimSpace(os.Getenv("ENABLE_METRICS"))); configuredMetrics {
+	case "", "false", "0":
+	case "true", "1":
+		metricsEnabled = true
+	default:
+		return Config{}, fmt.Errorf("ENABLE_METRICS must be true or false")
+	}
+	metricsToken := strings.TrimSpace(os.Getenv("METRICS_TOKEN"))
+	if metricsEnabled && len([]byte(metricsToken)) < 32 {
+		return Config{}, fmt.Errorf("METRICS_TOKEN must be at least 32 bytes when metrics are enabled")
+	}
+
 	secretNames := []string{"LICENSE_HMAC_KEY", "HARDWARE_HMAC_KEY", "ADMIN_SESSION_SECRET", "ADMIN_MFA_ENCRYPTION_KEY", "ADMIN_BOOTSTRAP_TOKEN"}
-	seenSecrets := make(map[string]string, len(secretNames))
+	seenSecrets := make(map[string]string, len(secretNames)+3+len(applicationKeyEncryptionKeys))
 	for _, name := range secretNames {
 		if len([]byte(values[name])) < 32 {
 			return Config{}, fmt.Errorf("%s must be at least 32 bytes", name)
@@ -96,6 +119,17 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("%s and %s must differ", previous, name)
 		}
 		seenSecrets[values[name]] = name
+	}
+	legacySeedValue := string(legacySeed)
+	if previous, exists := seenSecrets[legacySeedValue]; exists {
+		return Config{}, fmt.Errorf("%s and ED25519_PRIVATE_KEY seed must differ", previous)
+	}
+	seenSecrets[legacySeedValue] = "ED25519_PRIVATE_KEY seed"
+	if metricsToken != "" {
+		if previous, exists := seenSecrets[metricsToken]; exists {
+			return Config{}, fmt.Errorf("%s and METRICS_TOKEN must differ", previous)
+		}
+		seenSecrets[metricsToken] = "METRICS_TOKEN"
 	}
 	for version, key := range applicationKeyEncryptionKeys {
 		name := fmt.Sprintf("APPLICATION_KEY_ENCRYPTION_KEYS version %d", version)
@@ -158,19 +192,6 @@ func Load() (Config, error) {
 	default:
 		return Config{}, fmt.Errorf("ADMIN_CONSOLE_ENABLED must be true or false")
 	}
-	metricsEnabled := false
-	switch configuredMetrics := strings.ToLower(strings.TrimSpace(os.Getenv("ENABLE_METRICS"))); configuredMetrics {
-	case "", "false", "0":
-	case "true", "1":
-		metricsEnabled = true
-	default:
-		return Config{}, fmt.Errorf("ENABLE_METRICS must be true or false")
-	}
-	metricsToken := strings.TrimSpace(os.Getenv("METRICS_TOKEN"))
-	if metricsEnabled && len([]byte(metricsToken)) < 32 {
-		return Config{}, fmt.Errorf("METRICS_TOKEN must be at least 32 bytes when metrics are enabled")
-	}
-
 	return Config{
 		DatabaseURL:                  values["DATABASE_URL"],
 		LicenseHMACKey:               values["LICENSE_HMAC_KEY"],

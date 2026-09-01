@@ -597,21 +597,57 @@ git commit -m "docs: document application signing-key foundation"
 
 ## Verification Evidence
 
-Date: 2026-08-31
+Date: 2026-09-01
 
 ### Formatting and static verification
 
-- `cd backend; gofmt -w internal/config/*.go internal/domain/application_signing_key.go internal/security/application_key_cipher.go internal/security/application_key_cipher_test.go internal/security/application_signer.go internal/security/application_signer_test.go internal/store/application_signing_keys.go internal/store/applications.go internal/service/application_provisioning.go internal/service/application_provisioning_test.go internal/httpapi/types.go internal/httpapi/adminapi/admin_applications.go internal/httpapi/adminapi/admin_lifecycle_test.go cmd/server/main.go cmd/server/main_test.go` — exit 1 under PowerShell because `gofmt` received the literal `internal/config/*.go` path. The resolved-file equivalent exited 0.
-- `cd backend; go vet ./...` — exit 0.
-- `cd backend; go test -p 1 ./...` — exit 1 because the integration package requires `TEST_DATABASE_URL`; all non-integration packages passed.
+- Windows-safe formatting command — exit 0, formatting 18 explicitly resolved files:
+
+  ```powershell
+  $goFiles = @(
+    Get-ChildItem -LiteralPath 'backend\internal\config' -Filter '*.go' -File
+    Get-Item -LiteralPath 'backend\internal\domain\application_signing_key.go'
+    Get-Item -LiteralPath 'backend\internal\security\application_key_cipher.go'
+    Get-Item -LiteralPath 'backend\internal\security\application_key_cipher_test.go'
+    Get-Item -LiteralPath 'backend\internal\security\application_signer.go'
+    Get-Item -LiteralPath 'backend\internal\security\application_signer_test.go'
+    Get-Item -LiteralPath 'backend\internal\store\application_signing_keys.go'
+    Get-Item -LiteralPath 'backend\internal\store\applications.go'
+    Get-Item -LiteralPath 'backend\internal\service\application_provisioning.go'
+    Get-Item -LiteralPath 'backend\internal\service\application_provisioning_test.go'
+    Get-Item -LiteralPath 'backend\internal\httpapi\types.go'
+    Get-Item -LiteralPath 'backend\internal\httpapi\adminapi\admin_applications.go'
+    Get-Item -LiteralPath 'backend\internal\httpapi\adminapi\admin_lifecycle_test.go'
+    Get-Item -LiteralPath 'backend\cmd\server\main.go'
+    Get-Item -LiteralPath 'backend\cmd\server\main_test.go'
+    Get-Item -LiteralPath 'backend\cmd\e2e-fixture\main.go'
+    Get-Item -LiteralPath 'backend\cmd\e2e-fixture\main_test.go'
+  ) | Sort-Object -Property FullName -Unique
+  foreach ($goFile in $goFiles) {
+    gofmt -w $goFile.FullName
+    if ($LASTEXITCODE -ne 0) { throw "gofmt failed for $($goFile.FullName)" }
+  }
+  ```
+
+- `cd backend; $env:TEST_DATABASE_URL = 'postgres://keystar_test:keystar_test@127.0.0.1:55432/keystar_test?sslmode=disable'; go vet ./...; go test -p 1 ./... -count=1` — exit 0; every Go package passed, including black-box and PostgreSQL integration packages.
+- `cd backend; govulncheck ./...` — exit 0; no called vulnerabilities found.
+- `cd backend; gosec -quiet -severity high -confidence high ./...` — exit 0 with no findings.
 
 ### Dedicated PostgreSQL integration gate
 
-- `docker compose up -d db` — exit 0; the dedicated PostgreSQL container started.
-- `./scripts/test-integration.ps1` — exit 1. The runner reached PostgreSQL, but five application-signing-key provisioning tests failed while creating an organization because the database rejected the normalized organization name with `organizations_name_normalized_check`.
+- `docker compose up -d db` — exit 0; the dedicated PostgreSQL container was healthy on port 55432.
+- `./scripts/test-integration.ps1` — exit 0; `github.com/starloader/backend/tests/integration` passed in 19.166 seconds against `keystar_test`.
+- `cd backend; $env:TEST_DATABASE_URL = 'postgres://keystar_test:keystar_test@127.0.0.1:55432/keystar_test?sslmode=disable'; go run ./cmd/e2e-fixture reset; go run ./cmd/e2e-fixture seed` followed by a database count query — exit 0; the clean fixture contained 3 applications, 3 active application signing keys, and 0 applications without an active key.
+
+### Admin and browser verification
+
+- `cd admin; npm audit --omit=dev --audit-level=high; npm test; npm run lint; npm run build` — exit 0; 0 vulnerabilities, 32 test files and 103 tests passed, lint passed, and the production build completed.
+- `cd admin; npm run e2e` — exit 1 after backend and admin readiness; 6 tests passed and `lifecycle-onboarding.spec.ts` failed because license creation completed and redirected to the overview before the test observed the one-time-secret dialog. A focused rerun reproduced the same single failure. The original missing `APPLICATION_KEY_ENCRYPTION_KEYS` startup failure is fixed.
+- The local Docker Desktop engine stopped once during verification because of a stale model-runner socket. `docker desktop disable model-runner; docker desktop start` restored the engine; subsequent PostgreSQL, backend, and browser startup checks reached the application normally.
 
 ### Secret handling and worktree checks
 
-- `rg -n "EncryptedPrivateKey|EncryptionNonce|ApplicationKeyEncryptionKeys" backend/internal/httpapi admin docs/openapi.yaml` — exit 0; the only match was test fixture setup in `backend/internal/httpapi/adminapi/admin_lifecycle_test.go`, not a response mapping.
+- `rg -n "EncryptedPrivateKey|EncryptionNonce|ApplicationKeyEncryptionKeys|APPLICATION_KEY_ENCRYPTION_KEYS|APPLICATION_KEY_ACTIVE_VERSION" backend/internal/httpapi admin docs/openapi.yaml README.md .github/workflows/verify.yml` — exit 0; private fields appear only in the admin handler test fixture and are not response-mapped. Required variable references are present in the quick start, browser test environment, and documentation gate.
+- The README release-gate PowerShell check from `.github/workflows/verify.yml` — exit 0 with both application-key variables included.
 - `git diff --check` — exit 0; no whitespace errors.
-- `git status --short` — exit 0; before documentation edits the worktree was clean; afterward it contained only the three scoped documentation files.
+- Initial `git rev-parse --short HEAD; git status --short` — `e038340` and a clean tracked worktree before this final fix wave.

@@ -27,6 +27,9 @@ const backendEnvironment = {
   ADMIN_SESSION_SECRET: "e2e-session-key-0123456789abcdef0123456789",
   ADMIN_BOOTSTRAP_TOKEN: "e2e-bootstrap-token-0123456789abcdef012345",
   ADMIN_MFA_ENCRYPTION_KEY: "e2e-mfa-0123456789abcdef01234567",
+  APPLICATION_KEY_ENCRYPTION_KEYS:
+    "1=bm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm4=",
+  APPLICATION_KEY_ACTIVE_VERSION: "1",
   ADMIN_ALLOWED_ORIGIN: adminURL,
   ADMIN_COOKIE_SECURE: "false",
   SERVER_ADDR: `127.0.0.1:${backendPort}`,

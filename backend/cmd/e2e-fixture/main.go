@@ -4,7 +4,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	cryptorand "crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -16,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/starloader/backend/internal/domain"
 	"github.com/starloader/backend/internal/security"
+	"github.com/starloader/backend/internal/service"
 	"github.com/starloader/backend/internal/store"
 )
 
@@ -26,6 +29,12 @@ const (
 	adminTOTPSecret       = "JBSWY3DPEHPK3PXP"
 	unenrolledAdminEmail  = "e2e-enrollment@keystar.test"
 )
+
+var e2eApplicationKeyEncryptionKeys = map[int][]byte{
+	1: bytes.Repeat([]byte{0x6e}, 32),
+}
+
+const e2eApplicationKeyActiveVersion = 1
 
 type applicationFixture struct {
 	ID            string `json:"id"`
@@ -172,17 +181,18 @@ func seedDatabase(ctx context.Context, repository *store.Store) (fixtureData, er
 	if err != nil {
 		return fixture, fmt.Errorf("create E2E organization: %w", err)
 	}
-	alpha, err := repository.CreateApplication(ctx, domain.NewApplication{
-		OrganizationID: organization.ID, Name: "E2E Alpha", Slug: "e2e-alpha",
-	})
+	keyCipher, err := security.NewApplicationKeyCipher(
+		e2eApplicationKeyEncryptionKeys,
+		e2eApplicationKeyActiveVersion,
+		cryptorand.Reader,
+	)
 	if err != nil {
-		return fixture, fmt.Errorf("create E2E alpha application: %w", err)
+		return fixture, fmt.Errorf("configure E2E application signing keys: %w", err)
 	}
-	beta, err := repository.CreateApplication(ctx, domain.NewApplication{
-		OrganizationID: organization.ID, Name: "E2E Beta", Slug: "e2e-beta",
-	})
+	provisioner := service.NewApplicationProvisioner(repository, keyCipher, time.Now)
+	alpha, beta, err := provisionFixtureApplications(ctx, provisioner, organization.ID)
 	if err != nil {
-		return fixture, fmt.Errorf("create E2E beta application: %w", err)
+		return fixture, err
 	}
 
 	fixture.Applications.Alpha, err = seedApplication(ctx, repository, alpha.ID, alpha.Name, "alpha-user@keystar.test", "a")
@@ -194,6 +204,34 @@ func seedDatabase(ctx context.Context, repository *store.Store) (fixtureData, er
 		return fixture, err
 	}
 	return fixture, nil
+}
+
+type fixtureApplicationProvisioner interface {
+	Backfill(context.Context) (int, error)
+	Create(context.Context, domain.NewApplication) (*domain.Application, error)
+}
+
+func provisionFixtureApplications(
+	ctx context.Context,
+	provisioner fixtureApplicationProvisioner,
+	organizationID string,
+) (*domain.Application, *domain.Application, error) {
+	if _, err := provisioner.Backfill(ctx); err != nil {
+		return nil, nil, fmt.Errorf("backfill required default application signing key: %w", err)
+	}
+	alpha, err := provisioner.Create(ctx, domain.NewApplication{
+		OrganizationID: organizationID, Name: "E2E Alpha", Slug: "e2e-alpha",
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("create E2E alpha application: %w", err)
+	}
+	beta, err := provisioner.Create(ctx, domain.NewApplication{
+		OrganizationID: organizationID, Name: "E2E Beta", Slug: "e2e-beta",
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("create E2E beta application: %w", err)
+	}
+	return alpha, beta, nil
 }
 
 func seedApplication(ctx context.Context, repository *store.Store, applicationID, applicationName, userEmail, marker string) (applicationFixture, error) {
