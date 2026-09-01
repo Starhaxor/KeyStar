@@ -328,6 +328,49 @@ describe("OnboardingWizard", () => {
     expect(document.body.textContent).not.toContain("ks_pk_test_shown-once");
   });
 
+  it("keeps a newly issued one-time license visible until it is acknowledged before navigating", async () => {
+    const licenseProgress: OnboardingProgress = {
+      ...catalogProgress,
+      product_count: 1,
+      plan_count: 1,
+      product: { id: "product-1", name: "Desktop" },
+      plan: { id: "plan-1", name: "Test" },
+    };
+    vi.spyOn(api, "onboardingProgress")
+      .mockResolvedValueOnce(licenseProgress)
+      .mockResolvedValueOnce({ ...licenseProgress, license_count: 1 });
+    vi.spyOn(api, "createLicense").mockResolvedValue({
+      ok: true,
+      license: {
+        id: "license-1",
+        user_id: "user-1",
+        user_email: "tester@example.com",
+        product: "Desktop",
+        status: "active",
+        level: 1,
+        max_devices: 1,
+        notes: "",
+        expires_at: "2026-09-08T00:00:00Z",
+        created_at: "2026-09-01T00:00:00Z",
+      },
+      key: "license_shown_once",
+    });
+
+    renderWizard();
+    await flushEffects();
+
+    const email = document.querySelector<HTMLInputElement>("#onboarding-license-email");
+    if (email) setControlValue(email, "tester@example.com");
+    await act(async () => button("Issue test license")?.click());
+
+    expect(navigation.replace).not.toHaveBeenCalled();
+    expect(document.querySelector<HTMLElement>('[role="dialog"]')?.textContent).toContain("license_shown_once");
+
+    await act(async () => button("Done")?.click());
+    expect(navigation.replace).toHaveBeenCalledWith("/");
+    expect(document.body.textContent).not.toContain("license_shown_once");
+  });
+
   it("reloads persisted catalog state after plan creation fails and retries without recreating the product", async () => {
     const productOnlyProgress: OnboardingProgress = {
       ...catalogProgress,

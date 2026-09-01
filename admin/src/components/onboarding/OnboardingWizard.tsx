@@ -96,8 +96,8 @@ export default function OnboardingWizard() {
   const step = useMemo(() => progress ? deriveOnboardingStep(progress) : "application", [progress]);
 
   useEffect(() => {
-    if (!loading && step === "complete") router.replace("/");
-  }, [loading, router, step]);
+    if (!loading && step === "complete" && !revealedSecret) router.replace("/");
+  }, [loading, revealedSecret, router, step]);
 
   async function runAction(action: () => Promise<void>, safeMessage: string) {
     setBusy(true);
@@ -213,7 +213,7 @@ export default function OnboardingWizard() {
   const canCreateLicense = hasPermission("licenses.write");
   const progressMatchesSelection = !applicationsLoading && Boolean(selectedApplicationID) && progress?.application?.id === selectedApplicationID;
 
-  if (!loading && step === "complete") return null;
+  if (!loading && step === "complete" && !revealedSecret) return null;
 
   return (
     <div className="space-y-6">

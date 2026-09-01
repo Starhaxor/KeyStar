@@ -46,6 +46,7 @@ test("resumes onboarding after reload and issues a test license", async ({
   await expect(page.getByRole("heading", { name: "Save the test license" })).toBeVisible();
   await page.getByRole("dialog").getByRole("button", { name: "Done" }).click();
 
+  await expect(page).toHaveURL(/\/$/);
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Application setup is complete" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
 });
