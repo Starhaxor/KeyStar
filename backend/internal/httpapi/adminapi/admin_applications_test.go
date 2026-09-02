@@ -34,6 +34,16 @@ func TestAdminApplicationPatchTransitionsAuthProfileAndReturnsIt(t *testing.T) {
 		t.Fatalf("update calls = %d, want 1", console.updateApplicationCalls)
 	}
 	assertLifecycleAudit(t, console, "APPLICATION_UPDATED", "application-2")
+	var auditState struct {
+		Before map[string]string `json:"before"`
+		After  map[string]string `json:"after"`
+	}
+	if err := json.Unmarshal(console.auditEntries[0].Metadata, &auditState); err != nil {
+		t.Fatalf("decode audit metadata: %v", err)
+	}
+	if auditState.Before["auth_profile"] != "legacy" || auditState.After["auth_profile"] != "proof_bound" {
+		t.Fatalf("audit auth profiles = before %q, after %q", auditState.Before["auth_profile"], auditState.After["auth_profile"])
+	}
 }
 
 func TestAdminApplicationPatchRejectsUnknownAuthProfile(t *testing.T) {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/starloader/backend/internal/domain"
 	"github.com/starloader/backend/internal/store"
+	"github.com/starloader/backend/migrations"
 )
 
 func TestIntegrationDatabaseMustUseDedicatedName(t *testing.T) {
@@ -176,6 +177,49 @@ func TestApplicationAuthProfileDefaultsConstraintsAndPersistence(t *testing.T) {
 	}
 	if _, err := pool.Exec(ctx, `update applications set auth_profile = 'unknown' where id = $1::uuid`, created.ID); err == nil {
 		t.Fatal("database accepted an unknown auth profile")
+	}
+}
+
+func TestApplicationAuthProfileMigrationUpDefaultsExistingRowsAndDownRemovesColumn(t *testing.T) {
+	ctx := context.Background()
+	pool := openTestPool(t, ctx)
+	resetAndMigrate(t, ctx, pool)
+
+	down, err := migrations.Files.ReadFile("000021_application_auth_profile.down.sql")
+	if err != nil {
+		t.Fatalf("read auth-profile down migration: %v", err)
+	}
+	if _, err := pool.Exec(ctx, string(down)); err != nil {
+		t.Fatalf("execute auth-profile down migration: %v", err)
+	}
+	var hasColumn bool
+	if err := pool.QueryRow(ctx, `
+		select exists (
+			select 1 from information_schema.columns
+			where table_schema = 'public' and table_name = 'applications' and column_name = 'auth_profile'
+		)`).Scan(&hasColumn); err != nil {
+		t.Fatalf("check auth_profile column after down migration: %v", err)
+	}
+	if hasColumn {
+		t.Fatal("down migration did not remove applications.auth_profile")
+	}
+
+	up, err := migrations.Files.ReadFile("000021_application_auth_profile.up.sql")
+	if err != nil {
+		t.Fatalf("read auth-profile up migration: %v", err)
+	}
+	if _, err := pool.Exec(ctx, string(up)); err != nil {
+		t.Fatalf("execute auth-profile up migration: %v", err)
+	}
+	var profile string
+	if err := pool.QueryRow(ctx, `select auth_profile from applications where slug = 'starloader'`).Scan(&profile); err != nil {
+		t.Fatalf("read existing application auth profile after up migration: %v", err)
+	}
+	if profile != "legacy" {
+		t.Fatalf("existing auth profile after up migration = %q, want legacy", profile)
+	}
+	if _, err := pool.Exec(ctx, `update applications set auth_profile = 'unknown' where slug = 'starloader'`); err == nil {
+		t.Fatal("up migration accepted an unknown auth profile")
 	}
 }
 
