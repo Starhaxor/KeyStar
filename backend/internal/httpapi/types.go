@@ -194,6 +194,7 @@ type AdminApplicationSigningKeyReader interface {
 // application-scoped token migration. Current token flows do not call it.
 type ApplicationSigner interface {
 	Sign(context.Context, string, []byte) (security.SignedMessage, error)
+	IssueProofBound(context.Context, string, security.SessionClaims) (string, time.Time, error)
 }
 
 // AdminConfig bundles the dependencies of the /v1/admin namespace. The

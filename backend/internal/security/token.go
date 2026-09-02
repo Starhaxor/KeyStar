@@ -1,17 +1,23 @@
 package security
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 )
 
-const maxSessionTokenBytes = 16 * 1024
+const (
+	maxSessionTokenBytes     = 16 * 1024
+	proofBoundTokenLifetime  = 600 * time.Second
+	proofBoundTokenClockSkew = 60 * time.Second
+)
 
 var ErrInvalidSessionToken = errors.New("invalid session token")
 
@@ -26,6 +32,14 @@ type SessionClaims struct {
 	Audience      string
 	IssuedAt      time.Time
 	ExpiresAt     time.Time
+	ProofBound    *ProofBoundClaims
+}
+
+type ProofBoundClaims struct {
+	SessionID           string
+	TokenID             string
+	DeviceKeyThumbprint string
+	NotBefore           time.Time
 }
 
 type TokenIssuer struct {
@@ -49,6 +63,12 @@ type tokenHeader struct {
 	Type      string `json:"typ"`
 }
 
+type proofBoundTokenHeader struct {
+	Algorithm string `json:"alg"`
+	Type      string `json:"typ"`
+	KID       string `json:"kid"`
+}
+
 type sessionClaimsWire struct {
 	Subject       string   `json:"sub"`
 	ApplicationID string   `json:"app"`
@@ -60,6 +80,27 @@ type sessionClaimsWire struct {
 	Audience      string   `json:"aud"`
 	IssuedAt      int64    `json:"iat"`
 	ExpiresAt     int64    `json:"exp"`
+}
+
+type confirmationWire struct {
+	JKT string `json:"jkt"`
+}
+
+type proofBoundClaimsWire struct {
+	Subject       string           `json:"sub"`
+	ApplicationID string           `json:"app"`
+	LicenseID     string           `json:"license_id"`
+	DeviceID      string           `json:"device_id"`
+	Product       string           `json:"product"`
+	Features      []string         `json:"features"`
+	Issuer        string           `json:"iss"`
+	Audience      string           `json:"aud"`
+	IssuedAt      int64            `json:"iat"`
+	ExpiresAt     int64            `json:"exp"`
+	SessionID     string           `json:"sid"`
+	TokenID       string           `json:"jti"`
+	NotBefore     int64            `json:"nbf"`
+	Confirmation  confirmationWire `json:"cnf"`
 }
 
 func NewTokenIssuer(privateKey ed25519.PrivateKey, issuer, audience, product string) (*TokenIssuer, error) {
@@ -159,12 +200,208 @@ func (verifier *TokenVerifier) Verify(token string) (SessionClaims, error) {
 	return claims, nil
 }
 
+func issueProofBoundToken(privateKey ed25519.PrivateKey, kid string, claims SessionClaims) (string, error) {
+	if !validEd25519PrivateKey(privateKey) || strings.TrimSpace(kid) == "" ||
+		!validTokenPolicy(claims.Issuer, claims.Audience, claims.Product) ||
+		validateProofBoundClaims(claims, claims.ApplicationID, claims.Issuer, claims.Audience, claims.Product, claims.IssuedAt) != nil {
+		return "", ErrInvalidSessionToken
+	}
+	headerJSON, err := json.Marshal(proofBoundTokenHeader{Algorithm: "EdDSA", Type: "JWT", KID: kid})
+	if err != nil {
+		return "", ErrInvalidSessionToken
+	}
+	payloadJSON, err := json.Marshal(proofBoundClaimsToWire(claims))
+	if err != nil {
+		return "", ErrInvalidSessionToken
+	}
+	header := base64.RawURLEncoding.EncodeToString(headerJSON)
+	payload := base64.RawURLEncoding.EncodeToString(payloadJSON)
+	signingInput := header + "." + payload
+	signature := ed25519.Sign(privateKey, []byte(signingInput))
+	return signingInput + "." + base64.RawURLEncoding.EncodeToString(signature), nil
+}
+
+func verifyProofBoundToken(
+	token string,
+	publicKey ed25519.PublicKey,
+	kid, applicationID, issuer, audience, product string,
+	now time.Time,
+) (SessionClaims, error) {
+	if len(publicKey) != ed25519.PublicKeySize || strings.TrimSpace(kid) == "" || !validTokenPolicy(issuer, audience, product) {
+		return SessionClaims{}, ErrInvalidSessionToken
+	}
+	parts, decoded, err := decodeCompactToken(token)
+	if err != nil {
+		return SessionClaims{}, ErrInvalidSessionToken
+	}
+	var header proofBoundTokenHeader
+	if err := decodeStrictJSONObject(decoded[0], &header); err != nil ||
+		header.Algorithm != "EdDSA" || header.Type != "JWT" || header.KID != kid {
+		return SessionClaims{}, ErrInvalidSessionToken
+	}
+	signature := decoded[2]
+	if len(signature) != ed25519.SignatureSize || !ed25519.Verify(publicKey, []byte(parts[0]+"."+parts[1]), signature) {
+		return SessionClaims{}, ErrInvalidSessionToken
+	}
+	var wire proofBoundClaimsWire
+	if err := decodeStrictJSONObject(decoded[1], &wire); err != nil {
+		return SessionClaims{}, ErrInvalidSessionToken
+	}
+	claims := proofBoundWireToClaims(wire)
+	if err := validateProofBoundClaims(claims, applicationID, issuer, audience, product, now.UTC()); err != nil {
+		return SessionClaims{}, ErrInvalidSessionToken
+	}
+	return claims, nil
+}
+
+func decodeCompactToken(token string) ([3]string, [3][]byte, error) {
+	var parts [3]string
+	var decoded [3][]byte
+	if len(token) == 0 || len(token) > maxSessionTokenBytes {
+		return parts, decoded, ErrInvalidSessionToken
+	}
+	split := strings.Split(token, ".")
+	if len(split) != 3 {
+		return parts, decoded, ErrInvalidSessionToken
+	}
+	for index, segment := range split {
+		if segment == "" {
+			return parts, decoded, ErrInvalidSessionToken
+		}
+		value, err := decodeTokenSegment(segment)
+		if err != nil {
+			return parts, decoded, ErrInvalidSessionToken
+		}
+		parts[index], decoded[index] = segment, value
+	}
+	return parts, decoded, nil
+}
+
+func decodeStrictJSONObject(raw []byte, destination any) error {
+	if err := rejectDuplicateJSONMembers(raw); err != nil {
+		return ErrInvalidSessionToken
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		return ErrInvalidSessionToken
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return ErrInvalidSessionToken
+	}
+	return nil
+}
+
+func rejectDuplicateJSONMembers(raw []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := readUniqueJSONValue(decoder); err != nil {
+		return err
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return ErrInvalidSessionToken
+	}
+	return nil
+}
+
+func readUniqueJSONValue(decoder *json.Decoder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return ErrInvalidSessionToken
+	}
+	delimiter, isDelimiter := token.(json.Delim)
+	if !isDelimiter {
+		return nil
+	}
+	switch delimiter {
+	case '{':
+		members := make(map[string]struct{})
+		for decoder.More() {
+			memberToken, err := decoder.Token()
+			if err != nil {
+				return ErrInvalidSessionToken
+			}
+			member, ok := memberToken.(string)
+			if !ok {
+				return ErrInvalidSessionToken
+			}
+			if _, exists := members[member]; exists {
+				return ErrInvalidSessionToken
+			}
+			members[member] = struct{}{}
+			if err := readUniqueJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+		closing, err := decoder.Token()
+		if err != nil || closing != json.Delim('}') {
+			return ErrInvalidSessionToken
+		}
+	case '[':
+		for decoder.More() {
+			if err := readUniqueJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+		closing, err := decoder.Token()
+		if err != nil || closing != json.Delim(']') {
+			return ErrInvalidSessionToken
+		}
+	default:
+		return ErrInvalidSessionToken
+	}
+	return nil
+}
+
 func decodeTokenSegment(segment string) ([]byte, error) {
 	decoded, err := base64.RawURLEncoding.DecodeString(segment)
 	if err != nil || base64.RawURLEncoding.EncodeToString(decoded) != segment {
 		return nil, ErrInvalidSessionToken
 	}
 	return decoded, nil
+}
+
+func validateProofBoundClaims(claims SessionClaims, applicationID, issuer, audience, product string, now time.Time) error {
+	proof := claims.ProofBound
+	if proof == nil || claims.Subject == "" || claims.ApplicationID == "" || claims.ApplicationID != applicationID ||
+		claims.LicenseID == "" || claims.DeviceID == "" || claims.Product != product ||
+		claims.Issuer != issuer || claims.Audience != audience ||
+		claims.IssuedAt.IsZero() || claims.ExpiresAt.IsZero() || proof.NotBefore.IsZero() ||
+		proof.SessionID == "" || !validCanonicalRandom(proof.TokenID, 16) || !validCanonicalRandom(proof.DeviceKeyThumbprint, 32) ||
+		!proof.NotBefore.Equal(claims.IssuedAt) || claims.ExpiresAt.Sub(claims.IssuedAt) != proofBoundTokenLifetime ||
+		claims.IssuedAt.Nanosecond() != 0 || claims.ExpiresAt.Nanosecond() != 0 || proof.NotBefore.Nanosecond() != 0 ||
+		claims.IssuedAt.After(now.Add(proofBoundTokenClockSkew)) || proof.NotBefore.After(now.Add(proofBoundTokenClockSkew)) ||
+		claims.ExpiresAt.Before(now.Add(-proofBoundTokenClockSkew)) {
+		return ErrInvalidSessionToken
+	}
+	return nil
+}
+
+func validCanonicalRandom(value string, size int) bool {
+	decoded, err := base64.RawURLEncoding.DecodeString(value)
+	return err == nil && len(decoded) == size && base64.RawURLEncoding.EncodeToString(decoded) == value
+}
+
+func proofBoundClaimsToWire(claims SessionClaims) proofBoundClaimsWire {
+	return proofBoundClaimsWire{
+		Subject: claims.Subject, ApplicationID: claims.ApplicationID, LicenseID: claims.LicenseID, DeviceID: claims.DeviceID,
+		Product: claims.Product, Features: claims.Features, Issuer: claims.Issuer, Audience: claims.Audience,
+		IssuedAt: claims.IssuedAt.Unix(), ExpiresAt: claims.ExpiresAt.Unix(), SessionID: claims.ProofBound.SessionID,
+		TokenID: claims.ProofBound.TokenID, NotBefore: claims.ProofBound.NotBefore.Unix(),
+		Confirmation: confirmationWire{JKT: claims.ProofBound.DeviceKeyThumbprint},
+	}
+}
+
+func proofBoundWireToClaims(wire proofBoundClaimsWire) SessionClaims {
+	return SessionClaims{
+		Subject: wire.Subject, ApplicationID: wire.ApplicationID, LicenseID: wire.LicenseID, DeviceID: wire.DeviceID,
+		Product: wire.Product, Features: wire.Features, Issuer: wire.Issuer, Audience: wire.Audience,
+		IssuedAt: time.Unix(wire.IssuedAt, 0).UTC(), ExpiresAt: time.Unix(wire.ExpiresAt, 0).UTC(),
+		ProofBound: &ProofBoundClaims{
+			SessionID: wire.SessionID, TokenID: wire.TokenID, DeviceKeyThumbprint: wire.Confirmation.JKT,
+			NotBefore: time.Unix(wire.NotBefore, 0).UTC(),
+		},
+	}
 }
 
 func validTokenPolicy(issuer, audience, product string) bool {

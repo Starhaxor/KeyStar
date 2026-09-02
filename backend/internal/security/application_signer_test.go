@@ -1,14 +1,127 @@
 package security
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"errors"
+	"io"
 	"testing"
 	"time"
 
 	"github.com/starloader/backend/internal/domain"
 )
+
+func TestApplicationSignerIssuesDeterministicProofBoundTokenWithActiveApplicationKey(t *testing.T) {
+	cipher := newApplicationKeyCipherForTest(t)
+	record := activeApplicationSigningKeyRecord(t, cipher, "app-a")
+	signer := NewApplicationSigner(fixedApplicationSigningKeyRepository(&record), cipher)
+	now := time.Unix(1_788_343_200, 0).UTC()
+	signer.now = func() time.Time { return now }
+	signer.random = bytes.NewReader([]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15})
+	claims := requiredProofBoundClaims(now)
+	claims.ApplicationID = "app-a"
+	claims.IssuedAt = time.Time{}
+	claims.ExpiresAt = time.Time{}
+	claims.ProofBound.NotBefore = time.Time{}
+	claims.ProofBound.TokenID = ""
+
+	token, expiresAt, err := signer.IssueProofBound(context.Background(), "app-a", claims)
+	if err != nil {
+		t.Fatalf("IssueProofBound() error = %v", err)
+	}
+	if !expiresAt.Equal(now.Add(600 * time.Second)) {
+		t.Fatalf("expiresAt = %v, want %v", expiresAt, now.Add(600*time.Second))
+	}
+	verifier := NewProofBoundTokenVerifier(fixedApplicationSigningKeyRepository(&record), "keystar", "starloader-client", "StarLoader")
+	verifier.now = func() time.Time { return now }
+	got, err := verifier.Verify(context.Background(), "app-a", token)
+	if err != nil {
+		t.Fatalf("Verify() error = %v", err)
+	}
+	if got.ProofBound == nil || got.ProofBound.TokenID != "AAECAwQFBgcICQoLDA0ODw" {
+		t.Fatalf("verified token ID = %#v", got.ProofBound)
+	}
+	if got.ApplicationID != "app-a" || got.ProofBound.SessionID != claims.ProofBound.SessionID || got.ProofBound.DeviceKeyThumbprint != claims.ProofBound.DeviceKeyThumbprint {
+		t.Fatalf("verified bindings = %#v", got)
+	}
+}
+
+func TestApplicationSignerProofBoundIssuanceSanitizesKeyAndRandomFailures(t *testing.T) {
+	cipher := newApplicationKeyCipherForTest(t)
+	now := time.Unix(1_788_343_200, 0).UTC()
+	claims := requiredProofBoundClaims(now)
+	claims.ApplicationID = "app-a"
+	for _, test := range []struct {
+		name       string
+		repository ActiveApplicationKeyRepository
+		random     io.Reader
+	}{
+		{name: "missing key", repository: fixedApplicationSigningKeyRepository(nil), random: bytes.NewReader(make([]byte, 16))},
+		{name: "ambiguous key query", repository: applicationSignerRepositoryStub{find: func(context.Context, string) (*domain.ApplicationSigningKey, error) {
+			return nil, errors.New("multiple active rows")
+		}}, random: bytes.NewReader(make([]byte, 16))},
+		{name: "random failure", repository: fixedApplicationSigningKeyRepository(pointerToActiveApplicationSigningKey(t, cipher, "app-a")), random: failingReader{}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			signer := NewApplicationSigner(test.repository, cipher)
+			signer.now = func() time.Time { return now }
+			signer.random = test.random
+			token, expiresAt, err := signer.IssueProofBound(context.Background(), "app-a", claims)
+			if err != ErrApplicationSigningUnavailable {
+				t.Fatalf("IssueProofBound() error = %v, want only %v", err, ErrApplicationSigningUnavailable)
+			}
+			if token != "" || !expiresAt.IsZero() {
+				t.Fatalf("IssueProofBound() = %q, %v; want zero values", token, expiresAt)
+			}
+		})
+	}
+}
+
+func TestProofBoundTokenVerifierRejectsUnknownOrRevokedActiveKey(t *testing.T) {
+	cipher := newApplicationKeyCipherForTest(t)
+	record := activeApplicationSigningKeyRecord(t, cipher, "app-a")
+	now := time.Unix(1_788_343_200, 0).UTC()
+	signer := NewApplicationSigner(fixedApplicationSigningKeyRepository(&record), cipher)
+	signer.now = func() time.Time { return now }
+	signer.random = bytes.NewReader(make([]byte, 16))
+	claims := requiredProofBoundClaims(now)
+	claims.ApplicationID = "app-a"
+	token, _, err := signer.IssueProofBound(context.Background(), "app-a", claims)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	revoked := record
+	revoked.Status = domain.ApplicationSigningKeyRevoked
+	unknown := activeApplicationSigningKeyRecord(t, cipher, "app-a")
+	for _, test := range []struct {
+		name   string
+		record *domain.ApplicationSigningKey
+	}{
+		{name: "revoked kid", record: &revoked},
+		{name: "unknown kid", record: &unknown},
+		{name: "missing kid", record: nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			verifier := NewProofBoundTokenVerifier(fixedApplicationSigningKeyRepository(test.record), "keystar", "starloader-client", "StarLoader")
+			verifier.now = func() time.Time { return now }
+			if _, err := verifier.Verify(context.Background(), "app-a", token); err != ErrInvalidSessionToken {
+				t.Fatalf("Verify() error = %v, want only %v", err, ErrInvalidSessionToken)
+			}
+		})
+	}
+}
+
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) { return 0, errors.New("entropy source details") }
+
+func pointerToActiveApplicationSigningKey(t *testing.T, cipher *ApplicationKeyCipher, applicationID string) *domain.ApplicationSigningKey {
+	t.Helper()
+	record := activeApplicationSigningKeyRecord(t, cipher, applicationID)
+	return &record
+}
 
 func TestApplicationSignerSignsWithRequestedApplicationsActiveKey(t *testing.T) {
 	cipher := newApplicationKeyCipherForTest(t)

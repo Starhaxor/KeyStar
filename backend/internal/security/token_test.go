@@ -1,15 +1,206 @@
 package security
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestProofBoundTokenUsesExactKeyedHeaderAndRequiredBindings(t *testing.T) {
+	publicKey, privateKey := deterministicEd25519Key()
+	now := time.Unix(1_788_343_200, 0).UTC()
+	claims := requiredProofBoundClaims(now)
+
+	token, err := issueProofBoundToken(privateKey, "ksk_test", claims)
+	if err != nil {
+		t.Fatalf("issueProofBoundToken() error = %v", err)
+	}
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		t.Fatalf("token has %d segments, want 3", len(parts))
+	}
+	headerJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(headerJSON), `{"alg":"EdDSA","typ":"JWT","kid":"ksk_test"}`; got != want {
+		t.Fatalf("header = %s, want %s", got, want)
+	}
+	payloadJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(payloadJSON, &payload); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]any{
+		"sub": "user-1", "app": "app-1", "license_id": "license-1", "device_id": "device-1",
+		"product": "StarLoader", "iss": "keystar", "aud": "starloader-client", "sid": "session-1",
+		"jti": "AAECAwQFBgcICQoLDA0ODw", "iat": float64(now.Unix()), "nbf": float64(now.Unix()),
+		"exp": float64(now.Add(600 * time.Second).Unix()),
+	} {
+		if got := payload[key]; got != want {
+			t.Fatalf("payload[%q] = %#v, want %#v", key, got, want)
+		}
+	}
+	confirmation, ok := payload["cnf"].(map[string]any)
+	if !ok || len(confirmation) != 1 || confirmation["jkt"] != claims.ProofBound.DeviceKeyThumbprint {
+		t.Fatalf("payload cnf = %#v", payload["cnf"])
+	}
+	if got := int64(payload["exp"].(float64) - payload["iat"].(float64)); got != 600 {
+		t.Fatalf("exp-iat = %d, want 600", got)
+	}
+
+	got, err := verifyProofBoundToken(token, publicKey, "ksk_test", "app-1", "keystar", "starloader-client", "StarLoader", now)
+	if err != nil {
+		t.Fatalf("verifyProofBoundToken() error = %v", err)
+	}
+	if !reflect.DeepEqual(got, claims) {
+		t.Fatalf("verified claims = %#v, want %#v", got, claims)
+	}
+}
+
+func TestProofBoundTokenRejectsMissingOrChangedBindings(t *testing.T) {
+	_, privateKey := deterministicEd25519Key()
+	now := time.Unix(1_788_343_200, 0).UTC()
+	for _, test := range []struct {
+		name   string
+		mutate func(*SessionClaims)
+	}{
+		{name: "application", mutate: func(c *SessionClaims) { c.ApplicationID = "" }},
+		{name: "product", mutate: func(c *SessionClaims) { c.Product = "" }},
+		{name: "license", mutate: func(c *SessionClaims) { c.LicenseID = "" }},
+		{name: "device", mutate: func(c *SessionClaims) { c.DeviceID = "" }},
+		{name: "session", mutate: func(c *SessionClaims) { c.ProofBound.SessionID = "" }},
+		{name: "token id", mutate: func(c *SessionClaims) { c.ProofBound.TokenID = "" }},
+		{name: "thumbprint", mutate: func(c *SessionClaims) { c.ProofBound.DeviceKeyThumbprint = "" }},
+		{name: "not before", mutate: func(c *SessionClaims) { c.ProofBound.NotBefore = time.Time{} }},
+		{name: "wrong lifetime", mutate: func(c *SessionClaims) { c.ExpiresAt = c.IssuedAt.Add(601 * time.Second) }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			claims := requiredProofBoundClaims(now)
+			test.mutate(&claims)
+			if _, err := issueProofBoundToken(privateKey, "ksk_test", claims); err != ErrInvalidSessionToken {
+				t.Fatalf("issueProofBoundToken() error = %v, want %v", err, ErrInvalidSessionToken)
+			}
+		})
+	}
+}
+
+func TestProofBoundTokenStrictParsingRejectsDuplicateMembersAndNoncanonicalSegments(t *testing.T) {
+	publicKey, privateKey := deterministicEd25519Key()
+	now := time.Unix(1_788_343_200, 0).UTC()
+	payload := proofBoundPayloadJSON(now)
+	valid := signProofBoundJSON(t, privateKey, `{"alg":"EdDSA","typ":"JWT","kid":"ksk_test"}`, payload)
+	tests := []struct {
+		name  string
+		token string
+	}{
+		{name: "duplicate header member", token: signProofBoundJSON(t, privateKey, `{"alg":"EdDSA","typ":"JWT","kid":"ksk_test","kid":"ksk_test"}`, payload)},
+		{name: "duplicate payload member", token: signProofBoundJSON(t, privateKey, `{"alg":"EdDSA","typ":"JWT","kid":"ksk_test"}`, strings.Replace(payload, `"sid":"session-1"`, `"sid":"session-1","sid":"session-1"`, 1))},
+		{name: "duplicate confirmation member", token: signProofBoundJSON(t, privateKey, `{"alg":"EdDSA","typ":"JWT","kid":"ksk_test"}`, strings.Replace(payload, `"jkt":"`, `"jkt":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","jkt":"`, 1))},
+		{name: "padded header", token: strings.Split(valid, ".")[0] + "=." + strings.Join(strings.Split(valid, ".")[1:], ".")},
+		{name: "empty segment", token: strings.Split(valid, ".")[0] + ".." + strings.Split(valid, ".")[2]},
+		{name: "oversized compact token", token: valid + strings.Repeat("A", maxSessionTokenBytes)},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := verifyProofBoundToken(test.token, publicKey, "ksk_test", "app-1", "keystar", "starloader-client", "StarLoader", now); err != ErrInvalidSessionToken {
+				t.Fatalf("verifyProofBoundToken() error = %v, want sanitized %v", err, ErrInvalidSessionToken)
+			}
+		})
+	}
+}
+
+func TestProofBoundTokenRejectsUnknownKIDAndWrongSignedBindings(t *testing.T) {
+	publicKey, privateKey := deterministicEd25519Key()
+	now := time.Unix(1_788_343_200, 0).UTC()
+	token, err := issueProofBoundToken(privateKey, "ksk_test", requiredProofBoundClaims(now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct{ name, kid, app, issuer, audience, product string }{
+		{name: "unknown kid", kid: "ksk_unknown", app: "app-1", issuer: "keystar", audience: "starloader-client", product: "StarLoader"},
+		{name: "wrong application", kid: "ksk_test", app: "app-2", issuer: "keystar", audience: "starloader-client", product: "StarLoader"},
+		{name: "wrong issuer", kid: "ksk_test", app: "app-1", issuer: "other", audience: "starloader-client", product: "StarLoader"},
+		{name: "wrong audience", kid: "ksk_test", app: "app-1", issuer: "keystar", audience: "other", product: "StarLoader"},
+		{name: "wrong product", kid: "ksk_test", app: "app-1", issuer: "keystar", audience: "starloader-client", product: "Other"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := verifyProofBoundToken(token, publicKey, test.kid, test.app, test.issuer, test.audience, test.product, now); err != ErrInvalidSessionToken {
+				t.Fatalf("verifyProofBoundToken() error = %v, want %v", err, ErrInvalidSessionToken)
+			}
+		})
+	}
+}
+
+func TestProofBoundTokenAcceptsOnlyWithinSixtySecondClockSkew(t *testing.T) {
+	publicKey, privateKey := deterministicEd25519Key()
+	now := time.Unix(1_788_343_200, 0).UTC()
+	tests := []struct {
+		name     string
+		issuedAt time.Time
+		verifyAt time.Time
+		wantOK   bool
+	}{
+		{name: "not before exactly sixty seconds ahead", issuedAt: now.Add(60 * time.Second), verifyAt: now, wantOK: true},
+		{name: "not before sixty one seconds ahead", issuedAt: now.Add(61 * time.Second), verifyAt: now},
+		{name: "expired exactly sixty seconds ago", issuedAt: now.Add(-660 * time.Second), verifyAt: now, wantOK: true},
+		{name: "expired sixty one seconds ago", issuedAt: now.Add(-661 * time.Second), verifyAt: now},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			token, err := issueProofBoundToken(privateKey, "ksk_test", requiredProofBoundClaims(test.issuedAt))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = verifyProofBoundToken(token, publicKey, "ksk_test", "app-1", "keystar", "starloader-client", "StarLoader", test.verifyAt)
+			if test.wantOK && err != nil {
+				t.Fatalf("verifyProofBoundToken() error = %v", err)
+			}
+			if !test.wantOK && err != ErrInvalidSessionToken {
+				t.Fatalf("verifyProofBoundToken() error = %v, want %v", err, ErrInvalidSessionToken)
+			}
+		})
+	}
+}
+
+func deterministicEd25519Key() (ed25519.PublicKey, ed25519.PrivateKey) {
+	privateKey := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x42}, ed25519.SeedSize))
+	return append(ed25519.PublicKey(nil), privateKey[ed25519.SeedSize:]...), privateKey
+}
+
+func requiredProofBoundClaims(issuedAt time.Time) SessionClaims {
+	return SessionClaims{
+		Subject: "user-1", ApplicationID: "app-1", LicenseID: "license-1", DeviceID: "device-1",
+		Product: "StarLoader", Features: []string{"launch"}, Issuer: "keystar", Audience: "starloader-client",
+		IssuedAt: issuedAt, ExpiresAt: issuedAt.Add(600 * time.Second),
+		ProofBound: &ProofBoundClaims{
+			SessionID: "session-1", TokenID: "AAECAwQFBgcICQoLDA0ODw",
+			DeviceKeyThumbprint: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", NotBefore: issuedAt,
+		},
+	}
+}
+
+func proofBoundPayloadJSON(issuedAt time.Time) string {
+	return fmt.Sprintf(`{"sub":"user-1","app":"app-1","license_id":"license-1","device_id":"device-1","product":"StarLoader","features":["launch"],"iss":"keystar","aud":"starloader-client","iat":%d,"exp":%d,"sid":"session-1","jti":"AAECAwQFBgcICQoLDA0ODw","nbf":%d,"cnf":{"jkt":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}}`, issuedAt.Unix(), issuedAt.Add(600*time.Second).Unix(), issuedAt.Unix())
+}
+
+func signProofBoundJSON(t *testing.T, privateKey ed25519.PrivateKey, headerJSON, payloadJSON string) string {
+	t.Helper()
+	header := base64.RawURLEncoding.EncodeToString([]byte(headerJSON))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(payloadJSON))
+	input := header + "." + payload
+	return input + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(privateKey, []byte(input)))
+}
 
 func TestEd25519SessionTokenRoundTripPreservesRequiredClaims(t *testing.T) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
@@ -33,11 +224,11 @@ func TestEd25519SessionTokenRoundTripPreservesRequiredClaims(t *testing.T) {
 		LicenseID:     "license-1",
 		DeviceID:      "device-1",
 		Product:       "StarLoader",
-		Features:  []string{"launch"},
-		Issuer:    "starloader",
-		Audience:  "starloader-client",
-		IssuedAt:  now,
-		ExpiresAt: now.Add(time.Hour),
+		Features:      []string{"launch"},
+		Issuer:        "starloader",
+		Audience:      "starloader-client",
+		IssuedAt:      now,
+		ExpiresAt:     now.Add(time.Hour),
 	}
 
 	token, err := issuer.Issue(want)
