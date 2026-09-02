@@ -74,6 +74,9 @@ func (f *fakeLifecycleConsole) UpdateApplication(_ context.Context, _ string, in
 	if input.Slug != nil {
 		updated.Slug = *input.Slug
 	}
+	if input.AuthProfile != nil {
+		updated.AuthProfile = *input.AuthProfile
+	}
 	return &updated, nil
 }
 

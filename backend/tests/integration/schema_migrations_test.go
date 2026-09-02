@@ -3,10 +3,12 @@ package integration_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/starloader/backend/internal/domain"
 	"github.com/starloader/backend/internal/store"
 )
 
@@ -102,6 +104,78 @@ func TestSchemaRejectsInvalidStatusesAndUnprotectedValues(t *testing.T) {
 				t.Fatal("invalid database write unexpectedly succeeded")
 			}
 		})
+	}
+}
+
+func TestApplicationAuthProfileDefaultsConstraintsAndPersistence(t *testing.T) {
+	ctx := context.Background()
+	pool := openTestPool(t, ctx)
+	resetAndMigrate(t, ctx, pool)
+	repository := store.New(pool)
+
+	existing, err := repository.FindApplicationBySlug(ctx, "starloader")
+	if err != nil {
+		t.Fatalf("find existing application: %v", err)
+	}
+	if existing.AuthProfile != domain.ApplicationAuthLegacy {
+		t.Fatalf("existing auth profile = %q, want legacy", existing.AuthProfile)
+	}
+
+	organization, err := repository.CreateOrganization(ctx, "Auth profile test organization")
+	if err != nil {
+		t.Fatalf("create organization: %v", err)
+	}
+	created, err := repository.CreateApplication(ctx, domain.NewApplication{
+		OrganizationID: organization.ID, Name: "Auth profile test application", Slug: "auth-profile-test",
+	})
+	if err != nil {
+		t.Fatalf("create application: %v", err)
+	}
+	if created.AuthProfile != domain.ApplicationAuthLegacy {
+		t.Fatalf("new auth profile = %q, want legacy", created.AuthProfile)
+	}
+
+	proofBound := domain.ApplicationAuthProofBound
+	updated, err := repository.UpdateApplication(ctx, created.ID, domain.UpdateApplication{AuthProfile: &proofBound})
+	if err != nil {
+		t.Fatalf("update auth profile: %v", err)
+	}
+	if updated.AuthProfile != domain.ApplicationAuthProofBound {
+		t.Fatalf("updated auth profile = %q, want proof_bound", updated.AuthProfile)
+	}
+	byID, err := repository.FindApplicationByID(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("find application by ID: %v", err)
+	}
+	bySlug, err := repository.FindApplicationBySlug(ctx, created.Slug)
+	if err != nil {
+		t.Fatalf("find application by slug: %v", err)
+	}
+	applications, err := repository.ListApplications(ctx)
+	if err != nil {
+		t.Fatalf("list applications: %v", err)
+	}
+	if byID.AuthProfile != domain.ApplicationAuthProofBound || bySlug.AuthProfile != domain.ApplicationAuthProofBound {
+		t.Fatalf("loaded profiles = ID %q, slug %q, want proof_bound", byID.AuthProfile, bySlug.AuthProfile)
+	}
+	found := false
+	for _, application := range applications {
+		if application.ID == created.ID {
+			found = application.AuthProfile == domain.ApplicationAuthProofBound
+		}
+	}
+	if !found {
+		t.Fatal("listed application did not preserve proof_bound auth profile")
+	}
+
+	for _, profile := range []domain.ApplicationAuthProfile{"", "unknown"} {
+		profile := profile
+		if _, err := repository.UpdateApplication(ctx, created.ID, domain.UpdateApplication{AuthProfile: &profile}); !errors.Is(err, domain.ErrInvalidApplicationAuthProfile) {
+			t.Fatalf("update profile %q error = %v, want ErrInvalidApplicationAuthProfile", profile, err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `update applications set auth_profile = 'unknown' where id = $1::uuid`, created.ID); err == nil {
+		t.Fatal("database accepted an unknown auth profile")
 	}
 }
 

@@ -16,6 +16,13 @@ const (
 	ApplicationStatusSuspended ApplicationStatus = "suspended"
 )
 
+type ApplicationAuthProfile string
+
+const (
+	ApplicationAuthLegacy     ApplicationAuthProfile = "legacy"
+	ApplicationAuthProofBound ApplicationAuthProfile = "proof_bound"
+)
+
 type OrganizationStatus string
 
 const (
@@ -33,6 +40,7 @@ type Application struct {
 	Name            string
 	Slug            string
 	Status          ApplicationStatus
+	AuthProfile     ApplicationAuthProfile
 	EnvironmentMode string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
@@ -56,8 +64,9 @@ type NewApplication struct {
 
 // UpdateApplication carries optional editable application fields.
 type UpdateApplication struct {
-	Name *string
-	Slug *string
+	Name        *string
+	Slug        *string
+	AuthProfile *ApplicationAuthProfile
 }
 
 // ConflictError is safe to map directly to an API conflict response without
@@ -72,14 +81,15 @@ func (e *ConflictError) Error() string { return e.Message }
 func (e *ConflictError) Code() string { return e.ConflictCode }
 
 var (
-	ErrApplicationNotFound          = &NotFoundError{Entity: "application"}
-	ErrOrganizationNotFound         = &NotFoundError{Entity: "organization"}
-	ErrApplicationExists            = errors.New("an application with this slug already exists")
-	ErrOrganizationExists           = errors.New("an organization with this slug already exists")
-	ErrInvalidApplicationUpdate     = errors.New("application name and slug must not be empty")
-	ErrInvalidApplicationTransition = errors.New("application status must be active, maintenance or disabled")
-	ErrApplicationInUse             = &ConflictError{ConflictCode: "APPLICATION_IN_USE", Message: "application has active dependent records"}
-	ErrApplicationInactive          = &ConflictError{ConflictCode: "APPLICATION_INACTIVE", Message: "application is not active"}
+	ErrApplicationNotFound           = &NotFoundError{Entity: "application"}
+	ErrOrganizationNotFound          = &NotFoundError{Entity: "organization"}
+	ErrApplicationExists             = errors.New("an application with this slug already exists")
+	ErrOrganizationExists            = errors.New("an organization with this slug already exists")
+	ErrInvalidApplicationUpdate      = errors.New("application name and slug must not be empty")
+	ErrInvalidApplicationAuthProfile = errors.New("application auth profile must be legacy or proof_bound")
+	ErrInvalidApplicationTransition  = errors.New("application status must be active, maintenance or disabled")
+	ErrApplicationInUse              = &ConflictError{ConflictCode: "APPLICATION_IN_USE", Message: "application has active dependent records"}
+	ErrApplicationInactive           = &ConflictError{ConflictCode: "APPLICATION_INACTIVE", Message: "application is not active"}
 )
 
 // ValidateApplicationTransition limits lifecycle transitions to operational
@@ -90,5 +100,14 @@ func ValidateApplicationTransition(status ApplicationStatus) error {
 		return nil
 	default:
 		return ErrInvalidApplicationTransition
+	}
+}
+
+func ValidateApplicationAuthProfile(profile ApplicationAuthProfile) error {
+	switch profile {
+	case ApplicationAuthLegacy, ApplicationAuthProofBound:
+		return nil
+	default:
+		return ErrInvalidApplicationAuthProfile
 	}
 }

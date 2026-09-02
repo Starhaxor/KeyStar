@@ -22,6 +22,7 @@ type applicationJSON struct {
 	Name            string `json:"name"`
 	Slug            string `json:"slug"`
 	Status          string `json:"status"`
+	AuthProfile     string `json:"auth_profile"`
 	EnvironmentMode string `json:"environment_mode"`
 }
 
@@ -99,7 +100,7 @@ func (router *Router) writeLifecycleError(writer http.ResponseWriter, request *h
 		httpapi.WriteError(writer, request, http.StatusNotFound, "PLAN_NOT_FOUND", "plan not found")
 	case errors.Is(err, domain.ErrApplicationExists):
 		httpapi.WriteError(writer, request, http.StatusConflict, "APPLICATION_ALREADY_EXISTS", "an application with this slug already exists")
-	case errors.Is(err, domain.ErrInvalidApplicationUpdate), errors.Is(err, domain.ErrInvalidApplicationTransition):
+	case errors.Is(err, domain.ErrInvalidApplicationUpdate), errors.Is(err, domain.ErrInvalidApplicationAuthProfile), errors.Is(err, domain.ErrInvalidApplicationTransition):
 		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_APPLICATION", "invalid application lifecycle request")
 	case errors.Is(err, domain.ErrInvalidCatalogStatus):
 		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_CATALOG", "invalid catalog lifecycle request")
@@ -125,11 +126,16 @@ func (router *Router) findAdminApplication(writer http.ResponseWriter, request *
 
 func (router *Router) handleAdminApplicationUpdate(writer http.ResponseWriter, request *http.Request, account *domain.AdminAccount, applicationID string) {
 	var body struct {
-		Name *string `json:"name"`
-		Slug *string `json:"slug"`
+		Name        *string                        `json:"name"`
+		Slug        *string                        `json:"slug"`
+		AuthProfile *domain.ApplicationAuthProfile `json:"auth_profile"`
 	}
 	if err := httpapi.DecodeJSONBody(writer, request, &body); err != nil {
 		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		return
+	}
+	if body.AuthProfile != nil && domain.ValidateApplicationAuthProfile(*body.AuthProfile) != nil {
+		httpapi.WriteError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid auth_profile")
 		return
 	}
 	console, ok := router.applicationLifecycleConsole(writer, request)
@@ -140,7 +146,7 @@ func (router *Router) handleAdminApplicationUpdate(writer http.ResponseWriter, r
 	if !ok {
 		return
 	}
-	application, err := console.UpdateApplication(request.Context(), applicationID, domain.UpdateApplication{Name: body.Name, Slug: body.Slug})
+	application, err := console.UpdateApplication(request.Context(), applicationID, domain.UpdateApplication{Name: body.Name, Slug: body.Slug, AuthProfile: body.AuthProfile})
 	if err != nil {
 		router.writeLifecycleError(writer, request, err)
 		return
@@ -178,11 +184,15 @@ func writeAdminApplication(writer http.ResponseWriter, status int, application *
 	httpapi.WriteJSON(writer, status, struct {
 		OK          bool            `json:"ok"`
 		Application applicationJSON `json:"application"`
-	}{OK: true, Application: applicationJSON{ID: application.ID, OrganizationID: application.OrganizationID, Name: application.Name, Slug: application.Slug, Status: string(application.Status), EnvironmentMode: application.EnvironmentMode}})
+	}{OK: true, Application: newApplicationJSON(application)})
+}
+
+func newApplicationJSON(application *domain.Application) applicationJSON {
+	return applicationJSON{ID: application.ID, OrganizationID: application.OrganizationID, Name: application.Name, Slug: application.Slug, Status: string(application.Status), AuthProfile: string(application.AuthProfile), EnvironmentMode: application.EnvironmentMode}
 }
 
 func applicationAuditState(application *domain.Application) map[string]string {
-	return map[string]string{"name": application.Name, "slug": application.Slug, "status": string(application.Status), "environment_mode": application.EnvironmentMode}
+	return map[string]string{"name": application.Name, "slug": application.Slug, "status": string(application.Status), "auth_profile": string(application.AuthProfile), "environment_mode": application.EnvironmentMode}
 }
 
 func (router *Router) handleAdminApplicationList(writer http.ResponseWriter, request *http.Request) {
@@ -193,7 +203,7 @@ func (router *Router) handleAdminApplicationList(writer http.ResponseWriter, req
 	}
 	items := make([]applicationJSON, 0, len(applications))
 	for _, application := range applications {
-		items = append(items, applicationJSON{ID: application.ID, OrganizationID: application.OrganizationID, Name: application.Name, Slug: application.Slug, Status: string(application.Status), EnvironmentMode: application.EnvironmentMode})
+		items = append(items, newApplicationJSON(&application))
 	}
 	httpapi.WriteJSON(writer, http.StatusOK, struct {
 		OK    bool              `json:"ok"`
@@ -224,7 +234,7 @@ func (router *Router) handleAdminApplicationCreate(writer http.ResponseWriter, r
 	httpapi.WriteJSON(writer, http.StatusCreated, struct {
 		OK          bool            `json:"ok"`
 		Application applicationJSON `json:"application"`
-	}{OK: true, Application: applicationJSON{ID: application.ID, OrganizationID: application.OrganizationID, Name: application.Name, Slug: application.Slug, Status: string(application.Status), EnvironmentMode: application.EnvironmentMode}})
+	}{OK: true, Application: newApplicationJSON(application)})
 }
 
 func (router *Router) handleAdminApplicationSigningKeys(writer http.ResponseWriter, request *http.Request, applicationID string) {

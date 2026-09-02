@@ -11,7 +11,7 @@ import (
 	"github.com/starloader/backend/internal/domain"
 )
 
-const applicationColumns = `id::text, organization_id::text, name, slug, status, environment_mode, created_at, updated_at`
+const applicationColumns = `id::text, organization_id::text, name, slug, status, auth_profile, environment_mode, created_at, updated_at`
 
 const organizationColumns = `id::text, name, slug, status, created_at, updated_at`
 
@@ -120,8 +120,8 @@ func (s *Store) ListApplications(ctx context.Context) ([]domain.Application, err
 // lifecycle state. Lifecycle transitions use TransitionApplication so unsafe
 // disable operations cannot be hidden inside a general update.
 func (s *Store) UpdateApplication(ctx context.Context, applicationID string, input domain.UpdateApplication) (*domain.Application, error) {
-	setClauses := make([]string, 0, 3)
-	args := make([]any, 0, 3)
+	setClauses := make([]string, 0, 4)
+	args := make([]any, 0, 4)
 	if input.Name != nil {
 		name := strings.TrimSpace(*input.Name)
 		if name == "" {
@@ -137,6 +137,13 @@ func (s *Store) UpdateApplication(ctx context.Context, applicationID string, inp
 		}
 		args = append(args, slug)
 		setClauses = append(setClauses, fmt.Sprintf("slug = $%d", len(args)))
+	}
+	if input.AuthProfile != nil {
+		if err := domain.ValidateApplicationAuthProfile(*input.AuthProfile); err != nil {
+			return nil, err
+		}
+		args = append(args, *input.AuthProfile)
+		setClauses = append(setClauses, fmt.Sprintf("auth_profile = $%d", len(args)))
 	}
 	if len(setClauses) == 0 {
 		return s.FindApplicationByID(ctx, applicationID)
@@ -261,7 +268,7 @@ func scanApplication(row pgx.Row) (*domain.Application, error) {
 	var application domain.Application
 	err := row.Scan(
 		&application.ID, &application.OrganizationID, &application.Name, &application.Slug,
-		&application.Status, &application.EnvironmentMode, &application.CreatedAt, &application.UpdatedAt,
+		&application.Status, &application.AuthProfile, &application.EnvironmentMode, &application.CreatedAt, &application.UpdatedAt,
 	)
 	return &application, err
 }

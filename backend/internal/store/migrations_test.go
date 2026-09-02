@@ -7,10 +7,10 @@ import (
 	"github.com/starloader/backend/migrations"
 )
 
-func TestVersionedMigrationsIncludeApplicationSigningKeys(t *testing.T) {
+func TestVersionedMigrationsIncludeApplicationAuthProfile(t *testing.T) {
 	last := versionedMigrations[len(versionedMigrations)-1]
-	if last.version != 20 || last.up != "000020_application_signing_keys.up.sql" {
-		t.Fatalf("latest migration = %#v, want application signing keys migration 20", last)
+	if last.version != 21 || last.up != "000021_application_auth_profile.up.sql" || last.down != "000021_application_auth_profile.down.sql" {
+		t.Fatalf("latest migration = %#v, want application auth profile migration 21", last)
 	}
 }
 

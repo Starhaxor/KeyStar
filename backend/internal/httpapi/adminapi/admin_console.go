@@ -92,11 +92,8 @@ func (router *Router) handleAdminOnboardingProgress(writer http.ResponseWriter, 
 		return
 	}
 	progress := onboardingProgressJSON{
-		OK: true,
-		Application: applicationJSON{
-			ID: selected.ID, OrganizationID: selected.OrganizationID, Name: selected.Name,
-			Slug: selected.Slug, Status: string(selected.Status), EnvironmentMode: selected.EnvironmentMode,
-		},
+		OK:          true,
+		Application: newApplicationJSON(selected),
 	}
 	for _, entry := range credentials {
 		if entry.Status == domain.CredentialStatusActive &&
