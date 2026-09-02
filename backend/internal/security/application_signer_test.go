@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -44,6 +45,26 @@ func TestApplicationSignerIssuesDeterministicProofBoundTokenWithActiveApplicatio
 	}
 	if got.ApplicationID != "app-a" || got.ProofBound.SessionID != claims.ProofBound.SessionID || got.ProofBound.DeviceKeyThumbprint != claims.ProofBound.DeviceKeyThumbprint {
 		t.Fatalf("verified bindings = %#v", got)
+	}
+}
+
+func TestApplicationSignerRejectsProofBoundTokenThatExceedsCompactSizeCap(t *testing.T) {
+	cipher := newApplicationKeyCipherForTest(t)
+	record := activeApplicationSigningKeyRecord(t, cipher, "app-a")
+	signer := NewApplicationSigner(fixedApplicationSigningKeyRepository(&record), cipher)
+	now := time.Unix(1_788_343_200, 0).UTC()
+	signer.now = func() time.Time { return now }
+	signer.random = bytes.NewReader(make([]byte, 16))
+	claims := requiredProofBoundClaims(now)
+	claims.ApplicationID = "app-a"
+	claims.Features = []string{strings.Repeat("x", maxSessionTokenBytes)}
+
+	token, expiresAt, err := signer.IssueProofBound(context.Background(), "app-a", claims)
+	if err != ErrApplicationSigningUnavailable {
+		t.Fatalf("IssueProofBound() error = %v, want only %v", err, ErrApplicationSigningUnavailable)
+	}
+	if token != "" || !expiresAt.IsZero() {
+		t.Fatalf("IssueProofBound() = token length %d, expiry %v; want zero values", len(token), expiresAt)
 	}
 }
 
@@ -110,6 +131,34 @@ func TestProofBoundTokenVerifierRejectsUnknownOrRevokedActiveKey(t *testing.T) {
 				t.Fatalf("Verify() error = %v, want only %v", err, ErrInvalidSessionToken)
 			}
 		})
+	}
+}
+
+func TestApplicationSignerKeyRotationImmediatelyInvalidatesProofBoundTokenSignedByPreviousKey(t *testing.T) {
+	cipher := newApplicationKeyCipherForTest(t)
+	previous := activeApplicationSigningKeyRecord(t, cipher, "app-a")
+	current := &previous
+	repository := applicationSignerRepositoryStub{find: func(context.Context, string) (*domain.ApplicationSigningKey, error) {
+		return current, nil
+	}}
+	now := time.Unix(1_788_343_200, 0).UTC()
+	signer := NewApplicationSigner(repository, cipher)
+	signer.now = func() time.Time { return now }
+	signer.random = bytes.NewReader(make([]byte, 16))
+	claims := requiredProofBoundClaims(now)
+	claims.ApplicationID = "app-a"
+	token, _, err := signer.IssueProofBound(context.Background(), "app-a", claims)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	previous.Status = domain.ApplicationSigningKeyRetiring
+	replacement := activeApplicationSigningKeyRecord(t, cipher, "app-a")
+	current = &replacement
+	verifier := NewProofBoundTokenVerifier(repository, "keystar", "starloader-client", "StarLoader")
+	verifier.now = func() time.Time { return now }
+	if _, err := verifier.Verify(context.Background(), "app-a", token); err != ErrInvalidSessionToken {
+		t.Fatalf("Verify() after active-key replacement error = %v, want only %v", err, ErrInvalidSessionToken)
 	}
 }
 

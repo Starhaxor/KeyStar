@@ -218,7 +218,11 @@ func issueProofBoundToken(privateKey ed25519.PrivateKey, kid string, claims Sess
 	payload := base64.RawURLEncoding.EncodeToString(payloadJSON)
 	signingInput := header + "." + payload
 	signature := ed25519.Sign(privateKey, []byte(signingInput))
-	return signingInput + "." + base64.RawURLEncoding.EncodeToString(signature), nil
+	token := signingInput + "." + base64.RawURLEncoding.EncodeToString(signature)
+	if len(token) > maxSessionTokenBytes {
+		return "", ErrInvalidSessionToken
+	}
+	return token, nil
 }
 
 func verifyProofBoundToken(

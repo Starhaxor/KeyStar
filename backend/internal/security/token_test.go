@@ -99,16 +99,27 @@ func TestProofBoundTokenStrictParsingRejectsDuplicateMembersAndNoncanonicalSegme
 	publicKey, privateKey := deterministicEd25519Key()
 	now := time.Unix(1_788_343_200, 0).UTC()
 	payload := proofBoundPayloadJSON(now)
-	valid := signProofBoundJSON(t, privateKey, `{"alg":"EdDSA","typ":"JWT","kid":"ksk_test"}`, payload)
+	header := `{"alg":"EdDSA","typ":"JWT","kid":"ksk_test"}`
+	valid := signProofBoundJSON(t, privateKey, header, payload)
+	validParts := strings.Split(valid, ".")
+	noncanonicalPayload := validParts[1] + "="
 	tests := []struct {
 		name  string
 		token string
 	}{
 		{name: "duplicate header member", token: signProofBoundJSON(t, privateKey, `{"alg":"EdDSA","typ":"JWT","kid":"ksk_test","kid":"ksk_test"}`, payload)},
-		{name: "duplicate payload member", token: signProofBoundJSON(t, privateKey, `{"alg":"EdDSA","typ":"JWT","kid":"ksk_test"}`, strings.Replace(payload, `"sid":"session-1"`, `"sid":"session-1","sid":"session-1"`, 1))},
-		{name: "duplicate confirmation member", token: signProofBoundJSON(t, privateKey, `{"alg":"EdDSA","typ":"JWT","kid":"ksk_test"}`, strings.Replace(payload, `"jkt":"`, `"jkt":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","jkt":"`, 1))},
-		{name: "padded header", token: strings.Split(valid, ".")[0] + "=." + strings.Join(strings.Split(valid, ".")[1:], ".")},
-		{name: "empty segment", token: strings.Split(valid, ".")[0] + ".." + strings.Split(valid, ".")[2]},
+		{name: "escaped duplicate header member", token: signProofBoundJSON(t, privateKey, `{"alg":"EdDSA","typ":"JWT","kid":"ksk_test","\u006b\u0069\u0064":"ksk_test"}`, payload)},
+		{name: "duplicate payload member", token: signProofBoundJSON(t, privateKey, header, strings.Replace(payload, `"sid":"session-1"`, `"sid":"session-1","sid":"session-1"`, 1))},
+		{name: "duplicate confirmation member", token: signProofBoundJSON(t, privateKey, header, strings.Replace(payload, `"jkt":"`, `"jkt":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","jkt":"`, 1))},
+		{name: "unknown header member", token: signProofBoundJSON(t, privateKey, `{"alg":"EdDSA","typ":"JWT","kid":"ksk_test","extra":true}`, payload)},
+		{name: "unknown payload member", token: signProofBoundJSON(t, privateKey, header, strings.TrimSuffix(payload, "}")+`,"extra":true}`)},
+		{name: "unknown confirmation member", token: signProofBoundJSON(t, privateKey, header, strings.Replace(payload, `"cnf":{"jkt":`, `"cnf":{"extra":true,"jkt":`, 1))},
+		{name: "trailing header JSON", token: signProofBoundJSON(t, privateKey, header+` {}`, payload)},
+		{name: "trailing payload JSON", token: signProofBoundJSON(t, privateKey, header, payload+` {}`)},
+		{name: "padded header", token: validParts[0] + "=." + validParts[1] + "." + validParts[2]},
+		{name: "padded payload", token: signProofBoundSegments(t, privateKey, validParts[0], noncanonicalPayload)},
+		{name: "padded signature", token: valid + "="},
+		{name: "empty segment", token: validParts[0] + ".." + validParts[2]},
 		{name: "oversized compact token", token: valid + strings.Repeat("A", maxSessionTokenBytes)},
 	}
 	for _, test := range tests {
@@ -198,6 +209,11 @@ func signProofBoundJSON(t *testing.T, privateKey ed25519.PrivateKey, headerJSON,
 	t.Helper()
 	header := base64.RawURLEncoding.EncodeToString([]byte(headerJSON))
 	payload := base64.RawURLEncoding.EncodeToString([]byte(payloadJSON))
+	return signProofBoundSegments(t, privateKey, header, payload)
+}
+
+func signProofBoundSegments(t *testing.T, privateKey ed25519.PrivateKey, header, payload string) string {
+	t.Helper()
 	input := header + "." + payload
 	return input + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(privateKey, []byte(input)))
 }
