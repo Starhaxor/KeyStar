@@ -193,6 +193,7 @@ func runServer() error {
 		Repository: repository, Profile: repository,
 		HMACKey: []byte(configuration.LicenseHMACKey), TokenIssuer: tokenIssuer,
 		Issuer: configuration.LicenseIssuer, Audience: configuration.LicenseAudience, Product: configuration.Product,
+		ApplicationResolver: repository,
 	})
 	deviceService := service.NewDeviceService(service.NewStoreDeviceRepository(repository), service.DeviceServiceConfig{
 		HardwareHMACKey: []byte(configuration.HardwareHMACKey),
@@ -201,6 +202,11 @@ func runServer() error {
 		Audience:        configuration.LicenseAudience,
 		Product:         configuration.Product,
 		RefreshService:  refreshService,
+		// Authoritative application policy selects the legacy bearer flow
+		// or the proof-bound TPM key flow; the application signer binds
+		// proof-bound tokens to the verified device key thumbprint.
+		ApplicationResolver: repository,
+		ProofBoundIssuer:    applicationSigner,
 	})
 	adminConfig := httpapi.AdminConfig{}
 	if configuration.AdminConsoleEnabled {

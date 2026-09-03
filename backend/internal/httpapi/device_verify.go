@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -22,6 +23,9 @@ type deviceVerifyRequestBody struct {
 	Challenge          string                   `json:"challenge"`
 	ChallengeSignature string                   `json:"challenge_signature"`
 	TPMPublicKey       string                   `json:"tpm_public_key"`
+	// DeviceJWK carries the TPM P-256 public key for proof-bound
+	// applications. The service enforces its presence per profile.
+	DeviceJWK          json.RawMessage          `json:"device_jwk"`
 	Hardware           deviceVerifyHardwareBody `json:"hardware"`
 }
 
@@ -82,6 +86,7 @@ func (router *Router) handleDeviceVerify(writer http.ResponseWriter, request *ht
 		ApplicationID: applicationID,
 		SessionID:     body.SessionID, Challenge: body.Challenge,
 		ChallengeSignature: body.ChallengeSignature, TPMPublicKey: body.TPMPublicKey,
+		DeviceJWK: body.DeviceJWK,
 		Hardware: service.HardwareSignals{
 			SMBIOSUUID: body.Hardware.SMBIOSUUID, MotherboardSerial: body.Hardware.MotherboardSerial,
 			BIOSSerial: body.Hardware.BIOSSerial, SystemDiskSerial: body.Hardware.SystemDiskSerial,
@@ -119,8 +124,12 @@ func decodeDeviceVerifyRequest(writer http.ResponseWriter, request *http.Request
 
 func validDeviceVerifyBody(body deviceVerifyRequestBody) bool {
 	sessionID := strings.TrimSpace(body.SessionID)
+	// The TPM key arrives either as the legacy CNG blob or as a P-256 JWK
+	// for proof-bound applications; the service enforces the per-profile
+	// requirement. Cap the raw JWK before any service work.
+	hasDeviceKey := body.TPMPublicKey != "" || len(bytes.TrimSpace(body.DeviceJWK)) != 0
 	return sessionID == body.SessionID && len(sessionID) <= maxDeviceSessionIDBytes && validCanonicalUUID(sessionID) && body.Challenge != "" && body.ChallengeSignature != "" &&
-		body.TPMPublicKey != "" && strings.TrimSpace(body.Hardware.Fingerprint) != ""
+		hasDeviceKey && len(body.DeviceJWK) <= 16*1024 && strings.TrimSpace(body.Hardware.Fingerprint) != ""
 }
 
 func validCanonicalUUID(value string) bool {

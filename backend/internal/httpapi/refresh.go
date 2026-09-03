@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -63,6 +64,18 @@ func (router *Router) handleRefresh(writer http.ResponseWriter, request *http.Re
 		applicationID = principal.ApplicationID
 	}
 
+	// Proof-bound applications never use refresh tokens. Branch only on the
+	// authoritative application profile, never on request fields.
+	proofBound, err := router.isProofBoundApplication(request.Context(), applicationID)
+	if err != nil {
+		WriteError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
+		return
+	}
+	if proofBound {
+		WriteError(writer, request, http.StatusUnauthorized, "INVALID_REFRESH_TOKEN", "invalid refresh token")
+		return
+	}
+
 	// The refresh service is accessed through the device verification service
 	// configuration. We use a type assertion to reach it.
 	type refreshCapable interface {
@@ -118,6 +131,20 @@ func (router *Router) refreshFromRequest(request *http.Request, applicationID, r
 		ApplicationID: applicationID,
 		RefreshToken:  refreshToken,
 	})
+}
+
+// isProofBoundApplication reports the authoritative application auth
+// profile. A nil resolver preserves the legacy flow; unknown applications
+// and lookup failures fail closed via the returned error.
+func (router *Router) isProofBoundApplication(ctx context.Context, applicationID string) (bool, error) {
+	if router.applications == nil {
+		return false, nil
+	}
+	application, err := router.applications.FindApplicationByID(ctx, applicationID)
+	if err != nil || application == nil {
+		return false, errors.New("application policy unavailable")
+	}
+	return application.AuthProfile == domain.ApplicationAuthProofBound, nil
 }
 
 func (router *Router) writeRefreshError(writer http.ResponseWriter, request *http.Request, err error) {

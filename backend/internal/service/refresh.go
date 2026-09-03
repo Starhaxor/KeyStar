@@ -31,10 +31,28 @@ type RefreshTokenRepository interface {
 	RevokeAllUserRefreshSessions(ctx context.Context, applicationID, userID string) (int64, error)
 }
 
+// rejectProofBoundApplication denies refresh use for proof-bound
+// applications with the generic unauthorized error. Policy comes only from
+// authoritative storage; unknown applications and lookup failures fail
+// closed with the same generic error and issue nothing.
+func (service *RefreshService) rejectProofBoundApplication(ctx context.Context, applicationID string) error {
+	if service.applicationResolver == nil {
+		return nil
+	}
+	application, err := service.applicationResolver.FindApplicationByID(ctx, applicationID)
+	if err != nil || application == nil || application.AuthProfile == domain.ApplicationAuthProofBound {
+		return ErrInvalidRefreshToken
+	}
+	return nil
+}
+
 // Revoke invalidates the presented refresh token within its application.
 func (service *RefreshService) Revoke(ctx context.Context, input RefreshInput) error {
 	if service == nil || service.repository == nil || input.ApplicationID == "" || input.RefreshToken == "" {
 		return ErrInvalidRefreshToken
+	}
+	if err := service.rejectProofBoundApplication(ctx, input.ApplicationID); err != nil {
+		return err
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(input.RefreshToken)
 	if err != nil || len(raw) != refreshTokenBytes {
@@ -62,19 +80,24 @@ type RefreshServiceConfig struct {
 	Issuer      string
 	Audience    string
 	Product     string
+	// ApplicationResolver rejects proof-bound applications from the
+	// refresh flow using authoritative storage. Nil preserves legacy
+	// behavior for callers without policy context.
+	ApplicationResolver ApplicationResolver
 }
 
 // RefreshService manages the lifecycle of refresh tokens: issuance on device
 // verification, rotation on refresh, and reuse detection.
 type RefreshService struct {
-	repository  RefreshTokenRepository
-	hmacKey     []byte
-	tokenIssuer SessionTokenIssuer
-	profile     RefreshProfileRepository
-	issuer      string
-	audience    string
-	product     string
-	now         func() time.Time
+	repository          RefreshTokenRepository
+	hmacKey             []byte
+	tokenIssuer         SessionTokenIssuer
+	profile             RefreshProfileRepository
+	issuer              string
+	audience            string
+	product             string
+	now                 func() time.Time
+	applicationResolver ApplicationResolver
 }
 
 // NewRefreshService builds a RefreshService. The hmacKey is used only for
@@ -87,7 +110,8 @@ func NewRefreshService(config RefreshServiceConfig) *RefreshService {
 		hmacKey:     append([]byte(nil), config.HMACKey...),
 		tokenIssuer: config.TokenIssuer,
 		issuer:      config.Issuer, audience: config.Audience, product: config.Product,
-		now: now,
+		now:                 now,
+		applicationResolver: config.ApplicationResolver,
 	}
 }
 
@@ -96,6 +120,9 @@ func NewRefreshService(config RefreshServiceConfig) *RefreshService {
 func (service *RefreshService) IssueRefreshToken(ctx context.Context, applicationID, userID, licenseID, deviceID string) (string, time.Time, error) {
 	if service == nil || service.repository == nil {
 		return "", time.Time{}, errors.New("refresh service is not configured")
+	}
+	if err := service.rejectProofBoundApplication(ctx, applicationID); err != nil {
+		return "", time.Time{}, err
 	}
 	token, err := generateOpaqueToken()
 	if err != nil {
@@ -136,6 +163,9 @@ func (service *RefreshService) Refresh(ctx context.Context, input RefreshInput) 
 	}
 	if input.RefreshToken == "" || input.ApplicationID == "" {
 		return RefreshResult{}, ErrInvalidVerifyRequest
+	}
+	if err := service.rejectProofBoundApplication(ctx, input.ApplicationID); err != nil {
+		return RefreshResult{}, err
 	}
 
 	tokenBytes, err := base64.RawURLEncoding.DecodeString(input.RefreshToken)
