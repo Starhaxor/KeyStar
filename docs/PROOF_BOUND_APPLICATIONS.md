@@ -139,3 +139,16 @@ canonical URI from trusted configuration only:
 - Key state is untouched by rollback. Do not rotate or retire the
   application signing key as part of a rollback; that would break a
   subsequent re-activation instead of restoring service.
+
+## Live verification (2026-09-03, local keystar_test fixture)
+
+`TestProofBoundApplicationAuth` ran green against a locally hosted
+server (postgres:15, migrations 21/22, one `proof_bound` app plus a
+parallel `legacy` default app, software P-256 device key standing in
+for the TPM): password login, JWK-bound device verification, exact
+600-second `kid`-keyed token with matching `cnf.jkt` and no refresh
+token, DPoP `/v1/me`, replay rejection, different-key rejection,
+stale-proof rejection, bearer-fallback rejection, generic refresh
+rejection, exactly-one-winner concurrent race, and the parallel
+legacy bearer flow. The native StarLoader client smoke test on a
+real device fleet remains the production activation gate.
