@@ -273,6 +273,7 @@ export interface Application {
   slug: string;
   status: "active" | "maintenance" | "suspended" | "disabled";
   environment_mode: string;
+  auth_profile?: "legacy" | "proof_bound";
 }
 
 export interface ApplicationSigningKeyMetadata {

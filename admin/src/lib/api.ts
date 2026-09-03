@@ -273,7 +273,7 @@ export const api = {
   createApplication(input: { organization_id: string; name: string; slug: string }) {
     return request<{ ok: boolean; application: Application }>("/v1/admin/applications", { method: "POST", body: input });
   },
-  updateApplication(applicationId: string, input: { name?: string; slug?: string }) {
+  updateApplication(applicationId: string, input: { name?: string; slug?: string; auth_profile?: "legacy" | "proof_bound" }) {
     return request<{ ok: boolean; application: Application }>(`/v1/admin/applications/${applicationId}`, { method: "PATCH", body: input });
   },
   transitionApplication(applicationId: string, status: "active" | "maintenance" | "disabled") {

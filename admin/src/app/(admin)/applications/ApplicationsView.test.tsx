@@ -18,6 +18,7 @@ const application: Application = {
   slug: "starloader",
   status: "active",
   environment_mode: "separate",
+  auth_profile: "legacy",
 };
 
 const organization: Organization = {
