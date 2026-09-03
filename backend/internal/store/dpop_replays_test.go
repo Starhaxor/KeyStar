@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -187,9 +188,21 @@ func TestExternalDPoPReplayConsumption(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { deleteTestDPoPApplication(t, repository, second.ID, secondOrg.ID) })
+	// Unique digests per run plus cleanup keep the test idempotent against a
+	// reused database: fixed inputs would collide with rows from a prior run.
+	nonce := strconv.FormatInt(time.Now().UnixNano(), 36)
+	var digests [][32]byte
+	t.Cleanup(func() {
+		ctx := context.Background()
+		for _, digest := range digests {
+			_, _ = pool.Exec(ctx, `delete from dpop_replays where application_id = $1::uuid and jti_digest = $2`,
+				application.ID, digest[:])
+		}
+	})
 
 	t.Run("uniqueness", func(t *testing.T) {
-		digest := testJTIDigest("external-unique-jti")
+		digest := testJTIDigest("external-unique-jti-" + nonce)
+		digests = append(digests, digest)
 		expiresAt := time.Now().UTC().Add(10 * time.Minute)
 		consumed, err := repository.ConsumeDPoP(ctx, application.ID, digest, "token-ext-1", expiresAt)
 		if err != nil || !consumed {
@@ -202,7 +215,8 @@ func TestExternalDPoPReplayConsumption(t *testing.T) {
 	})
 
 	t.Run("tenant isolation", func(t *testing.T) {
-		digest := testJTIDigest("external-tenant-jti")
+		digest := testJTIDigest("external-tenant-jti-" + nonce)
+		digests = append(digests, digest)
 		expiresAt := time.Now().UTC().Add(10 * time.Minute)
 		if consumed, err := repository.ConsumeDPoP(ctx, application.ID, digest, "token-ext-1", expiresAt); err != nil || !consumed {
 			t.Fatalf("first tenant consume = (%v, %v)", consumed, err)
@@ -226,7 +240,8 @@ func TestExternalDPoPReplayConsumption(t *testing.T) {
 	})
 
 	t.Run("concurrent atomic", func(t *testing.T) {
-		digest := testJTIDigest("external-race-jti")
+		digest := testJTIDigest("external-race-jti-" + nonce)
+		digests = append(digests, digest)
 		expiresAt := time.Now().UTC().Add(10 * time.Minute)
 		results := make(chan bool, 8)
 		for index := 0; index < 8; index++ {
@@ -247,7 +262,8 @@ func TestExternalDPoPReplayConsumption(t *testing.T) {
 	})
 
 	t.Run("expiry cleanup", func(t *testing.T) {
-		digest := testJTIDigest("external-expired-jti")
+		digest := testJTIDigest("external-expired-jti-" + nonce)
+		digests = append(digests, digest)
 		if _, err := repository.ConsumeDPoP(ctx, application.ID, digest, "token-ext-old", time.Now().UTC().Add(-time.Minute)); err != nil {
 			t.Fatal(err)
 		}
