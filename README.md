@@ -420,6 +420,21 @@ StarLoader follows the desktop integration model:
 No legacy StarLoader-only backend contract or desktop secret is required for
 this flow.
 
+### Proof-bound applications
+
+An application can opt into the strict `proof_bound` profile: 600-second
+EdDSA access tokens bound to the device TPM P-256 key (`cnf.jkt`), one
+DPoP proof per request on `/v1/me` and other session routes, and no
+refresh tokens or bearer fallback. Legacy applications are unaffected.
+
+Activation order: deploy migrations and code with the application still
+`legacy`; provision and confirm exactly one active application signing
+key; set `PUBLIC_SCHEME`/`PUBLIC_HOST` to the exact public entry point;
+ship the proof-ready client with its TLS pins; switch the application to
+`proof_bound`; then run the proof-bound black-box suite. See
+[Proof-Bound Applications](docs/PROOF_BOUND_APPLICATIONS.md) for the
+contract, replay retention, safe-metrics rules, and rollback.
+
 ---
 
 ## Administration workflow
