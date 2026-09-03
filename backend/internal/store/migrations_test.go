@@ -8,9 +8,17 @@ import (
 )
 
 func TestVersionedMigrationsIncludeApplicationAuthProfile(t *testing.T) {
+	versions := make(map[int64]migration, len(versionedMigrations))
+	for _, migration := range versionedMigrations {
+		versions[migration.version] = migration
+	}
+	profile, ok := versions[21]
+	if !ok || profile.up != "000021_application_auth_profile.up.sql" || profile.down != "000021_application_auth_profile.down.sql" {
+		t.Fatalf("application auth profile migration 21 = %#v", profile)
+	}
 	last := versionedMigrations[len(versionedMigrations)-1]
-	if last.version != 21 || last.up != "000021_application_auth_profile.up.sql" || last.down != "000021_application_auth_profile.down.sql" {
-		t.Fatalf("latest migration = %#v, want application auth profile migration 21", last)
+	if last.version != 22 || last.up != "000022_dpop_replays.up.sql" || last.down != "000022_dpop_replays.down.sql" {
+		t.Fatalf("latest migration = %#v, want dpop replays migration 22", last)
 	}
 }
 

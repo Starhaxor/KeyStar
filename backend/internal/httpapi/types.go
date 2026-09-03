@@ -197,6 +197,19 @@ type ApplicationSigner interface {
 	IssueProofBound(context.Context, string, security.SessionClaims) (string, time.Time, error)
 }
 
+// ProofBoundTokenVerifier verifies application-scoped proof-bound access
+// tokens with the active application signing key. It is satisfied by
+// security.ProofBoundTokenVerifier.
+type ProofBoundTokenVerifier interface {
+	Verify(context.Context, string, string) (security.SessionClaims, error)
+}
+
+// DPoPReplayStore atomically consumes DPoP proof identifiers per
+// application. It is satisfied by store.Store.
+type DPoPReplayStore interface {
+	ConsumeDPoP(context.Context, string, [32]byte, string, time.Time) (bool, error)
+}
+
 // AdminConfig bundles the dependencies of the /v1/admin namespace. The
 // namespace stays disabled unless both Auth and Console are provided.
 type AdminConfig struct {

@@ -39,6 +39,7 @@ var versionedMigrations = []migration{
 	{version: 19, up: "000019_admin_bootstrap_state.up.sql", down: "000019_admin_bootstrap_state.down.sql"},
 	{version: 20, up: "000020_application_signing_keys.up.sql", down: "000020_application_signing_keys.down.sql"},
 	{version: 21, up: "000021_application_auth_profile.up.sql", down: "000021_application_auth_profile.down.sql"},
+	{version: 22, up: "000022_dpop_replays.up.sql", down: "000022_dpop_replays.down.sql"},
 }
 
 func MigrateUp(ctx context.Context, pool *pgxpool.Pool) error {

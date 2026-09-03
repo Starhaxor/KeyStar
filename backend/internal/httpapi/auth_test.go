@@ -30,7 +30,7 @@ func TestRequireSessionRejectsInvalidAuthorizationHeaders(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			verifier := &fakeBearerVerifier{err: tt.verifierErr}
 			nextCalled := false
-			handler := RequireSession(verifier, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			handler := RequireSession(SessionAuthConfig{LegacyVerifier: verifier}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 				nextCalled = true
 			}))
 			recorder := httptest.NewRecorder()
@@ -69,7 +69,7 @@ func TestRequireSessionStoresExactVerifiedClaimsInRequestContext(t *testing.T) {
 	verifier := &fakeBearerVerifier{claims: wantClaims}
 	var gotClaims security.SessionClaims
 	var found bool
-	handler := RequireSession(verifier, http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+	handler := RequireSession(SessionAuthConfig{LegacyVerifier: verifier}, http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
 		gotClaims, found = SessionClaimsFromContext(request.Context())
 	}))
 	recorder := httptest.NewRecorder()

@@ -55,6 +55,19 @@ type RouterConfig struct {
 	// ApplicationSigner is staged for the later application-scoped token
 	// profile migration. Existing token issuance and verification do not use it.
 	ApplicationSigner ApplicationSigner
+	// ProofBoundVerifier verifies application-scoped proof-bound access
+	// tokens for DPoP-protected routes. Nil fails proof-bound requests
+	// closed while legacy bearer keeps working.
+	ProofBoundVerifier ProofBoundTokenVerifier
+	// ReplayStore atomically consumes DPoP proof identifiers. Nil fails
+	// proof-bound requests closed.
+	ReplayStore DPoPReplayStore
+	// PublicScheme and PublicHost build the canonical external request URI
+	// for DPoP verification. They must reflect the production entry point;
+	// forwarding headers are never trusted. Empty values fail proof-bound
+	// requests closed.
+	PublicScheme string
+	PublicHost   string
 	// Metrics, when set, enables request instrumentation and the /metrics
 	// endpoint. Nil keeps both disabled (default).
 	Metrics      *metrics.Registry
@@ -159,6 +172,12 @@ func (router *Router) allowRate(ctx context.Context, namespace, key string, limi
 	return allowed, retry
 }
 
+// allowSessionRate gates session authentication ahead of signature work,
+// keyed by the presented credential. It fails closed on limiter errors.
+func (router *Router) allowSessionRate(ctx context.Context, key string) (bool, int) {
+	return router.allowRate(ctx, "session", key, 120, time.Minute, router.sessionLimiter)
+}
+
 // MountAdmin attaches the /v1/admin namespace handler.
 func (router *Router) MountAdmin(handler http.Handler) {
 	router.adminHandler = handler
@@ -220,7 +239,16 @@ func NewRouter(config RouterConfig) *Router {
 	router.deviceVerifyHandler = router.RequireCredential(domain.CredentialPublishable, "device.verify")(http.HandlerFunc(router.handleDeviceVerify))
 	router.refreshHandler = router.RequireCredential(domain.CredentialPublishable, "auth.refresh")(http.HandlerFunc(router.handleRefresh))
 	router.logoutHandler = router.RequireCredential(domain.CredentialPublishable, "auth.logout")(http.HandlerFunc(router.handleLogout))
-	router.meHandler = RequireSession(config.SessionVerifier, http.HandlerFunc(router.handleMe))
+	router.meHandler = RequireSession(SessionAuthConfig{
+		LegacyVerifier:     config.SessionVerifier,
+		ProofBoundVerifier: config.ProofBoundVerifier,
+		Applications:       config.Applications,
+		Replays:            config.ReplayStore,
+		Now:                now,
+		PublicScheme:       config.PublicScheme,
+		PublicHost:         config.PublicHost,
+		RateLimit:          router.allowSessionRate,
+	}, http.HandlerFunc(router.handleMe))
 	router.metrics = config.Metrics
 	var core http.Handler = http.HandlerFunc(router.route)
 	if config.Metrics != nil {

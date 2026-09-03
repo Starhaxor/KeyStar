@@ -189,8 +189,8 @@ func runServer() error {
 	if err != nil {
 		return errors.New("configuration error: invalid token verifier configuration")
 	}
-	refreshService := service.NewRefreshService(service.RefreshServiceConfig{
-		Repository: repository, Profile: repository,
+	proofBoundVerifier := security.NewProofBoundTokenVerifier(repository, configuration.LicenseIssuer, configuration.LicenseAudience, configuration.Product)
+	refreshService := service.NewRefreshService(service.RefreshServiceConfig{		Repository: repository, Profile: repository,
 		HMACKey: []byte(configuration.LicenseHMACKey), TokenIssuer: tokenIssuer,
 		Issuer: configuration.LicenseIssuer, Audience: configuration.LicenseAudience, Product: configuration.Product,
 		ApplicationResolver: repository,
@@ -251,6 +251,10 @@ func runServer() error {
 		Login:                    loginService,
 		DeviceVerification:       deviceService,
 		SessionVerifier:          tokenVerifier,
+		ProofBoundVerifier:       proofBoundVerifier,
+		ReplayStore:              repository,
+		PublicScheme:             publicScheme(),
+		PublicHost:               publicHost(),
 		Profile:                  repository,
 		LoginTimeout:             configuration.LoginTimeout,
 		TrustedProxies:           trustedProxies,
@@ -313,6 +317,11 @@ func runServer() error {
 				} else if deleted > 0 {
 					log.Printf("refresh session cleanup: deleted %d expired sessions", deleted)
 				}
+				if deleted, err := repository.DeleteExpiredDPoPReplays(cleanupCtx); err != nil {
+					log.Printf("dpop replay cleanup error: %v", err)
+				} else if deleted > 0 {
+					log.Printf("dpop replay cleanup: deleted %d expired replays", deleted)
+				}
 				if auditRetentionDays > 0 {
 					cutoff := time.Now().UTC().AddDate(0, 0, -auditRetentionDays)
 					if deleted, err := repository.DeleteAuditLogsBefore(cleanupCtx, cutoff); err != nil {
@@ -339,6 +348,22 @@ func runServer() error {
 		return fmt.Errorf("server stopped: %w", err)
 	}
 	return nil
+}
+
+// publicScheme returns the trusted public entry-point scheme used to build
+// the canonical DPoP request URI. It defaults to https.
+func publicScheme() string {
+	scheme := strings.ToLower(strings.TrimSpace(os.Getenv("PUBLIC_SCHEME")))
+	if scheme == "" {
+		return "https"
+	}
+	return scheme
+}
+
+// publicHost returns the trusted public entry-point host used to build the
+// canonical DPoP request URI. Empty fails proof-bound requests closed.
+func publicHost() string {
+	return strings.ToLower(strings.TrimSpace(os.Getenv("PUBLIC_HOST")))
 }
 
 // envInt reads an integer environment variable, falling back to the default
