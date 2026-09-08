@@ -7,7 +7,15 @@ export function exportCSV(
 ): void {
   const escape = (value: string | number): string => {
     const text = String(value ?? "");
-    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    // CSV quoting alone does not stop spreadsheet formula execution. Keep
+    // untrusted formula-like strings literal, including whitespace and locale
+    // variants. Real numbers remain numeric. Re-saving a CSV in a spreadsheet
+    // can remove this text marker; the protection applies to this export.
+    const formulaLike = typeof value === "string" && /^[\s]*[=+\-@＝＋－＠\t\r\n]/u.test(text);
+    const safeText = formulaLike ? `'${text}` : text;
+    return formulaLike || /[",\r\n]/.test(safeText)
+      ? `"${safeText.replace(/"/g, '""')}"`
+      : safeText;
   };
   const content = [headers, ...rows]
     .map((row) => row.map(escape).join(","))

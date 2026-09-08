@@ -88,6 +88,7 @@ type Router struct {
 	deviceVerifyTimeout      time.Duration
 	trustedProxies           []netip.Prefix
 	loginLimiter             *ipRateLimiter
+	ingressLimiter           *ipRateLimiter
 	sessionLimiter           *ipRateLimiter
 	credentialLimiter        *ipRateLimiter
 	Admin                    AdminConfig
@@ -172,8 +173,8 @@ func (router *Router) allowRate(ctx context.Context, namespace, key string, limi
 	return allowed, retry
 }
 
-// allowSessionRate gates session authentication ahead of signature work,
-// keyed by the presented credential. It fails closed on limiter errors.
+// allowSessionRate gates verified sessions by token digest. Ingress limiting
+// bounds signature work; invalid tokens cannot allocate session buckets.
 func (router *Router) allowSessionRate(ctx context.Context, key string) (bool, int) {
 	return router.allowRate(ctx, "session", key, 120, time.Minute, router.sessionLimiter)
 }
@@ -219,6 +220,7 @@ func NewRouter(config RouterConfig) *Router {
 		deviceVerifyTimeout:      deviceVerifyTimeout,
 		trustedProxies:           append([]netip.Prefix(nil), config.TrustedProxies...),
 		loginLimiter:             newIPRateLimiter(5, time.Minute, config.RateLimitMaxKeys, config.Now),
+		ingressLimiter:           newIPRateLimiter(120, time.Minute, config.RateLimitMaxKeys, config.Now),
 		sessionLimiter:           newIPRateLimiter(10, time.Minute, config.RateLimitMaxKeys, config.Now),
 		Admin:                    config.Admin,
 		adminLimiter:             newIPRateLimiter(10, time.Minute, config.RateLimitMaxKeys, config.Now),
@@ -263,6 +265,12 @@ func (router *Router) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 }
 
 func (router *Router) route(writer http.ResponseWriter, request *http.Request) {
+	if strings.HasPrefix(request.URL.Path, "/v1/") && request.Method != http.MethodOptions {
+		if allowed, _ := router.allowRate(request.Context(), "ingress", ClientIP(request, router.trustedProxies), 120, time.Minute, router.ingressLimiter); !allowed {
+			WriteError(writer, request, http.StatusTooManyRequests, "RATE_LIMITED", "too many requests")
+			return
+		}
+	}
 	switch {
 	case request.Method == http.MethodPost && request.URL.Path == "/v1/auth/login":
 		router.loginHandler.ServeHTTP(writer, request)

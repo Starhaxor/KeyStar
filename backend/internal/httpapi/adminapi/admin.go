@@ -104,6 +104,10 @@ func (router *Router) serveAdmin(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 	if path == "/auth/login" || path == "/auth/mfa" {
+		if origin != "" && !originAllowed {
+			httpapi.WriteError(writer, request, http.StatusForbidden, "ORIGIN_REJECTED", "origin is not allowed")
+			return
+		}
 		if request.Method != http.MethodPost {
 			httpapi.WriteError(writer, request, http.StatusMethodNotAllowed, "INVALID_REQUEST", "method not allowed")
 			return

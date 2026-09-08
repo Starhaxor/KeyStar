@@ -1,3 +1,4 @@
+#include "transport_url_policy.hpp"
 #include "keystar/transport.hpp"
 
 #include <curl/curl.h>
@@ -9,19 +10,7 @@ namespace {
 constexpr std::size_t kMaxResponseBytes = 1024 * 1024;
 struct ResponseBuffer { std::string body; bool overflow = false; };
 
-bool allowedUrl(const std::string& url, bool allowLoopback) {
-	if (url.rfind("https://", 0) == 0) {
-		const auto end = url.find('/', 8);
-		const auto authority = url.substr(8, end - 8);
-		return !authority.empty() && authority.find('@') == std::string::npos;
-	}
-    if (!allowLoopback || url.rfind("http://", 0) != 0) return false;
-    const auto end = url.find('/', 7);
-    const auto authority = url.substr(7, end - 7);
-    return authority == "localhost" || authority.rfind("localhost:", 0) == 0 ||
-           authority == "127.0.0.1" || authority.rfind("127.0.0.1:", 0) == 0 ||
-           authority == "[::1]" || authority.rfind("[::1]:", 0) == 0;
-}
+bool allowedUrl(const std::string& url, bool allowLoopback) { return keystar::detail::allowedTransportURL(url, allowLoopback); }
 }
 
 namespace keystar {

@@ -22,6 +22,7 @@ const (
 var ErrInvalidSessionToken = errors.New("invalid session token")
 
 type SessionClaims struct {
+	ProductID     string
 	Subject       string
 	ApplicationID string
 	LicenseID     string
@@ -87,6 +88,7 @@ type confirmationWire struct {
 }
 
 type proofBoundClaimsWire struct {
+	ProductID     string           `json:"product_id"`
 	Subject       string           `json:"sub"`
 	ApplicationID string           `json:"app"`
 	LicenseID     string           `json:"license_id"`
@@ -368,7 +370,7 @@ func decodeTokenSegment(segment string) ([]byte, error) {
 func validateProofBoundClaims(claims SessionClaims, applicationID, issuer, audience, product string, now time.Time) error {
 	proof := claims.ProofBound
 	if proof == nil || claims.Subject == "" || claims.ApplicationID == "" || claims.ApplicationID != applicationID ||
-		claims.LicenseID == "" || claims.DeviceID == "" || claims.Product != product ||
+		claims.LicenseID == "" || claims.DeviceID == "" || claims.ProductID == "" || claims.Product != product ||
 		claims.Issuer != issuer || claims.Audience != audience ||
 		claims.IssuedAt.IsZero() || claims.ExpiresAt.IsZero() || proof.NotBefore.IsZero() ||
 		proof.SessionID == "" || !validCanonicalRandom(proof.TokenID, 16) || !validCanonicalRandom(proof.DeviceKeyThumbprint, 32) ||
@@ -388,7 +390,8 @@ func validCanonicalRandom(value string, size int) bool {
 
 func proofBoundClaimsToWire(claims SessionClaims) proofBoundClaimsWire {
 	return proofBoundClaimsWire{
-		Subject: claims.Subject, ApplicationID: claims.ApplicationID, LicenseID: claims.LicenseID, DeviceID: claims.DeviceID,
+		ProductID: claims.ProductID,
+		Subject:   claims.Subject, ApplicationID: claims.ApplicationID, LicenseID: claims.LicenseID, DeviceID: claims.DeviceID,
 		Product: claims.Product, Features: claims.Features, Issuer: claims.Issuer, Audience: claims.Audience,
 		IssuedAt: claims.IssuedAt.Unix(), ExpiresAt: claims.ExpiresAt.Unix(), SessionID: claims.ProofBound.SessionID,
 		TokenID: claims.ProofBound.TokenID, NotBefore: claims.ProofBound.NotBefore.Unix(),
@@ -398,7 +401,8 @@ func proofBoundClaimsToWire(claims SessionClaims) proofBoundClaimsWire {
 
 func proofBoundWireToClaims(wire proofBoundClaimsWire) SessionClaims {
 	return SessionClaims{
-		Subject: wire.Subject, ApplicationID: wire.ApplicationID, LicenseID: wire.LicenseID, DeviceID: wire.DeviceID,
+		ProductID: wire.ProductID,
+		Subject:   wire.Subject, ApplicationID: wire.ApplicationID, LicenseID: wire.LicenseID, DeviceID: wire.DeviceID,
 		Product: wire.Product, Features: wire.Features, Issuer: wire.Issuer, Audience: wire.Audience,
 		IssuedAt: time.Unix(wire.IssuedAt, 0).UTC(), ExpiresAt: time.Unix(wire.ExpiresAt, 0).UTC(),
 		ProofBound: &ProofBoundClaims{

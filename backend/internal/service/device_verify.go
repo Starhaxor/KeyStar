@@ -238,14 +238,14 @@ func (service *DeviceService) verifyProofBound(ctx context.Context, input Verify
 			return VerifiedSession{}, ErrInvalidDeviceSignature
 		}
 	}
-	userID, licenseID, deviceID, err := service.runVerificationTransaction(ctx, input, sessionID, challenge, deviceKeyBytes, func() error {
+	userID, licenseID, deviceID, productID, err := service.runVerificationTransaction(ctx, input, sessionID, challenge, deviceKeyBytes, func() error {
 		return verifyP256ChallengeSignature(deviceKey, challenge, signature)
 	})
 	if err != nil {
 		return VerifiedSession{}, err
 	}
 	token, expiresAt, err := service.proofBoundIssuer.IssueProofBound(ctx, input.ApplicationID, security.SessionClaims{
-		Subject: userID, ApplicationID: input.ApplicationID, LicenseID: licenseID, DeviceID: deviceID, Product: service.product,
+		ProductID: productID, Subject: userID, ApplicationID: input.ApplicationID, LicenseID: licenseID, DeviceID: deviceID, Product: service.product,
 		Features: []string{}, Issuer: service.issuer, Audience: service.audience,
 		ProofBound: &security.ProofBoundClaims{SessionID: sessionID, DeviceKeyThumbprint: thumbprint},
 	})
@@ -271,7 +271,7 @@ func (service *DeviceService) verifyLegacy(ctx context.Context, input VerifyInpu
 	if err != nil {
 		return VerifiedSession{}, ErrInvalidVerifyRequest
 	}
-	userID, licenseID, deviceID, err := service.runVerificationTransaction(ctx, input, sessionID, challenge, publicKey, func() error {
+	userID, licenseID, deviceID, productID, err := service.runVerificationTransaction(ctx, input, sessionID, challenge, publicKey, func() error {
 		return security.VerifyCNGP256(publicKey, challenge, signature)
 	})
 	if err != nil {
@@ -281,7 +281,7 @@ func (service *DeviceService) verifyLegacy(ctx context.Context, input VerifyInpu
 	issuedAt := service.now().UTC().Truncate(time.Second)
 	expiresAt := issuedAt.Add(sessionTokenLifetime)
 	token, err := service.tokenIssuer.Issue(security.SessionClaims{
-		Subject: userID, ApplicationID: input.ApplicationID, LicenseID: licenseID, DeviceID: deviceID, Product: service.product,
+		ProductID: productID, Subject: userID, ApplicationID: input.ApplicationID, LicenseID: licenseID, DeviceID: deviceID, Product: service.product,
 		Features: []string{}, Issuer: service.issuer, Audience: service.audience,
 		IssuedAt: issuedAt, ExpiresAt: expiresAt,
 	})
@@ -310,10 +310,10 @@ func (service *DeviceService) runVerificationTransaction(
 	sessionID string,
 	challenge, deviceKeyBytes []byte,
 	checkSignature func() error,
-) (userID, licenseID, deviceID string, err error) {
+) (userID, licenseID, deviceID, productID string, err error) {
 	presented := protectedDeviceInput(service.hardwareHMACKey, deviceKeyBytes, input.Hardware)
 	if presented.FingerprintHMAC == "" {
-		return "", "", "", ErrInvalidVerifyRequest
+		return "", "", "", "", ErrInvalidVerifyRequest
 	}
 
 	// Load per-application device policy. When no row exists the defaults
@@ -321,7 +321,7 @@ func (service *DeviceService) runVerificationTransaction(
 	// optional).
 	devicePolicy, err := service.repository.GetDevicePolicy(ctx, input.ApplicationID)
 	if err != nil {
-		return "", "", "", fmt.Errorf("load device policy: %w", err)
+		return "", "", "", "", fmt.Errorf("load device policy: %w", err)
 	}
 	policyNow := service.now().UTC()
 	err = service.repository.WithLockedChallenge(ctx, input.ApplicationID, sessionID, func(transaction DeviceTransaction) error {
@@ -418,13 +418,14 @@ func (service *DeviceService) runVerificationTransaction(
 			return fmt.Errorf("mark verified session: %w", err)
 		}
 		licenseID = license.ID
+		productID = license.ProductID
 		userID = session.UserID
 		return nil
 	})
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", "", err
 	}
-	return userID, licenseID, deviceID, nil
+	return userID, licenseID, deviceID, productID, nil
 }
 
 // verifyP256ChallengeSignature verifies a raw fixed-width r||s ECDSA P-256

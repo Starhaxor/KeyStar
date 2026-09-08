@@ -1,3 +1,4 @@
+#include "../transport_url_policy.hpp"
 #ifdef _WIN32
 
 #include "keystar/transport.hpp"
@@ -113,6 +114,7 @@ void populateHeaders(HINTERNET request, HttpResponse& response) {
 class WinHttpTransport final : public Transport {
 public:
     HttpResponse send(const HttpRequest& request) override {
+        if (!detail::allowedTransportURL(request.url, request.allow_insecure_loopback)) return transportError();
         const std::wstring url = utf8ToWide(request.url);
         if (url.empty()) return transportError();
 
@@ -120,11 +122,18 @@ public:
         urlBuffer.push_back(L'\0');
         URL_COMPONENTS components{};
         components.dwStructSize = sizeof(components);
+		components.dwHostNameLength = static_cast<DWORD>(-1);
+		components.dwUrlPathLength = static_cast<DWORD>(-1);
+		components.dwExtraInfoLength = static_cast<DWORD>(-1);
+		components.dwUserNameLength = static_cast<DWORD>(-1);
+		components.dwPasswordLength = static_cast<DWORD>(-1);
         if (!WinHttpCrackUrl(urlBuffer.data(), 0, 0, &components)) return transportError();
 
+		if (!components.lpszHostName || components.dwHostNameLength == 0) return transportError();
         const std::wstring host(components.lpszHostName, components.dwHostNameLength);
-        std::wstring path(components.lpszUrlPath, components.dwUrlPathLength);
-        path.append(components.lpszExtraInfo, components.dwExtraInfoLength);
+        std::wstring path;
+		if (components.dwUrlPathLength) path.assign(components.lpszUrlPath, components.dwUrlPathLength);
+		if (components.dwExtraInfoLength) path.append(components.lpszExtraInfo, components.dwExtraInfoLength);
 		if (host.empty() || components.dwUserNameLength != 0 || components.dwPasswordLength != 0) return transportError();
         if (path.empty()) path = L"/";
 

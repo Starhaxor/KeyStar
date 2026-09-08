@@ -17,6 +17,7 @@ export default function UserDropdown() {
   const [isOpen, setIsOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -39,10 +40,14 @@ export default function UserDropdown() {
   async function handleSignOut() {
     if (signingOut) return;
     setSigningOut(true);
+    setSignOutError(null);
     try {
       await api.logout();
     } catch {
-      // Even if the backend call fails, drop the local session.
+      // Only the backend can revoke the session and clear its HttpOnly cookie.
+      setSignOutError("Sign out failed. You may still be signed in. Please try again.");
+      setSigningOut(false);
+      return;
     }
     window.location.assign("/signin");
   }
@@ -109,6 +114,7 @@ export default function UserDropdown() {
             <DropdownItem
               onClick={() => {
                 setIsOpen(false);
+                setSignOutError(null);
                 setConfirmOpen(true);
               }}
               baseClassName="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-error-600 hover:bg-error-50 dark:text-error-500 dark:hover:bg-error-500/10"
@@ -163,6 +169,7 @@ export default function UserDropdown() {
           <p className="mb-5 text-sm text-gray-500 dark:text-gray-400">
             You will need to sign in again to access the admin console.
           </p>
+          {signOutError ? <p role="alert" className="mb-4 text-sm text-error-500">{signOutError}</p> : null}
           <div className="flex gap-3">
             <button
               onClick={() => setConfirmOpen(false)}

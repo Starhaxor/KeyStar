@@ -191,7 +191,8 @@ func deterministicEd25519Key() (ed25519.PublicKey, ed25519.PrivateKey) {
 
 func requiredProofBoundClaims(issuedAt time.Time) SessionClaims {
 	return SessionClaims{
-		Subject: "user-1", ApplicationID: "app-1", LicenseID: "license-1", DeviceID: "device-1",
+		ProductID: "product-1",
+		Subject:   "user-1", ApplicationID: "app-1", LicenseID: "license-1", DeviceID: "device-1",
 		Product: "StarLoader", Features: []string{"launch"}, Issuer: "keystar", Audience: "starloader-client",
 		IssuedAt: issuedAt, ExpiresAt: issuedAt.Add(600 * time.Second),
 		ProofBound: &ProofBoundClaims{

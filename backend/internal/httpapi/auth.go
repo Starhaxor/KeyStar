@@ -26,7 +26,7 @@ type sessionClaimsContextKey struct{}
 // the trusted public scheme/host is missing or the path is not normalizable.
 var errDPoPPublicURIUnconfigured = errors.New("dpop public uri unconfigured")
 
-// SessionRateGate rate-limits session authentication before signature work.
+// SessionRateGate rate-limits verified sessions after signature work.
 // A nil gate disables limiting.
 type SessionRateGate func(ctx context.Context, key string) (allowed bool, retryAfter int)
 
@@ -63,13 +63,6 @@ func RequireSession(config SessionAuthConfig, next http.Handler) http.Handler {
 			writeInvalidSessionToken(writer, request)
 			return
 		}
-		if config.RateLimit != nil {
-			digest := sha256.Sum256([]byte(values[0]))
-			if allowed, _ := config.RateLimit(request.Context(), hex.EncodeToString(digest[:])); !allowed {
-				WriteError(writer, request, http.StatusTooManyRequests, "RATE_LIMITED", "too many requests")
-				return
-			}
-		}
 		switch {
 		case strings.EqualFold(fields[0], "Bearer"):
 			serveBearerSession(config, writer, request, next, fields[1])
@@ -104,10 +97,13 @@ func serveBearerSession(config SessionAuthConfig, writer http.ResponseWriter, re
 			WriteError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
 			return
 		}
-		if application.AuthProfile == domain.ApplicationAuthProofBound {
+		if application.Status != domain.ApplicationStatusActive || application.AuthProfile != domain.ApplicationAuthLegacy {
 			writeInvalidSessionToken(writer, request)
 			return
 		}
+	}
+	if !allowVerifiedSession(config, writer, request, token) {
+		return
 	}
 	next.ServeHTTP(writer, request.WithContext(context.WithValue(request.Context(), sessionClaimsContextKey{}, claims)))
 }
@@ -137,7 +133,7 @@ func serveDPoPSession(config SessionAuthConfig, writer http.ResponseWriter, requ
 		WriteError(writer, request, http.StatusInternalServerError, "SERVER_ERROR", "internal server error")
 		return
 	}
-	if application.AuthProfile != domain.ApplicationAuthProofBound {
+	if application.Status != domain.ApplicationStatusActive || application.AuthProfile != domain.ApplicationAuthProofBound {
 		writeInvalidSessionToken(writer, request)
 		return
 	}
@@ -153,6 +149,9 @@ func serveDPoPSession(config SessionAuthConfig, writer http.ResponseWriter, requ
 	// The signed application boundary wins over every client hint.
 	if claims.ApplicationID != application.ID || claims.ProofBound == nil {
 		writeInvalidSessionToken(writer, request)
+		return
+	}
+	if !allowVerifiedSession(config, writer, request, token) {
 		return
 	}
 	uri, err := canonicalDPoPURI(config.PublicScheme, config.PublicHost, dpopRequestPath(request))
@@ -182,6 +181,21 @@ func serveDPoPSession(config SessionAuthConfig, writer http.ResponseWriter, requ
 		return
 	}
 	next.ServeHTTP(writer, request.WithContext(context.WithValue(request.Context(), sessionClaimsContextKey{}, claims)))
+}
+
+// Only authenticated tokens allocate per-session quota. Invalid token text
+// must not evict or starve unrelated sessions. Ingress limiting bounds the
+// verification work before this gate.
+func allowVerifiedSession(config SessionAuthConfig, writer http.ResponseWriter, request *http.Request, token string) bool {
+	if config.RateLimit == nil {
+		return true
+	}
+	digest := sha256.Sum256([]byte(token))
+	if allowed, _ := config.RateLimit(request.Context(), hex.EncodeToString(digest[:])); !allowed {
+		WriteError(writer, request, http.StatusTooManyRequests, "RATE_LIMITED", "too many requests")
+		return false
+	}
+	return true
 }
 
 // unverifiedTokenApplicationID extracts the application hint from a token

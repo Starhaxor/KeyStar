@@ -1,4 +1,6 @@
 #include "keystar/client.hpp"
+#include "../src/transport_url_policy.hpp"
+#include <cstdlib>
 
 #include <cassert>
 #include <cstdio>
@@ -100,6 +102,18 @@ void testDefaultWindowsTransportRejectsPlainHttp() {
 }  // namespace
 
 void run_transport_tests() {
+    for (const auto& url : {"http://127.0.0.1:80@attacker.example/", "http://localhost:abc/", "http://127.0.0.1:70000/", "https://user:pass@example.com/", "http://example.com/"}) {
+        if (keystar::detail::allowedTransportURL(url, true)) throw std::runtime_error("unsafe transport URL accepted");
+    }
+    if (!keystar::detail::allowedTransportURL("https://api.example.com/v1/me", false)
+        || !keystar::detail::allowedTransportURL("http://127.0.0.1:55231/", true)) throw std::runtime_error("valid transport URL rejected");
+#ifdef _WIN32
+    if (const char* url = std::getenv("KEYSTAR_TRANSPORT_TEST_URL")) {
+        auto transport = keystar::createDefaultTransport();
+        const auto response = transport->send({.url = url, .allow_insecure_loopback = true});
+        if (response.status_code != 200) throw std::runtime_error("valid local WinHTTP request failed");
+    }
+#endif
     printf("Running transport tests...\n");
     testFakeTransportRecordsRequests();
     testHttpResponseOk();
