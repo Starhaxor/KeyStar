@@ -191,22 +191,28 @@ export const api = {
       isLogin: true,
     });
   },
+  // MFA endpoints never touch application state on the backend, so they skip
+  // the X-KeyStar-App header like /me and /applications do. Otherwise a
+  // stale keystar_application_id cookie fails enrollment with
+  // INVALID_APPLICATION before the user can even start setup.
   mfaEnrollStart() {
     return request<{ ok: boolean } & MfaEnrollment>("/v1/admin/mfa/enroll/start", {
       method: "POST",
       body: {},
+      skipApplicationHeader: true,
     });
   },
   mfaEnrollConfirm(code: string) {
     return request<{ ok: boolean; recovery_codes: string[] }>(
       "/v1/admin/mfa/enroll/confirm",
-      { method: "POST", body: { code } }
+      { method: "POST", body: { code }, skipApplicationHeader: true }
     );
   },
   mfaDisable(password: string) {
     return request<{ ok: boolean }>("/v1/admin/mfa/disable", {
       method: "POST",
       body: { password },
+      skipApplicationHeader: true,
     });
   },
   admins() {
